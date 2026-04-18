@@ -11,58 +11,83 @@ export const localeLongLabel: Record<Locale, string> = {
   de: 'Deutsch',
 };
 
+type CircleCard = {
+  eyebrow: string;
+  size: string;
+  name: string;
+  title: { plain: string; italic: string };
+  body: string;
+  initials: string[];
+};
+
 type Dictionary = {
   htmlLang: string;
-  meta: {
-    title: string;
-    description: string;
-  };
-  nav: {
-    about: string;
-    circles: string;
-    storage: string;
-    principles: string;
-    switchLang: string;
-  };
+  meta: { title: string; description: string };
+  masthead: { availability: string };
+  nav: { why: string; circles: string; hosting: string; waitlist: string };
   hero: {
     eyebrow: string;
-    title: string[];
-    titleEm: number;
+    titleLine1: string;
+    titleItalic: string;
+    titleLine2: string;
     lede: string;
     primaryCta: string;
     secondaryCta: string;
-    note: string;
+    metaItems: string[];
+    polaroids: Array<{ caption: string; date: string }>;
   };
-  polaroids: Array<{ caption: string; date: string; tone: string }>;
-  manifesto: {
-    label: string;
-    title: string;
-    body: string[];
+  promise: {
+    eyebrow: string;
+    titlePlain: string;
+    titleItalic: string;
+    body: string;
   };
   circles: {
+    eyebrow: string;
     label: string;
-    title: string;
-    intro: string;
-    items: Array<{ name: string; count: string; line: string }>;
-  };
-  storage: {
-    label: string;
-    title: string;
-    intro: string;
-    bullets: Array<{ k: string; v: string }>;
+    titlePlain: string;
+    titleItalic: string;
+    cards: CircleCard[];
   };
   principles: {
-    label: string;
-    title: string;
-    items: Array<{ n: string; t: string; b: string }>;
+    eyebrow: string;
+    titlePlain: string;
+    titleItalic: string;
+    items: Array<{ title: string; body: string }>;
   };
-  cta: {
-    label: string;
-    title: string;
+  hosting: {
+    eyebrow: string;
+    titlePlain: string;
+    titleItalic: string;
+    cloud: {
+      tag: string;
+      badge: string;
+      titlePlain: string;
+      titleItalic: string;
+      body: string;
+      points: string[];
+    };
+    self: {
+      tag: string;
+      badge: string;
+      titlePlain: string;
+      titleItalic: string;
+      body: string;
+      points: string[];
+    };
+    storageLabel: string;
+    storageProviders: string[];
+    note: string;
+  };
+  waitlist: {
+    eyebrow: string;
+    titlePlain: string;
+    titleItalic: string;
     body: string;
     emailPlaceholder: string;
+    emailLabel: string;
     primary: string;
-    secondary: string;
+    footnote: string;
     success: string;
     duplicate: string;
     error: string;
@@ -73,7 +98,6 @@ type Dictionary = {
     source: string;
     license: string;
     privacy: string;
-    colophon: string;
     year: string;
   };
 };
@@ -82,245 +106,327 @@ export const dict: Record<Locale, Dictionary> = {
   en: {
     htmlLang: 'en',
     meta: {
-      title: 'beisammen — a photo app for the people you keep close',
+      title: 'beisammen — a quieter place for your closest photos',
       description:
-        'beisammen is a private photo and video app for small circles — partners, families, close friends. Bring your own storage. No feeds, no followers, no strangers.',
+        'Private photo circles for partners, families, and close friends. No feed, no followers, no algorithm. Start in the official cloud or run your own.',
+    },
+    masthead: {
+      availability: 'Private beta · 2026',
     },
     nav: {
-      about: 'What it is',
+      why: 'Idea',
       circles: 'Circles',
-      storage: 'Your storage',
-      principles: 'Principles',
-      switchLang: 'Deutsch',
+      hosting: 'Hosting',
+      waitlist: 'Access',
     },
     hero: {
-      eyebrow: 'beisammen · noun · German · being together',
-      title: ['For moments', 'that stay', 'between us'],
-      titleEm: 2,
+      eyebrow: 'Private photo circles',
+      titleLine1: 'Photos for',
+      titleItalic: 'your people,',
+      titleLine2: 'no one else.',
       lede:
-        'A photo and video app for the handful of people you actually want to send things to. Not a network. Not a feed. A small, quiet place.',
-      primaryCta: 'Join the early circle',
-      secondaryCta: 'Read the principles',
-      note: 'Coming to iOS and Android — self-hostable by design.',
-    },
-    polaroids: [
-      { caption: 'Kitchen floor, 2am', date: '09 · Feb', tone: 'warm' },
-      { caption: 'First walk of the year', date: '02 · Jan', tone: 'sage' },
-      { caption: 'Grandma’s Sunday', date: '17 · Mar', tone: 'rose' },
-      { caption: 'Nothing in particular', date: '24 · Apr', tone: 'ink' },
-    ],
-    manifesto: {
-      label: '01 — What it is',
-      title:
-        'A small, private place for the photos that don’t belong on the internet.',
-      body: [
-        'Most of the pictures on your phone are not for everyone. They are for three people, or five, or one. They are for the people in the photo and the people who love them.',
-        'beisammen is built for that audience. Share with a named circle. Keep the originals on storage you control. Leave the rest of the internet out of it.',
+        'beisammen is a quiet home for the photos you take together — for partners, families, and the friends you actually text back. No feed. No followers. No algorithm.',
+      primaryCta: 'Request early access',
+      secondaryCta: 'How it works',
+      metaItems: [
+        'Invite-only circles',
+        'Official cloud or your own',
+        'Source-available',
       ],
+      polaroids: [
+        { caption: 'Sunday light', date: 'Mar 14' },
+        { caption: 'Her first candle', date: 'Feb 03' },
+        { caption: 'Portugal, briefly', date: 'Oct 22' },
+      ],
+    },
+    promise: {
+      eyebrow: 'The idea',
+      titlePlain: 'Closer,',
+      titleItalic: 'not louder.',
+      body:
+        'Social apps keep shouting. beisammen whispers — between the few people who actually matter to you, and nobody else.',
     },
     circles: {
-      label: '02 — Circles',
-      title: 'Small groups, named out loud.',
-      intro:
-        'A circle is a private shared library for a specific set of people. Join by invitation. No discovery, no suggestions, no metrics.',
-      items: [
+      eyebrow: 'Circles',
+      label: '01 · 02 · 03',
+      titlePlain: 'A quiet place',
+      titleItalic: 'for every quiet group.',
+      cards: [
         {
-          name: 'Partners',
-          count: 'usually 2',
-          line: 'Every picture, shared by default.',
+          eyebrow: '01',
+          size: 'Usually 2',
+          name: 'Partner',
+          title: { plain: 'Just the', italic: 'two of you.' },
+          body: 'The in-jokes, the Polaroids, the Tuesday nights. A small, steady place for the life you share.',
+          initials: ['N', 'L'],
         },
         {
+          eyebrow: '02',
+          size: '4–8 people',
           name: 'Family',
-          count: '4 – 12',
-          line: 'Birthdays, kitchens, back-of-the-car photos.',
+          title: { plain: 'The family chat,', italic: 'but warmer.' },
+          body: 'First steps, last candles, ordinary Sundays. One calm feed for the people who were there from the start.',
+          initials: ['M', 'P', 'A', 'E'],
         },
         {
+          eyebrow: '03',
+          size: 'A few',
           name: 'Close friends',
-          count: '3 – 20',
-          line: 'The chat before, the album after.',
+          title: { plain: 'The people', italic: 'you actually call.' },
+          body: 'Trips, concerts, inside bits. Kept between the four of you — never borrowed by a feed.',
+          initials: ['J', 'T', 'K', 'S'],
         },
-      ],
-    },
-    storage: {
-      label: '03 — Your storage',
-      title: 'Your originals live where you say they live.',
-      intro:
-        'beisammen is a bring-your-own-storage app. We hold the metadata, the shared views, and the invites. The full-resolution files live on an S3-compatible bucket you choose — your own, your family’s, or an official one.',
-      bullets: [
-        { k: 'S3-compatible', v: 'AWS, Backblaze, Wasabi, MinIO, Hetzner, Garage' },
-        { k: 'Self-hostable', v: 'Run the whole thing on your own hardware' },
-        { k: 'Leaveable', v: 'Take your originals and go, at any time' },
-        { k: 'Source available', v: 'PolyForm Noncommercial — readable, private' },
       ],
     },
     principles: {
-      label: '04 — Principles',
-      title: 'Four quiet commitments.',
+      eyebrow: 'Private by design',
+      titlePlain: 'Trust,',
+      titleItalic: 'quietly built in.',
       items: [
         {
-          n: 'i.',
-          t: 'No feed',
-          b: 'There is no algorithm deciding what you see. You see what your circles shared, in order.',
+          title: 'Invite-only',
+          body: 'Every circle starts empty. You decide who walks in — no requests, no suggestions, no surprises.',
         },
         {
-          n: 'ii.',
-          t: 'No strangers',
-          b: 'Every person in beisammen is someone you already named. That is the whole social graph.',
+          title: 'No public feed',
+          body: 'Nothing here is tuned for strangers, followers, or reach. There is no explore tab because there is nothing to explore.',
         },
         {
-          n: 'iii.',
-          t: 'No lock-in',
-          b: 'Your originals stay in storage you control. Walk away with them whenever you want.',
+          title: 'Yours, really',
+          body: 'Your photos live on your cloud — or on ours. Leave whenever, take them with you.',
         },
         {
-          n: 'iv.',
-          t: 'No theatre',
-          b: 'No reactions inflating into numbers. No streaks, no notifications chasing you back.',
+          title: 'Source-available',
+          body: 'Read the code. Audit the boundaries. Trust, verified — not just promised.',
         },
       ],
     },
-    cta: {
-      label: 'Coming soon',
-      title: 'If this sounds like the app your group chat has been asking for, let us know.',
+    hosting: {
+      eyebrow: 'Hosting',
+      titlePlain: 'Start in the cloud.',
+      titleItalic: 'Move to your own, anytime.',
+      cloud: {
+        tag: 'Option 01',
+        badge: 'Recommended',
+        titlePlain: 'Official',
+        titleItalic: 'cloud.',
+        body:
+          'Sign in, make a circle, share something from tonight. We handle uploads, backups, and upgrades so nothing gets in the way of your photos.',
+        points: [
+          'Nothing to set up. Open the app and start.',
+          'Encrypted in transit and at rest.',
+          'New features land here first.',
+        ],
+      },
+      self: {
+        tag: 'Option 02',
+        badge: 'Advanced',
+        titlePlain: 'Self-',
+        titleItalic: 'hosted.',
+        body:
+          'Prefer your own box? Run beisammen next to your own S3 bucket. Yours to own, break, and bring back — on your terms.',
+        points: [
+          'Runs on any S3-compatible storage.',
+          'WorkOS handles sign-in for you.',
+          'Private, noncommercial use is welcome.',
+        ],
+      },
+      storageLabel: 'Pairs with',
+      storageProviders: [
+        'Amazon S3',
+        'Backblaze B2',
+        'Cloudflare R2',
+        'Hetzner Object',
+        'MinIO',
+        'Wasabi',
+      ],
+      note:
+        'Source-available is not OSI open source. Commercial hosting and resale need a separate agreement.',
+    },
+    waitlist: {
+      eyebrow: 'Access',
+      titlePlain: 'The door is',
+      titleItalic: 'almost open.',
       body:
-        'We are building slowly, with a small group of early circles. Drop your email if you want to be one of them.',
-      emailPlaceholder: 'you@somewhere.email',
-      primary: 'Join the waitlist',
-      secondary: 'Read the docs',
-      success: 'You are on the list. We will reach out when early access opens.',
-      duplicate: 'This address is already on the waitlist.',
-      error: 'That did not work. Please try again in a moment.',
+        'We are letting people in slowly, one circle at a time. Drop your email and we will quietly tap you when the next round unlocks.',
+      emailPlaceholder: 'you@quiet.place',
+      emailLabel: 'Email',
+      primary: 'Request access',
+      footnote: 'No newsletter. No noise. Just the ping when it is your turn.',
+      success: 'You are on the list. We will tap you when the next round opens.',
+      duplicate: 'You are already on the list. We have not forgotten.',
+      error: 'Something went sideways. Try once more?',
       configError: 'The waitlist is not configured yet.',
     },
     footer: {
-      tagline: 'Made to be used, quietly.',
+      tagline: 'Closer, not louder.',
       source: 'Source',
       license: 'License',
       privacy: 'Privacy',
-      colophon: 'Colophon',
-      year: '© 2026 beisammen',
+      year: 'MMXXVI · beisammen',
     },
   },
   de: {
     htmlLang: 'de',
     meta: {
-      title: 'beisammen — eine Foto-App für die Menschen, die dir nah sind',
+      title: 'beisammen — ein leiserer Ort für eure Fotos',
       description:
-        'beisammen ist eine private Foto- und Video-App für kleine Kreise — Partner, Familien, enge Freunde. Dein eigener Speicher. Kein Feed, keine Follower, keine Fremden.',
+        'Private Fotokreise für Partner, Familie und enge Freunde. Kein Feed, keine Follower, kein Algorithmus. Starte in der offiziellen Cloud oder hoste selbst.',
+    },
+    masthead: {
+      availability: 'Private Beta · 2026',
     },
     nav: {
-      about: 'Worum es geht',
+      why: 'Idee',
       circles: 'Kreise',
-      storage: 'Dein Speicher',
-      principles: 'Prinzipien',
-      switchLang: 'English',
+      hosting: 'Hosting',
+      waitlist: 'Zugang',
     },
     hero: {
-      eyebrow: 'beisammen · Nomen · Deutsch · zusammen sein',
-      title: ['Für Momente,', 'die zwischen', 'uns bleiben'],
-      titleEm: 1,
+      eyebrow: 'Private Fotokreise',
+      titleLine1: 'Fotos für',
+      titleItalic: 'deine Menschen,',
+      titleLine2: 'sonst niemand.',
       lede:
-        'Eine Foto- und Video-App für die Handvoll Menschen, denen du wirklich etwas schicken willst. Kein Netzwerk. Kein Feed. Ein kleiner, ruhiger Ort.',
-      primaryCta: 'Dem frühen Kreis beitreten',
-      secondaryCta: 'Die Prinzipien lesen',
-      note: 'Kommt für iOS und Android — von Grund auf selbst hostbar.',
-    },
-    polaroids: [
-      { caption: 'Küchenboden, 2 Uhr', date: '09 · Feb', tone: 'warm' },
-      { caption: 'Erster Spaziergang', date: '02 · Jan', tone: 'sage' },
-      { caption: 'Omas Sonntag', date: '17 · Mär', tone: 'rose' },
-      { caption: 'Nichts Besonderes', date: '24 · Apr', tone: 'ink' },
-    ],
-    manifesto: {
-      label: '01 — Worum es geht',
-      title:
-        'Ein kleiner, privater Ort für die Bilder, die nicht ins Internet gehören.',
-      body: [
-        'Die meisten Fotos auf deinem Telefon sind nicht für alle da. Sie sind für drei Menschen, oder fünf, oder einen. Für die Menschen im Bild und für die, die sie lieben.',
-        'beisammen ist für genau dieses Publikum gebaut. Teile mit einem benannten Kreis. Halte die Originale auf Speicher, den du kontrollierst. Lass den Rest des Internets draußen.',
+        'beisammen ist ein ruhiger Ort für die Fotos, die ihr zusammen macht — für Partner, Familie und die Freunde, denen du wirklich antwortest. Kein Feed. Keine Follower. Kein Algorithmus.',
+      primaryCta: 'Früher Zugang',
+      secondaryCta: 'So funktioniert es',
+      metaItems: [
+        'Nur auf Einladung',
+        'Offizielle Cloud oder deine eigene',
+        'Quelltext einsehbar',
       ],
+      polaroids: [
+        { caption: 'Sonntagslicht', date: '14. Mär' },
+        { caption: 'Ihre erste Kerze', date: '03. Feb' },
+        { caption: 'Portugal, kurz', date: '22. Okt' },
+      ],
+    },
+    promise: {
+      eyebrow: 'Die Idee',
+      titlePlain: 'Näher.',
+      titleItalic: 'Leiser.',
+      body:
+        'Social Apps schreien. beisammen flüstert — zwischen den wenigen Menschen, auf die es wirklich ankommt. Sonst niemand.',
     },
     circles: {
-      label: '02 — Kreise',
-      title: 'Kleine Gruppen, mit Namen.',
-      intro:
-        'Ein Kreis ist eine private, gemeinsame Bibliothek für eine bestimmte Gruppe. Beitritt per Einladung. Keine Vorschläge, keine Entdeckung, keine Kennzahlen.',
-      items: [
+      eyebrow: 'Kreise',
+      label: '01 · 02 · 03',
+      titlePlain: 'Ein ruhiger Ort',
+      titleItalic: 'für jede kleine Runde.',
+      cards: [
         {
+          eyebrow: '01',
+          size: 'Meist 2',
           name: 'Partner',
-          count: 'meist 2',
-          line: 'Jedes Bild, standardmäßig geteilt.',
+          title: { plain: 'Nur', italic: 'ihr zwei.' },
+          body: 'Die Insider-Witze, die Polaroids, die Dienstagabende. Ein kleiner, beständiger Ort für das, was ihr teilt.',
+          initials: ['N', 'L'],
         },
         {
+          eyebrow: '02',
+          size: '4–8 Personen',
           name: 'Familie',
-          count: '4 – 12',
-          line: 'Geburtstage, Küchen, Rückbank-Fotos.',
+          title: { plain: 'Familie,', italic: 'wärmer gedacht.' },
+          body: 'Erste Schritte, letzte Kerzen, normale Sonntage. Ein ruhiger Feed für die Menschen, die von Anfang an dabei sind.',
+          initials: ['M', 'P', 'A', 'E'],
         },
         {
+          eyebrow: '03',
+          size: 'Eine Handvoll',
           name: 'Enge Freunde',
-          count: '3 – 20',
-          line: 'Der Chat davor, das Album danach.',
+          title: { plain: 'Die Leute,', italic: 'die du wirklich anrufst.' },
+          body: 'Reisen, Konzerte, Insider. Nur zwischen euch vieren — nie von einem Feed geliehen.',
+          initials: ['J', 'T', 'K', 'S'],
         },
-      ],
-    },
-    storage: {
-      label: '03 — Dein Speicher',
-      title: 'Deine Originale liegen dort, wo du sagst.',
-      intro:
-        'beisammen ist eine Bring-your-own-Storage-App. Wir halten die Metadaten, die geteilten Ansichten und die Einladungen. Die Originale in voller Auflösung liegen in einem S3-kompatiblen Bucket deiner Wahl — deinem eigenen, dem deiner Familie oder einem offiziellen.',
-      bullets: [
-        { k: 'S3-kompatibel', v: 'AWS, Backblaze, Wasabi, MinIO, Hetzner, Garage' },
-        { k: 'Selbst hostbar', v: 'Alles auf deiner eigenen Hardware betreiben' },
-        { k: 'Verlassbar', v: 'Nimm deine Originale mit, jederzeit' },
-        { k: 'Quelltext offen', v: 'PolyForm Noncommercial — lesbar, privat' },
       ],
     },
     principles: {
-      label: '04 — Prinzipien',
-      title: 'Vier ruhige Versprechen.',
+      eyebrow: 'Privat entworfen',
+      titlePlain: 'Vertrauen,',
+      titleItalic: 'leise eingebaut.',
       items: [
         {
-          n: 'i.',
-          t: 'Kein Feed',
-          b: 'Kein Algorithmus entscheidet, was du siehst. Du siehst, was deine Kreise geteilt haben, der Reihe nach.',
+          title: 'Nur auf Einladung',
+          body: 'Jeder Kreis beginnt leer. Du entscheidest, wer hereinkommt — keine Anfragen, keine Vorschläge, keine Überraschungen.',
         },
         {
-          n: 'ii.',
-          t: 'Keine Fremden',
-          b: 'Jede Person in beisammen ist jemand, den du selbst benannt hast. Das ist der ganze Social Graph.',
+          title: 'Kein öffentlicher Feed',
+          body: 'Hier ist nichts für Fremde, Follower oder Reichweite optimiert. Es gibt keinen Entdecken-Tab, weil es nichts zu entdecken gibt.',
         },
         {
-          n: 'iii.',
-          t: 'Kein Lock-in',
-          b: 'Deine Originale bleiben auf Speicher, den du kontrollierst. Geh jederzeit damit.',
+          title: 'Wirklich deins',
+          body: 'Deine Fotos liegen auf deiner Cloud — oder auf unserer. Geh, wann du willst, und nimm sie mit.',
         },
         {
-          n: 'iv.',
-          t: 'Kein Theater',
-          b: 'Keine Reaktionen, die zu Zahlen anschwellen. Keine Streaks, keine Benachrichtigungen, die dich zurückjagen.',
+          title: 'Quelltext einsehbar',
+          body: 'Lies den Code. Prüfe die Grenzen. Vertrauen belegbar, nicht versprochen.',
         },
       ],
     },
-    cta: {
-      label: 'Bald',
-      title: 'Wenn das nach der App klingt, nach der euer Gruppenchat ruft — schreib uns.',
+    hosting: {
+      eyebrow: 'Hosting',
+      titlePlain: 'Starte in der Cloud.',
+      titleItalic: 'Wechsle später, wenn du willst.',
+      cloud: {
+        tag: 'Option 01',
+        badge: 'Empfohlen',
+        titlePlain: 'Offizielle',
+        titleItalic: 'Cloud.',
+        body:
+          'Anmelden, Kreis erstellen, etwas vom heutigen Abend teilen. Uploads, Backups und Updates übernehmen wir — du teilst.',
+        points: [
+          'Nichts einzurichten. App auf, los geht\'s.',
+          'Verschlüsselt beim Transport und im Speicher.',
+          'Neue Funktionen landen zuerst hier.',
+        ],
+      },
+      self: {
+        tag: 'Option 02',
+        badge: 'Fortgeschritten',
+        titlePlain: 'Selbst',
+        titleItalic: 'gehostet.',
+        body:
+          'Lieber auf deiner eigenen Kiste? Betreibe beisammen neben deinem S3-Bucket. Deine Infrastruktur, deine Regeln, dein Rhythmus.',
+        points: [
+          'Läuft auf jedem S3-kompatiblen Speicher.',
+          'WorkOS übernimmt die Anmeldung.',
+          'Private, nichtkommerzielle Nutzung willkommen.',
+        ],
+      },
+      storageLabel: 'Passt zu',
+      storageProviders: [
+        'Amazon S3',
+        'Backblaze B2',
+        'Cloudflare R2',
+        'Hetzner Object',
+        'MinIO',
+        'Wasabi',
+      ],
+      note:
+        'Quelltext einsehbar heißt nicht OSI Open Source. Kommerzielles Hosting und Weiterverkauf brauchen eine separate Vereinbarung.',
+    },
+    waitlist: {
+      eyebrow: 'Zugang',
+      titlePlain: 'Die Tür geht',
+      titleItalic: 'bald auf.',
       body:
-        'Wir bauen langsam, mit einer kleinen Gruppe früher Kreise. Lass uns deine E-Mail da, wenn du einer davon sein willst.',
-      emailPlaceholder: 'du@beispiel.de',
-      primary: 'Auf die Warteliste',
-      secondary: 'Zur Dokumentation',
-      success: 'Du bist auf der Liste. Wir melden uns, wenn der frühe Zugang startet.',
-      duplicate: 'Diese Adresse steht bereits auf der Warteliste.',
-      error: 'Das hat nicht geklappt. Versuch es bitte gleich noch einmal.',
+        'Wir lassen schrittweise Menschen hinein, Kreis für Kreis. Lass deine E-Mail da — wir klopfen leise, wenn die nächste Runde frei ist.',
+      emailPlaceholder: 'du@leiser.ort',
+      emailLabel: 'E-Mail',
+      primary: 'Zugang anfragen',
+      footnote: 'Kein Newsletter. Kein Lärm. Nur das Klopfen, wenn du dran bist.',
+      success: 'Du stehst auf der Liste. Wir klopfen, sobald neue Plätze frei werden.',
+      duplicate: 'Du stehst schon auf der Liste. Wir haben dich nicht vergessen.',
+      error: 'Da ist etwas schiefgegangen. Noch einmal versuchen?',
       configError: 'Die Warteliste ist noch nicht konfiguriert.',
     },
     footer: {
-      tagline: 'Gebaut, um leise benutzt zu werden.',
+      tagline: 'Näher. Leiser.',
       source: 'Quelltext',
       license: 'Lizenz',
       privacy: 'Datenschutz',
-      colophon: 'Kolophon',
-      year: '© 2026 beisammen',
+      year: 'MMXXVI · beisammen',
     },
   },
 };

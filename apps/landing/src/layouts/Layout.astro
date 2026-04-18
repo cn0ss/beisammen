@@ -19,8 +19,8 @@ const alt = locale === 'en' ? 'de' : 'en';
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{t.meta.title}</title>
     <meta name="description" content={t.meta.description} />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0d0a07" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f7f4ee" />
     <meta property="og:title" content={t.meta.title} />
     <meta property="og:description" content={t.meta.description} />
     <meta property="og:type" content="website" />
@@ -46,6 +46,17 @@ const alt = locale === 'en' ? 'de' : 'en';
             localStorage.setItem(KEY, alt);
           } catch {}
         });
+      }
+
+      // sticky header border when scrolled
+      const header = document.querySelector('.site-header');
+      if (header) {
+        const onScroll = () => {
+          if (window.scrollY > 8) header.classList.add('is-scrolled');
+          else header.classList.remove('is-scrolled');
+        };
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
       }
     </script>
   </body>
