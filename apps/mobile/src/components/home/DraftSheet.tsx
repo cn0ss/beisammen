@@ -1,0 +1,464 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { memo } from 'react';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import type { CircleListItem, ShareDraftRecord } from '@/features/convex/api';
+import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import type { UploadQueueState } from '@beisammen/upload-client';
+
+import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+
+import { AssetThumbnail } from '@/components/media/AssetThumbnail';
+import { Avatar, Button, LoadingBox } from '@/components/ui';
+
+const CAPTION_MAX_LENGTH = 240;
+
+interface DraftSheetProps {
+  visible: boolean;
+  circle: CircleListItem | null;
+  draft: ShareDraftRecord | null | undefined;
+  caption: string;
+  onChangeCaption: (text: string) => void;
+  isDraftLoading: boolean;
+  isUploading: boolean;
+  isPublishing: boolean;
+  isDeletingDraft: boolean;
+  canPublish: boolean;
+  uploadQueue: UploadQueueState;
+  onPickMedia: () => void;
+  onPublish: () => void;
+  onDeleteDraft: () => void;
+  onDeleteAsset: (assetId: string) => void;
+  onRemoveFailedUpload: (itemId: string) => void;
+  onClose: () => void;
+}
+
+export const DraftSheet = memo(function DraftSheet({
+  visible,
+  circle,
+  draft,
+  caption,
+  onChangeCaption,
+  isDraftLoading,
+  isUploading,
+  isPublishing,
+  isDeletingDraft,
+  canPublish,
+  uploadQueue,
+  onPickMedia,
+  onPublish,
+  onDeleteDraft,
+  onDeleteAsset,
+  onRemoveFailedUpload,
+  onClose,
+}: DraftSheetProps) {
+  const theme = useTheme();
+  const captionLength = caption.length;
+  const circleImageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        {/* Handle bar */}
+        <View style={styles.handleRow}>
+          <View style={[styles.handle, { backgroundColor: theme.borderLight }]} />
+        </View>
+
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Pressable
+              onPress={onClose}
+              hitSlop={12}
+              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            >
+              <Ionicons name="chevron-down" size={24} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+
+          <Text style={[styles.headerTitle, { color: theme.text }]}>
+            Neuer <Text style={styles.headerTitleAccent}>Beitrag</Text>
+          </Text>
+
+          <View style={styles.headerRight}>
+            {draft ? (
+              <Pressable
+                onPress={onDeleteDraft}
+                hitSlop={12}
+                disabled={isDeletingDraft || isUploading || isPublishing}
+                style={({ pressed }) => ({
+                  opacity: pressed || isDeletingDraft ? 0.5 : 1,
+                })}
+              >
+                <Ionicons name="trash-outline" size={20} color={theme.danger} />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {isDraftLoading ? (
+            <LoadingBox />
+          ) : (
+            <>
+              {/* Circle target card */}
+              {circle ? (
+                <View
+                  style={[
+                    styles.circleCard,
+                    {
+                      backgroundColor: theme.surface,
+                      borderColor: theme.borderLight,
+                    },
+                  ]}
+                >
+                  <Avatar name={circle.name} imageUrl={circleImageUrl} size="sm" />
+                  <View style={styles.circleCopy}>
+                    <Text style={[styles.circleTarget, { color: theme.text }]} numberOfLines={1}>
+                      An · <Text style={styles.circleTargetName}>{circle.name}</Text>
+                    </Text>
+                    <Text style={[styles.circleMembers, { color: theme.textTertiary }]}>
+                      {circle.memberCount} {circle.memberCount === 1 ? 'Person' : 'Personen'}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Caption input */}
+              <View
+                style={[
+                  styles.captionCard,
+                  {
+                    backgroundColor: theme.surface,
+                    borderColor: theme.borderLight,
+                  },
+                ]}
+              >
+                <TextInput
+                  value={caption}
+                  onChangeText={onChangeCaption}
+                  placeholder="Schreib etwas dazu..."
+                  placeholderTextColor={theme.textTertiary}
+                  multiline
+                  maxLength={CAPTION_MAX_LENGTH}
+                  style={[styles.captionInput, { color: theme.text }]}
+                />
+                <View style={styles.captionMeta}>
+                  <View style={styles.captionMetaLeft}>
+                    <Ionicons name="lock-closed-outline" size={12} color={theme.textTertiary} />
+                    <Text style={[styles.captionMetaHint, { color: theme.textTertiary }]}>
+                      Nur dieser Circle
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.captionCounter,
+                      { color: theme.textTertiary },
+                    ]}
+                  >
+                    {captionLength}/{CAPTION_MAX_LENGTH}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Asset thumbnails */}
+              {draft?.assets.length ? (
+                <View style={styles.assetsSection}>
+                  <Text style={[styles.assetsSectionLabel, { color: theme.textSecondary }]}>
+                    {draft.assets.length} {draft.assets.length === 1 ? 'Medium' : 'Medien'}
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.assetRow}
+                  >
+                    {draft.assets.map((asset) => (
+                      <AssetThumbnail
+                        key={asset._id}
+                        asset={asset}
+                        size={100}
+                        onRemove={() => onDeleteAsset(asset._id)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+
+              {/* Upload queue */}
+              {uploadQueue.items.length > 0 ? (
+                <View style={styles.queueList}>
+                  {uploadQueue.items.map((item) => (
+                    <UploadQueueItem
+                      key={item.id}
+                      item={item}
+                      onRemove={item.status === 'failed' ? () => onRemoveFailedUpload(item.id) : undefined}
+                    />
+                  ))}
+                </View>
+              ) : null}
+
+              {/* Actions */}
+              <View style={styles.actions}>
+                <Button
+                  label={isUploading ? 'Wird vorbereitet...' : 'Medien hinzufügen'}
+                  icon={isUploading ? 'cloud-upload-outline' : 'images-outline'}
+                  variant="ghost"
+                  loading={isUploading}
+                  disabled={isPublishing || isDeletingDraft}
+                  onPress={onPickMedia}
+                />
+
+                <Button
+                  label={isPublishing ? 'Wird veröffentlicht...' : 'Veröffentlichen'}
+                  icon="send-outline"
+                  loading={isPublishing}
+                  disabled={!canPublish || isUploading || isDeletingDraft}
+                  onPress={onPublish}
+                />
+              </View>
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+});
+
+// ---------------------------------------------------------------------------
+
+interface UploadQueueItemData {
+  id: string;
+  fileName: string;
+  locationLabel?: string;
+  status: string;
+  errorMessage?: string;
+}
+
+const UploadQueueItem = memo(function UploadQueueItem({
+  item,
+  onRemove,
+}: {
+  item: UploadQueueItemData;
+  onRemove?: () => void;
+}) {
+  const theme = useTheme();
+
+  const iconName =
+    item.status === 'uploaded'
+      ? 'checkmark-circle'
+      : item.status === 'failed'
+        ? 'alert-circle'
+        : item.status === 'uploading'
+          ? 'cloud-upload-outline'
+          : item.status === 'processing'
+            ? 'sparkles-outline'
+            : 'time-outline';
+
+  const iconColor =
+    item.status === 'uploaded'
+      ? theme.primary
+      : item.status === 'failed'
+        ? theme.danger
+        : item.status === 'processing'
+          ? theme.accent
+          : theme.textTertiary;
+
+  const statusLabel =
+    item.status === 'processing'
+      ? 'Wird komprimiert'
+      : item.status === 'uploading'
+        ? 'Wird hochgeladen'
+        : item.status === 'uploaded'
+          ? 'Fertig'
+          : item.status === 'failed'
+            ? 'Fehlgeschlagen'
+            : 'Wartet';
+
+  return (
+    <View style={[styles.queueItem, { borderBottomColor: theme.borderLight }]}>
+      <Ionicons name={iconName as keyof typeof Ionicons.glyphMap} size={14} color={iconColor} />
+      <View style={styles.queueText}>
+        <Text style={[styles.queueFile, { color: theme.text }]} numberOfLines={1}>
+          {item.fileName}
+        </Text>
+        <Text style={[styles.queueStatus, { color: theme.textSecondary }]}>{statusLabel}</Text>
+        {item.locationLabel ? (
+          <Text style={[styles.queueLocation, { color: theme.textSecondary }]} numberOfLines={1}>
+            {item.locationLabel}
+          </Text>
+        ) : null}
+      </View>
+      {onRemove ? (
+        <Pressable onPress={onRemove} hitSlop={8}>
+          <Ionicons name="close-circle" size={18} color={theme.textTertiary} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+});
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  handleRow: {
+    alignItems: 'center',
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xs,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+  },
+  headerLeft: {
+    width: 40,
+    alignItems: 'flex-start',
+  },
+  headerTitle: {
+    fontFamily: Fonts.display,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  headerTitleAccent: {
+    fontStyle: 'italic',
+    fontWeight: '400',
+  },
+  circleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md + 2,
+  },
+  circleCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  circleTarget: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+  },
+  circleTargetName: {
+    fontWeight: '700',
+  },
+  circleMembers: {
+    fontSize: FontSize.xs,
+  },
+  captionCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md + 2,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
+  },
+  captionMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'transparent',
+  },
+  captionMetaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  captionMetaHint: {
+    fontSize: FontSize.xs,
+  },
+  captionCounter: {
+    fontFamily: Fonts.mono,
+    fontSize: FontSize.xs,
+    letterSpacing: 0.5,
+  },
+  headerRight: {
+    width: 40,
+    alignItems: 'flex-end',
+  },
+  scroll: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing['3xl'],
+    gap: Spacing.xl,
+  },
+  captionInput: {
+    fontSize: FontSize.md,
+    lineHeight: 26,
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  assetsSection: {
+    gap: Spacing.sm,
+  },
+  assetsSectionLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  assetRow: {
+    gap: Spacing.sm,
+  },
+  queueList: {
+    gap: 2,
+  },
+  queueItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  queueText: {
+    flex: 1,
+    gap: 2,
+  },
+  queueFile: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  queueStatus: {
+    fontSize: FontSize.xs,
+  },
+  queueLocation: {
+    fontSize: FontSize.xs,
+  },
+  actions: {
+    gap: Spacing.md,
+  },
+});

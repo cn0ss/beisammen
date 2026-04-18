@@ -1,0 +1,52 @@
+---
+import '../styles/global.css';
+import type { Locale } from '../i18n/ui';
+import { dict } from '../i18n/ui';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dict[locale];
+const alt = locale === 'en' ? 'de' : 'en';
+---
+
+<!doctype html>
+<html lang={t.htmlLang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{t.meta.title}</title>
+    <meta name="description" content={t.meta.description} />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0d0a07" />
+    <meta property="og:title" content={t.meta.title} />
+    <meta property="og:description" content={t.meta.description} />
+    <meta property="og:type" content="website" />
+    <link rel="alternate" hreflang="en" href="/en/" />
+    <link rel="alternate" hreflang="de" href="/de/" />
+    <link rel="alternate" hreflang="x-default" href="/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  </head>
+  <body>
+    <slot />
+    <script is:inline define:vars={{ alt }}>
+      const KEY = 'beisammen:lang';
+      try {
+        if (document.documentElement.lang) {
+          localStorage.setItem(KEY, document.documentElement.lang);
+        }
+      } catch {}
+      for (const el of document.querySelectorAll('[data-lang-switch]')) {
+        el.addEventListener('click', () => {
+          try {
+            localStorage.setItem(KEY, alt);
+          } catch {}
+        });
+      }
+    </script>
+  </body>
+</html>

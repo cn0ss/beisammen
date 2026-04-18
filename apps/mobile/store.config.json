@@ -1,0 +1,22 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "info": {
+      "en-US": {
+        "title": "beisammen",
+        "subtitle": "Private photo circles",
+        "description": "beisammen is a private photo and video app for small circles such as partners, families, and close friends. Share into named circles, keep the wider internet out, and store original files on storage you control.",
+        "keywords": [
+          "private photos",
+          "family album",
+          "photo sharing",
+          "friends",
+          "self hosted"
+        ],
+        "marketingUrl": "https://beisammen.app/en/",
+        "supportUrl": "https://beisammen.app/en/privacy/",
+        "privacyPolicyUrl": "https://beisammen.app/en/privacy/"
+      }
+    }
+  }
+}

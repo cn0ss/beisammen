@@ -1,0 +1,79 @@
+/* eslint-disable */
+/**
+ * Generated `api` utility.
+ *
+ * THIS CODE IS AUTOMATICALLY GENERATED.
+ *
+ * To regenerate, run `npx convex dev`.
+ * @module
+ */
+
+import type * as assets from "../assets.js";
+import type * as circles from "../circles.js";
+import type * as http from "../http.js";
+import type * as invites from "../invites.js";
+import type * as lib_auth from "../lib/auth.js";
+import type * as lib_permissions from "../lib/permissions.js";
+import type * as lib_storage_adapter from "../lib/storage/adapter.js";
+import type * as lib_storage_s3 from "../lib/storage/s3.js";
+import type * as lib_storage_shared from "../lib/storage/shared.js";
+import type * as lib_viewer from "../lib/viewer.js";
+import type * as lib_workos from "../lib/workos.js";
+import type * as shares from "../shares.js";
+import type * as storageStats from "../storageStats.js";
+import type * as uploads from "../uploads.js";
+import type * as users from "../users.js";
+import type * as waitlist from "../waitlist.js";
+
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
+
+declare const fullApi: ApiFromModules<{
+  assets: typeof assets;
+  circles: typeof circles;
+  http: typeof http;
+  invites: typeof invites;
+  "lib/auth": typeof lib_auth;
+  "lib/permissions": typeof lib_permissions;
+  "lib/storage/adapter": typeof lib_storage_adapter;
+  "lib/storage/s3": typeof lib_storage_s3;
+  "lib/storage/shared": typeof lib_storage_shared;
+  "lib/viewer": typeof lib_viewer;
+  "lib/workos": typeof lib_workos;
+  shares: typeof shares;
+  storageStats: typeof storageStats;
+  uploads: typeof uploads;
+  users: typeof users;
+  waitlist: typeof waitlist;
+}>;
+
+/**
+ * A utility for referencing Convex functions in your app's public API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
+export declare const api: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "public">
+>;
+
+/**
+ * A utility for referencing Convex functions in your app's internal API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = internal.myModule.myFunction;
+ * ```
+ */
+export declare const internal: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "internal">
+>;
+
+export declare const components: {};

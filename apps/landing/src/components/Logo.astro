@@ -1,0 +1,79 @@
+---
+interface Props {
+  size?: number;
+  showWordmark?: boolean;
+}
+const { size = 28, showWordmark = true } = Astro.props;
+// Mark aspect ratio matches the source brand SVG (110 x 130).
+const height = Math.round((size * 130) / 110);
+---
+
+<span class="logo" style={`--s: ${size}px`}>
+  <span class="logo-halo" aria-hidden="true"></span>
+  <svg
+    width={size}
+    height={height}
+    viewBox="0 0 110 130"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+    class="logo-mark"
+  >
+    <line
+      x1="22"
+      y1="12"
+      x2="22"
+      y2="118"
+      stroke="currentColor"
+      stroke-width="8"
+      stroke-linecap="round"
+    />
+    <path
+      d="M 22 62 Q 52 52, 66 75 Q 80 98, 66 112 Q 52 122, 22 115"
+      stroke="currentColor"
+      stroke-width="8"
+      fill="none"
+      stroke-linecap="round"
+    />
+    <circle cx="95" cy="115" r="9" fill="var(--ember, #c4654a)" />
+  </svg>
+  {showWordmark && <span class="logo-word">beisammen</span>}
+</span>
+
+<style>
+  .logo {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55em;
+    color: var(--ink);
+    isolation: isolate;
+  }
+  .logo-halo {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--s) * 0.45);
+    width: calc(var(--s) * 2.2);
+    height: calc(var(--s) * 2.2);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(
+      closest-side,
+      rgba(244, 162, 97, 0.28),
+      rgba(244, 162, 97, 0) 72%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+  .logo-mark {
+    display: block;
+    flex-shrink: 0;
+  }
+  .logo-word {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 1.35rem;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+</style>

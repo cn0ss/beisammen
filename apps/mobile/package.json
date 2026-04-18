@@ -1,0 +1,50 @@
+{
+  "name": "@beisammen/mobile",
+  "main": "expo-router/entry",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "expo start --dev-client --clear",
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@beisammen/contracts": "workspace:*",
+    "@beisammen/upload-client": "workspace:*",
+    "@react-navigation/bottom-tabs": "^7.15.5",
+    "@react-navigation/native": "^7.1.33",
+    "convex": "^1.28.2",
+    "expo": "~55.0.14",
+    "expo-crypto": "^55.0.14",
+    "expo-dev-client": "^55.0.27",
+    "expo-file-system": "^55.0.16",
+    "expo-image": "^55.0.8",
+    "expo-image-manipulator": "^55.0.15",
+    "expo-image-picker": "^55.0.18",
+    "expo-linking": "~55.0.12",
+    "expo-location": "^55.1.8",
+    "expo-media-library": "^55.0.14",
+    "expo-router": "~55.0.12",
+    "expo-secure-store": "^55.0.13",
+    "expo-sharing": "^55.0.18",
+    "expo-status-bar": "~55.0.5",
+    "expo-video": "^55.0.15",
+    "expo-web-browser": "~55.0.14",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.4",
+    "react-native-compressor": "^1.16.0",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-svg": "^15.15.4",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}

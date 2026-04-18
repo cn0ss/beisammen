@@ -1,0 +1,50 @@
+node_modules
+.turbo
+.DS_Store
+
+# Expo / React Native
+.expo
+dist
+web-build
+apps/mobile/.expo
+apps/mobile/dist
+apps/mobile/web-build
+
+# Native local files
+*.p8
+*.p12
+*.mobileprovision
+*.keystore
+*.jks
+GoogleService-Info.plist
+google-services.json
+google-services.debug.json
+
+# Env and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+apps/mobile/.env
+apps/mobile/.env.local
+apps/mobile/.env.*.local
+
+# Convex
+.convex
+convex/.env.local
+convex/.generated
+
+# Local assistant tooling
+.agents
+.claude
+
+# Expo account/build linkage
+eas.json
+apps/mobile/eas.json
+
+# Logs
+*.log
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

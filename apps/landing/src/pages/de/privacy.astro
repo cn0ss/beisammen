@@ -1,0 +1,162 @@
+---
+import Layout from '../../layouts/Layout.astro';
+---
+
+<Layout locale="de">
+  <main class="policy">
+    <section class="policy-hero">
+      <p class="eyebrow">Datenschutzerklaerung</p>
+      <h1>beisammen</h1>
+      <p class="lede">
+        Diese Seite beschreibt die aktuell im Produkt vorgesehenen
+        Datenkategorien der beisammen-App und Website. Sie ist als
+        produktnahe Dokumentation gedacht und sollte vor einem breiten
+        oeffentlichen Release juristisch geprueft werden.
+      </p>
+      <p class="meta">Stand: 18. April 2026</p>
+    </section>
+
+    <section>
+      <h2>Geltungsbereich</h2>
+      <p>
+        Diese Erklaerung gilt fuer die mobile beisammen-App, die
+        beisammen-Website und die gehosteten Backend-Dienste, die zu ihrem
+        Betrieb eingesetzt werden.
+      </p>
+    </section>
+
+    <section>
+      <h2>Welche Daten verarbeitet werden</h2>
+      <p>Je nach Nutzung des Produkts koennen unter anderem verarbeitet werden:</p>
+      <ul>
+        <li>Account- und Anmeldedaten fuer die Authentifizierung ueber WorkOS</li>
+        <li>Profildaten wie Anzeigename, E-Mail-Adresse und Profilbild</li>
+        <li>Kreis-, Einladungs- und Mitgliedschaftsdaten fuer private Gruppen</li>
+        <li>Medienmetadaten wie Dateiname, MIME-Type, Zeitstempel und Upload-Status</li>
+        <li>Mediendateien, die du hochlaedst, auf dem konfigurierten S3-kompatiblen Speicher</li>
+        <li>optionale Standortdaten aus eingebetteten Fotodaten oder Geraetefreigaben</li>
+        <li>Waitlist-Formularangaben, die du ueber die Website absendest</li>
+        <li>technische Logs fuer Betrieb, Sicherheit und Fehlersuche</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Wofuer diese Daten genutzt werden</h2>
+      <ul>
+        <li>zur Anmeldung und Verwaltung von Sitzungen</li>
+        <li>zum Erstellen und Betreiben privater Kreise, Einladungen und Mediatheken</li>
+        <li>zum Hochladen, Verarbeiten und Anzeigen geteilter Fotos und Videos</li>
+        <li>zum Ergaenzen optionaler Ortsangaben, wenn Standortinformationen vorliegen</li>
+        <li>zur Bearbeitung von Waitlist- und Zugangs-Anfragen</li>
+        <li>zur Absicherung, Missbrauchserkennung und technischen Fehleranalyse</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Berechtigungen</h2>
+      <p>Die mobile App kann Zugriff auf Folgendes anfragen:</p>
+      <ul>
+        <li>Fotos und Videos, um Medien auszuwaehlen und zu speichern</li>
+        <li>Kamera, um Fotos und Videos aufzunehmen</li>
+        <li>Mikrofon, um Videos mit Ton aufzunehmen</li>
+        <li>Standort, um Medien optional mit Ortsinformationen zu ergaenzen</li>
+      </ul>
+      <p>
+        Diese Berechtigungen unterstuetzen die Kernfunktionen der App. Optionale
+        Freigaben koennen verweigert werden, wodurch einzelne Funktionen nur
+        eingeschraenkt nutzbar sein koennen.
+      </p>
+    </section>
+
+    <section>
+      <h2>Speicherung und Dienstleister</h2>
+      <p>
+        beisammen nutzt Convex als Applikations-Backend und WorkOS fuer
+        Authentifizierung. Originale Mediendateien sind so angelegt, dass sie
+        auf S3-kompatiblem Speicher der jeweiligen Deployment-Instanz liegen.
+      </p>
+    </section>
+
+    <section>
+      <h2>Speicherdauer</h2>
+      <p>
+        Account-, Gruppen- und Mediendaten werden so lange gespeichert, wie sie
+        fuer den Betrieb erforderlich sind oder bis sie im aktiven Deployment
+        geloescht werden. Bei Self-Hosting-Deployments koennen abweichende
+        Aufbewahrungsregeln gelten.
+      </p>
+    </section>
+
+    <section>
+      <h2>Deine Moeglichkeiten</h2>
+      <ul>
+        <li>du entscheidest, ob du Medien hochlaedst</li>
+        <li>du entscheidest, ob du optionale Geraeteberechtigungen erteilst</li>
+        <li>du kannst Waitlist-Anfragen ueber den Betreiber der Deployment-Instanz entfernen lassen</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Kontakt</h2>
+      <p>
+        Fuer Datenschutzanfragen zum offiziellen beisammen-Deployment nutze bitte
+        die Kontaktangaben auf <a href="https://beisammen.app/de/">beisammen.app</a>.
+      </p>
+    </section>
+  </main>
+</Layout>
+
+<style>
+  .policy {
+    width: min(52rem, calc(100vw - 2rem));
+    margin: 0 auto;
+    padding: 4rem 0 6rem;
+    color: #f1e7d2;
+  }
+  .policy-hero {
+    margin-bottom: 2.5rem;
+  }
+  .eyebrow,
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(241, 231, 210, 0.64);
+  }
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.03em;
+  }
+  h1 {
+    font-size: clamp(2.8rem, 7vw, 4.8rem);
+    line-height: 0.94;
+    margin: 0.6rem 0 1rem;
+  }
+  h2 {
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    margin: 0 0 0.7rem;
+  }
+  section + section {
+    margin-top: 2rem;
+  }
+  p,
+  li {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.75;
+    color: rgba(241, 231, 210, 0.84);
+  }
+  .lede {
+    max-width: 42rem;
+    font-size: 1.08rem;
+  }
+  ul {
+    padding-left: 1.2rem;
+  }
+  a {
+    color: #f4a261;
+  }
+</style>

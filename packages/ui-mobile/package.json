@@ -1,0 +1,16 @@
+{
+  "name": "@beisammen/ui-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.tsx",
+  "types": "./src/index.tsx",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
+
