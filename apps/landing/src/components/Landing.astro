@@ -17,7 +17,12 @@ const repoUrl = 'https://github.com/cn0ss/beisammen';
 const licenseUrl = `${repoUrl}/blob/main/docs/licensing.md`;
 
 const waitlistEndpoint = (() => {
-  const baseUrl = import.meta.env.PUBLIC_INSTANCE_BASE_URL ?? 'http://127.0.0.1:3211';
+  const baseUrl = import.meta.env.PUBLIC_INSTANCE_BASE_URL?.trim();
+
+  if (!baseUrl) {
+    return '';
+  }
+
   try {
     return new URL('/waitlist/join', baseUrl).toString();
   } catch {
@@ -295,6 +300,7 @@ const polaroidClasses = ['polaroid-1', 'polaroid-2', 'polaroid-3'];
   if (form instanceof HTMLFormElement) {
     const button = form.querySelector('[data-waitlist-submit]');
     const status = form.querySelector('[data-waitlist-status]');
+    const endpoint = form.dataset.endpoint || waitlistEndpoint;
     const setStatus = (message, state) => {
       if (!(status instanceof HTMLElement)) return;
       status.textContent = message;
@@ -304,13 +310,13 @@ const polaroidClasses = ['polaroid-1', 'polaroid-2', 'polaroid-3'];
       form.setAttribute('aria-busy', pending ? 'true' : 'false');
       if (button instanceof HTMLButtonElement) button.disabled = pending;
     };
+    if (!endpoint) {
+      setStatus(configErrorMessage, 'error');
+      if (button instanceof HTMLButtonElement) button.disabled = true;
+      return;
+    }
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const endpoint = form.dataset.endpoint || waitlistEndpoint;
-      if (!endpoint) {
-        setStatus(configErrorMessage, 'error');
-        return;
-      }
       setPending(true);
       setStatus('', 'idle');
       try {

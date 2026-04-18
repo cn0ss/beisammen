@@ -18,5 +18,8 @@
     "convex": "^1.28.2",
     "turbo": "^2.5.8",
     "typescript": "~5.9.2"
+  },
+  "dependencies": {
+    "@convex-dev/rate-limiter": "^0.3.2"
   }
 }

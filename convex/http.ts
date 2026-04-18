@@ -1,4 +1,5 @@
 import { httpRouter } from 'convex/server';
+import { isRateLimitError } from '@convex-dev/rate-limiter';
 
 import { internal } from './_generated/api';
 import { httpAction } from './_generated/server';
@@ -74,6 +75,27 @@ function createPublicResponse(init?: ResponseInit): Response {
   });
 }
 
+function createRateLimitedResponse(retryAfterMs?: number): Response {
+  const safeRetryAfterMs =
+    typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs)
+      ? Math.max(0, Math.ceil(retryAfterMs))
+      : 0;
+
+  return createPublicJsonResponse(
+    {
+      ok: false,
+      error: 'rate_limited',
+      retryAfterMs: safeRetryAfterMs,
+    },
+    {
+      status: 429,
+      headers: {
+        'Retry-After': String(Math.max(1, Math.ceil(safeRetryAfterMs / 1000))),
+      },
+    },
+  );
+}
+
 function appendParamsToUrl(baseUrl: string, params: Record<string, string>): string {
   const target = new URL(baseUrl);
 
@@ -111,6 +133,32 @@ function getRecord(value: Record<string, unknown>, key: string): Record<string, 
   }
 
   return candidate as Record<string, unknown>;
+}
+
+function readClientIp(request: Request): string | null {
+  const forwardedFor = request.headers.get('x-forwarded-for');
+
+  if (forwardedFor) {
+    const firstForwardedIp = forwardedFor
+      .split(',')
+      .map((value) => value.trim())
+      .find(Boolean);
+
+    if (firstForwardedIp) {
+      return firstForwardedIp;
+    }
+  }
+
+  const directIp =
+    request.headers.get('cf-connecting-ip') ??
+    request.headers.get('x-real-ip');
+
+  if (!directIp) {
+    return null;
+  }
+
+  const trimmedIp = directIp.trim();
+  return trimmedIp.length > 0 ? trimmedIp : null;
 }
 
 async function readWaitlistPayload(
@@ -187,6 +235,7 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     const payload = await readWaitlistPayload(request);
     const email = payload.email;
+    const clientIp = readClientIp(request);
     const normalizedEmail =
       typeof email === 'string'
         ? normalizeEmailAddress(email)
@@ -206,25 +255,36 @@ http.route({
       );
     }
 
-    const result: { alreadyJoined: boolean } = await ctx.runMutation(
-      internal.waitlist.upsertEntry,
-      {
-        email,
-        locale: payload.locale,
-        source: payload.source,
-        ...(request.headers.get('referer')
-          ? { referrer: request.headers.get('referer') as string }
-          : {}),
-        ...(request.headers.get('user-agent')
-          ? { userAgent: request.headers.get('user-agent') as string }
-          : {}),
-      },
-    );
+    try {
+      const result: { alreadyJoined: boolean } = await ctx.runMutation(
+        internal.waitlist.joinFromHttp,
+        {
+          email,
+          locale: payload.locale,
+          source: payload.source,
+          ...(request.headers.get('referer')
+            ? { referrer: request.headers.get('referer') as string }
+            : {}),
+          ...(request.headers.get('user-agent')
+            ? { userAgent: request.headers.get('user-agent') as string }
+            : {}),
+          ...(clientIp
+            ? { clientIp }
+            : {}),
+        },
+      );
 
-    return createPublicJsonResponse({
-      ok: true,
-      alreadyJoined: result.alreadyJoined,
-    });
+      return createPublicJsonResponse({
+        ok: true,
+        alreadyJoined: result.alreadyJoined,
+      });
+    } catch (error) {
+      if (isRateLimitError(error)) {
+        return createRateLimitedResponse(error.data.retryAfter);
+      }
+
+      throw error;
+    }
   }),
 });
 

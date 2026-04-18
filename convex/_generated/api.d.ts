@@ -19,6 +19,7 @@ import type * as lib_storage_s3 from "../lib/storage/s3.js";
 import type * as lib_storage_shared from "../lib/storage/shared.js";
 import type * as lib_viewer from "../lib/viewer.js";
 import type * as lib_workos from "../lib/workos.js";
+import type * as rateLimit from "../rateLimit.js";
 import type * as shares from "../shares.js";
 import type * as storageStats from "../storageStats.js";
 import type * as uploads from "../uploads.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   "lib/storage/shared": typeof lib_storage_shared;
   "lib/viewer": typeof lib_viewer;
   "lib/workos": typeof lib_workos;
+  rateLimit: typeof rateLimit;
   shares: typeof shares;
   storageStats: typeof storageStats;
   uploads: typeof uploads;
@@ -76,4 +78,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  rateLimiter: import("@convex-dev/rate-limiter/_generated/component.js").ComponentApi<"rateLimiter">;
+};
