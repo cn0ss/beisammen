@@ -40,6 +40,7 @@ interface DraftSheetProps {
   onPublish: () => void;
   onDeleteDraft: () => void;
   onDeleteAsset: (assetId: string) => void;
+  onRetryFailedUpload: (itemId: string) => void;
   onRemoveFailedUpload: (itemId: string) => void;
   onClose: () => void;
 }
@@ -60,6 +61,7 @@ export const DraftSheet = memo(function DraftSheet({
   onPublish,
   onDeleteDraft,
   onDeleteAsset,
+  onRetryFailedUpload,
   onRemoveFailedUpload,
   onClose,
 }: DraftSheetProps) {
@@ -214,7 +216,12 @@ export const DraftSheet = memo(function DraftSheet({
                     <UploadQueueItem
                       key={item.id}
                       item={item}
-                      onRemove={item.status === 'failed' ? () => onRemoveFailedUpload(item.id) : undefined}
+                      onRetry={
+                        item.status === 'failed' ? () => onRetryFailedUpload(item.id) : undefined
+                      }
+                      onRemove={
+                        item.status === 'failed' ? () => onRemoveFailedUpload(item.id) : undefined
+                      }
                     />
                   ))}
                 </View>
@@ -259,9 +266,11 @@ interface UploadQueueItemData {
 
 const UploadQueueItem = memo(function UploadQueueItem({
   item,
+  onRetry,
   onRemove,
 }: {
   item: UploadQueueItemData;
+  onRetry?: () => void;
   onRemove?: () => void;
 }) {
   const theme = useTheme();
@@ -304,17 +313,28 @@ const UploadQueueItem = memo(function UploadQueueItem({
         <Text style={[styles.queueFile, { color: theme.text }]} numberOfLines={1}>
           {item.fileName}
         </Text>
-        <Text style={[styles.queueStatus, { color: theme.textSecondary }]}>{statusLabel}</Text>
+        <Text style={[styles.queueStatus, { color: theme.textSecondary }]} numberOfLines={2}>
+          {item.status === 'failed' && item.errorMessage ? item.errorMessage : statusLabel}
+        </Text>
         {item.locationLabel ? (
           <Text style={[styles.queueLocation, { color: theme.textSecondary }]} numberOfLines={1}>
             {item.locationLabel}
           </Text>
         ) : null}
       </View>
-      {onRemove ? (
-        <Pressable onPress={onRemove} hitSlop={8}>
-          <Ionicons name="close-circle" size={18} color={theme.textTertiary} />
-        </Pressable>
+      {onRetry || onRemove ? (
+        <View style={styles.queueActions}>
+          {onRetry ? (
+            <Pressable accessibilityLabel="Upload erneut versuchen" onPress={onRetry} hitSlop={8}>
+              <Ionicons name="refresh-circle" size={20} color={theme.primary} />
+            </Pressable>
+          ) : null}
+          {onRemove ? (
+            <Pressable accessibilityLabel="Upload entfernen" onPress={onRemove} hitSlop={8}>
+              <Ionicons name="close-circle" size={20} color={theme.textTertiary} />
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -447,6 +467,11 @@ const styles = StyleSheet.create({
   queueText: {
     flex: 1,
     gap: 2,
+  },
+  queueActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
   queueFile: {
     fontSize: FontSize.sm,

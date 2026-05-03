@@ -7,6 +7,11 @@ import { defineConfig } from 'astro/config';
 export default defineConfig({
   site: 'https://beisammen.app',
   trailingSlash: 'always',
+  vite: {
+    server: {
+      allowedHosts: ['beisammen-40.localcan.dev'],
+    },
+  },
   i18n: {
     locales: ['en', 'de'],
     defaultLocale: 'en',

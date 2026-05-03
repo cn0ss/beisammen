@@ -20,6 +20,7 @@ import {
   markUploadStatus,
   patchUploadQueueItem,
   removeUploadQueueItems,
+  uploadQueueItemToPreparedAsset,
   type UploadQueueState,
 } from '@beisammen/upload-client';
 
@@ -32,6 +33,7 @@ import {
   formatMediaLocation,
   mimeTypeForPickerAsset,
   optimizePickerAsset,
+  type PreparedUploadAsset,
   resolvePickerAssetLocations,
   uploadPreparedFile,
 } from '@/features/media/client';
@@ -86,13 +88,15 @@ export default function HomeScreen() {
   const updateDraft = useMutation(api.shares.updateDraft);
   const publishDraft = useMutation(api.shares.publish);
   const createTarget = useAction(api.uploads.createTarget);
+  const retryUpload = useAction(api.uploads.retry);
   const completeUpload = useAction(api.uploads.complete);
   const discardUpload = useAction(api.uploads.discard);
   const deleteDraftAsset = useAction(api.assets.deleteDraftAsset);
   const deleteShare = useAction(api.shares.delete);
 
   const [draftCaption, setDraftCaption] = useState('');
-  const [uploadQueue, setUploadQueue] = useState<UploadQueueState>(initialUploadQueueState);
+  const [uploadQueue, setUploadQueue] =
+    useState<UploadQueueState<ImagePicker.ImagePickerAsset>>(initialUploadQueueState);
   const [isUploading, setIsUploading] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [deletingShareId, setDeletingShareId] = useState<string | null>(null);
@@ -335,11 +339,13 @@ export default function HomeScreen() {
             id: queueId,
             circleId: selectedCircle._id,
             shareBatchId: draft.shareBatchId,
+            sourceAsset: asset,
             kind: assetKind(asset),
             fileName: fileNameFromPickerAsset(asset),
             mimeType: mimeTypeForPickerAsset(asset),
             fileUri: asset.uri,
             previewUri: asset.uri,
+            location: resolvedLocation,
             locationLabel: formatMediaLocation(resolvedLocation) ?? undefined,
             status: 'processing',
             attempts: 0,
@@ -348,6 +354,22 @@ export default function HomeScreen() {
 
         try {
           const processedAsset = await optimizePickerAsset(asset, resolvedLocation);
+          setUploadQueue((state) =>
+            patchUploadQueueItem(state, queueId, {
+              fileUri: processedAsset.uri,
+              previewUri: processedAsset.previewUri,
+              kind: processedAsset.kind,
+              fileName: processedAsset.fileName,
+              mimeType: processedAsset.mimeType,
+              sizeBytes: processedAsset.sizeBytes,
+              width: processedAsset.width,
+              height: processedAsset.height,
+              durationSeconds: processedAsset.durationSeconds,
+              location: processedAsset.location,
+              locationLabel: formatMediaLocation(processedAsset.location) ?? undefined,
+              prepared: true,
+            }),
+          );
           const prepared = await createTarget({
             circleId: selectedCircle._id,
             shareBatchId: draft.shareBatchId,
@@ -409,6 +431,93 @@ export default function HomeScreen() {
       setIsUploading(false);
     }
   }, [completeUpload, createTarget, getOrCreateDraft, selectedCircle]);
+
+  const handleRetryFailedUpload = useCallback(
+    async (itemId: string) => {
+      const queueItem = uploadQueue.items.find((item) => item.id === itemId);
+
+      if (!queueItem) {
+        return;
+      }
+
+      setFeedback(null);
+      setIsUploading(true);
+      setUploadQueue((state) => markUploadStatus(state, itemId, 'processing'));
+
+      try {
+        let preparedAsset: PreparedUploadAsset;
+
+        if (queueItem.uploadId || !queueItem.sourceAsset) {
+          preparedAsset = uploadQueueItemToPreparedAsset(queueItem);
+        } else {
+          preparedAsset = await optimizePickerAsset(queueItem.sourceAsset, queueItem.location);
+          setUploadQueue((state) =>
+            patchUploadQueueItem(state, itemId, {
+              fileUri: preparedAsset.uri,
+              previewUri: preparedAsset.previewUri,
+              kind: preparedAsset.kind,
+              fileName: preparedAsset.fileName,
+              mimeType: preparedAsset.mimeType,
+              sizeBytes: preparedAsset.sizeBytes,
+              width: preparedAsset.width,
+              height: preparedAsset.height,
+              durationSeconds: preparedAsset.durationSeconds,
+              location: preparedAsset.location,
+              locationLabel: formatMediaLocation(preparedAsset.location) ?? undefined,
+              prepared: true,
+            }),
+          );
+        }
+
+        const prepared = queueItem.uploadId
+          ? await retryUpload({ uploadId: queueItem.uploadId })
+          : await createTarget({
+              circleId: queueItem.circleId,
+              shareBatchId: queueItem.shareBatchId,
+              kind: preparedAsset.kind,
+              mimeType: preparedAsset.mimeType,
+              fileName: preparedAsset.fileName,
+            });
+
+        if (!queueItem.uploadId) {
+          setUploadQueue((state) =>
+            patchUploadQueueItem(state, itemId, {
+              uploadId: prepared.uploadId,
+            }),
+          );
+        }
+
+        setUploadQueue((state) => markUploadStatus(state, itemId, 'uploading'));
+
+        const uploaded = await uploadPreparedFile({
+          target: prepared.target,
+          asset: preparedAsset,
+        });
+
+        await completeUpload({
+          uploadId: prepared.uploadId,
+          storageId: uploaded.storageId,
+          objectKey: uploaded.objectKey,
+          fileName: preparedAsset.fileName,
+          sizeBytes: preparedAsset.sizeBytes,
+          width: preparedAsset.width,
+          height: preparedAsset.height,
+          durationSeconds: preparedAsset.durationSeconds,
+          location: preparedAsset.location,
+        });
+
+        setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === itemId));
+        setFeedback('Upload wurde abgeschlossen.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Upload fehlgeschlagen.';
+        setUploadQueue((state) => markUploadStatus(state, itemId, 'failed', message));
+        setFeedback(message);
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [completeUpload, createTarget, retryUpload, uploadQueue.items],
+  );
 
   const handlePublishDraft = useCallback(async () => {
     if (!activeDraft) return;
@@ -581,6 +690,7 @@ export default function HomeScreen() {
           onPublish={() => void handlePublishDraft()}
           onDeleteDraft={handleDeleteDraft}
           onDeleteAsset={handleDeleteAsset}
+          onRetryFailedUpload={(itemId) => void handleRetryFailedUpload(itemId)}
           onRemoveFailedUpload={(itemId) => void handleRemoveFailedUpload(itemId)}
           onClose={() => setIsDraftSheetOpen(false)}
         />

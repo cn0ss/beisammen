@@ -148,6 +148,24 @@ export const prepareRetry = internalMutation({
       throw new Error('Publishing is not allowed for this member role.');
     }
 
+    const shareBatch = await ctx.db.get(upload.shareBatchId);
+
+    if (!shareBatch || shareBatch.circleId !== upload.circleId) {
+      throw new Error('Share batch not found in the selected circle.');
+    }
+
+    if (
+      shareBatch.authorId !== viewer._id ||
+      upload.createdBy !== viewer._id ||
+      shareBatch.status !== 'draft'
+    ) {
+      throw new Error('Only the draft author can retry uploads into this share batch.');
+    }
+
+    if (upload.assetId || upload.status === 'uploaded') {
+      throw new Error('Completed uploads cannot be retried.');
+    }
+
     await ctx.db.patch(upload._id, {
       status: 'uploading',
       failureReason: undefined,

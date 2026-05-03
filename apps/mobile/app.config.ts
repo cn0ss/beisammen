@@ -21,6 +21,7 @@ const scheme = publicEnv.EXPO_PUBLIC_APP_SCHEME;
 const config: ExpoConfig = {
   name: 'beisammen',
   slug: 'beisammen-mobile',
+  owner: 'noss',
   version: '0.1.0',
   scheme,
   orientation: 'portrait',
@@ -84,6 +85,9 @@ const config: ExpoConfig = {
     reactCompiler: true,
   },
   extra: {
+    eas: {
+      projectId: '542d4e0c-87c8-4d9b-bbb9-6ee280fe8d91',
+    },
     publicEnv,
   },
 };
