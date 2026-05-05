@@ -1,12 +1,16 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BrandMark } from '@/components/ui';
+import { normalizeBaseUrl } from '@beisammen/contracts';
+
+import { BrandMark, Button, Card } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
+import { defaultInstanceConfig } from '@/features/instances/catalog';
+import { resolveInstanceConfig } from '@/features/instances/discovery';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -28,14 +32,86 @@ function useFadeIn(delay: number) {
 }
 
 export default function SignInScreen() {
-  const { instance, instanceError, isBusy, pendingInviteToken, session, signIn } = useSession();
+  const {
+    instance,
+    instanceError,
+    isBusy,
+    isReady,
+    pendingInviteToken,
+    session,
+    setActiveInstance,
+    signIn,
+  } = useSession();
   const theme = useTheme();
   const colorScheme = useColorScheme();
+  const [customInstanceUrl, setCustomInstanceUrl] = useState(instance.instance.baseUrl);
+  const [isInstanceEditorOpen, setIsInstanceEditorOpen] = useState(false);
+  const [isSwitchingInstance, setIsSwitchingInstance] = useState(false);
+  const [instanceSwitchError, setInstanceSwitchError] = useState<string | null>(null);
+  const [instanceSwitchMessage, setInstanceSwitchMessage] = useState<string | null>(null);
 
   const heroAnim = useFadeIn(100);
   const featuresAnim = useFadeIn(250);
   const actionAnim = useFadeIn(400);
   const footerAnim = useFadeIn(550);
+  const isDefaultInstance =
+    normalizeBaseUrl(instance.instance.baseUrl) ===
+    normalizeBaseUrl(defaultInstanceConfig.instance.baseUrl);
+
+  useEffect(() => {
+    setCustomInstanceUrl(instance.instance.baseUrl);
+  }, [instance.instance.baseUrl]);
+
+  async function handleSwitchInstance() {
+    const nextUrl = customInstanceUrl.trim();
+
+    if (!nextUrl) {
+      setInstanceSwitchError('Gib die Backend-Adresse deiner Instanz ein.');
+      setInstanceSwitchMessage(null);
+      return;
+    }
+
+    setIsSwitchingInstance(true);
+    setInstanceSwitchError(null);
+    setInstanceSwitchMessage(null);
+
+    try {
+      const nextInstance = await resolveInstanceConfig(nextUrl);
+      await setActiveInstance(nextInstance);
+      setCustomInstanceUrl(nextInstance.instance.baseUrl);
+      setInstanceSwitchMessage(`Verbunden mit ${nextInstance.instance.name}.`);
+      setIsInstanceEditorOpen(false);
+    } catch (error) {
+      setInstanceSwitchError(
+        error instanceof Error
+          ? error.message
+          : 'Instanz konnte nicht geprüft werden.',
+      );
+    } finally {
+      setIsSwitchingInstance(false);
+    }
+  }
+
+  async function handleResetInstance() {
+    setIsSwitchingInstance(true);
+    setInstanceSwitchError(null);
+    setInstanceSwitchMessage(null);
+
+    try {
+      await setActiveInstance(defaultInstanceConfig);
+      setCustomInstanceUrl(defaultInstanceConfig.instance.baseUrl);
+      setInstanceSwitchMessage(`Verbunden mit ${defaultInstanceConfig.instance.name}.`);
+      setIsInstanceEditorOpen(false);
+    } catch (error) {
+      setInstanceSwitchError(
+        error instanceof Error
+          ? error.message
+          : 'Standard-Instanz konnte nicht aktiviert werden.',
+      );
+    } finally {
+      setIsSwitchingInstance(false);
+    }
+  }
 
   if (session) {
     return <Redirect href={pendingInviteToken ? '/(app)/invite' : '/(app)/home'} />;
@@ -73,12 +149,94 @@ export default function SignInScreen() {
         </Animated.View>
 
         <Animated.View style={[styles.actionArea, actionAnim]}>
-          <View style={[styles.instanceChip, { backgroundColor: theme.primaryMuted }]}>
+          <Pressable
+            onPress={() => {
+              setIsInstanceEditorOpen((value) => !value);
+              setInstanceSwitchError(null);
+              setInstanceSwitchMessage(null);
+            }}
+            style={({ pressed }) => [
+              styles.instanceChip,
+              {
+                backgroundColor: theme.primaryMuted,
+                opacity: pressed ? 0.86 : 1,
+              },
+            ]}
+          >
             <View style={[styles.dot, { backgroundColor: theme.primary }]} />
             <Text style={[styles.instanceChipText, { color: theme.primary }]} numberOfLines={1}>
               {instance.instance.name}
             </Text>
-          </View>
+            <Ionicons
+              name={isInstanceEditorOpen ? 'chevron-up-outline' : 'server-outline'}
+              size={14}
+              color={theme.primary}
+            />
+          </Pressable>
+
+          {isInstanceEditorOpen ? (
+            <Card style={[styles.instanceEditor, { borderColor: theme.borderLight }]}>
+              <View style={styles.instanceHeader}>
+                <Ionicons name="server-outline" size={18} color={theme.primary} />
+                <View style={styles.instanceHeaderCopy}>
+                  <Text style={[styles.instanceTitle, { color: theme.text }]}>
+                    Backend vor der Anmeldung
+                  </Text>
+                  <Text style={[styles.instanceSubtitle, { color: theme.textSecondary }]}>
+                    Login läuft über die aktive Instanz.
+                  </Text>
+                </View>
+              </View>
+
+              <TextInput
+                value={customInstanceUrl}
+                onChangeText={setCustomInstanceUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                placeholder="https://deine-instanz.example.com"
+                placeholderTextColor={theme.textTertiary}
+                editable={!isSwitchingInstance}
+                style={[
+                  styles.instanceInput,
+                  {
+                    borderColor: theme.border,
+                    color: theme.text,
+                    backgroundColor: theme.background,
+                  },
+                ]}
+              />
+
+              {instanceSwitchError ? (
+                <Text style={[styles.instanceError, { color: theme.danger }]}>
+                  {instanceSwitchError}
+                </Text>
+              ) : null}
+
+              <View style={styles.instanceActions}>
+                <Button
+                  label="Prüfen"
+                  icon="checkmark-circle-outline"
+                  loading={isSwitchingInstance}
+                  disabled={!isReady}
+                  onPress={() => {
+                    void handleSwitchInstance();
+                  }}
+                />
+                {!isDefaultInstance ? (
+                  <Button
+                    label="Cloud"
+                    icon="cloud-outline"
+                    variant="outline"
+                    disabled={isSwitchingInstance || !isReady}
+                    onPress={() => {
+                      void handleResetInstance();
+                    }}
+                  />
+                ) : null}
+              </View>
+            </Card>
+          ) : null}
 
           {instanceError ? (
             <View style={[styles.errorBanner, { backgroundColor: theme.dangerMuted }]}>
@@ -87,22 +245,38 @@ export default function SignInScreen() {
             </View>
           ) : null}
 
+          {instanceSwitchMessage ? (
+            <View style={[styles.successBanner, { backgroundColor: theme.primaryMuted }]}>
+              <Ionicons name="checkmark-circle-outline" size={15} color={theme.primary} />
+              <Text style={[styles.successText, { color: theme.primary }]}>
+                {instanceSwitchMessage}
+              </Text>
+            </View>
+          ) : null}
+
           <Pressable
             onPress={() => {
               void signIn();
             }}
+            disabled={!isReady || isSwitchingInstance || isBusy}
             style={({ pressed }) => [
               styles.signInBtn,
               {
                 backgroundColor: theme.primary,
-                opacity: pressed || isBusy ? 0.85 : 1,
+                opacity: pressed || isBusy ? 0.85 : !isReady || isSwitchingInstance ? 0.6 : 1,
                 transform: [{ scale: pressed ? 0.985 : 1 }],
               },
             ]}
           >
             <Ionicons name="log-in-outline" size={20} color={theme.primaryText} />
             <Text style={[styles.signInLabel, { color: theme.primaryText }]}>
-              {isBusy ? 'Anmeldung läuft...' : 'Anmelden'}
+              {!isReady
+                ? 'Instanz wird geladen...'
+                : isSwitchingInstance
+                  ? 'Instanz wird geprüft...'
+                  : isBusy
+                    ? 'Anmeldung läuft...'
+                    : 'Anmelden'}
             </Text>
           </Pressable>
 
@@ -215,6 +389,41 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '600',
   },
+  instanceEditor: {
+    borderWidth: 1,
+  },
+  instanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  instanceHeaderCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  instanceTitle: {
+    fontSize: FontSize.base,
+    fontWeight: '700',
+  },
+  instanceSubtitle: {
+    fontSize: FontSize.sm,
+    lineHeight: 18,
+  },
+  instanceInput: {
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    fontSize: FontSize.base,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  instanceActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  instanceError: {
+    fontSize: FontSize.sm,
+    lineHeight: 19,
+  },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -226,6 +435,19 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FontSize.sm,
     lineHeight: 20,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: Radius.md,
+  },
+  successText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    lineHeight: 20,
+    fontWeight: '600',
   },
   signInBtn: {
     flexDirection: 'row',

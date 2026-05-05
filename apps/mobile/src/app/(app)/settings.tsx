@@ -1,10 +1,12 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, ScrollView, StyleSheet, Text } from 'react-native';
+import { Alert, Animated, Linking, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAction, useConvexAuth, useMutation, useQuery } from 'convex/react';
+import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+
+import type { BillingStatus, ConnectionCheck } from '@beisammen/contracts';
 
 import { Fonts, FontSize, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
@@ -14,9 +16,10 @@ import { optimizePickerAsset, uploadPreparedFile } from '@/features/media/client
 import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
-import { FeedbackToast, SectionHeader } from '@/components/ui';
+import { Button, FeedbackToast, SectionHeader } from '@/components/ui';
 import { CreateCircleCard } from '@/components/home/CreateCircleCard';
 import { AccountCard } from '@/components/settings/AccountCard';
+import { BillingCard } from '@/components/settings/BillingCard';
 import { CirclesList } from '@/components/settings/CirclesList';
 import { settingsCopy } from '@/components/settings/copy';
 import { StorageUsageCard } from '@/components/settings/StorageUsageCard';
@@ -66,9 +69,18 @@ export default function SettingsScreen() {
   const viewerState = useQuery(api.users.viewerState, convexAuth.isAuthenticated ? {} : 'skip');
   const viewer = viewerState?.viewer ?? null;
   const hasViewer = viewerState?.isAuthenticated === true && viewer !== null;
-  const circles = useQuery(api.circles.listForViewer, hasViewer ? {} : 'skip');
+  const circlesPage = usePaginatedQuery(
+    api.circles.listForViewer,
+    hasViewer ? {} : 'skip',
+    { initialNumItems: 20 },
+  );
+  const circles = hasViewer ? circlesPage.results : undefined;
   const storageStats = useQuery(api.storageStats.forViewer, hasViewer ? {} : 'skip');
   const createCircle = useMutation(api.circles.create);
+  const checkStorageConnection = useAction(api.storageStats.checkConnection);
+  const loadBillingStatus = useAction(api.billing.status);
+  const createBillingCheckout = useAction(api.billing.createCheckout);
+  const createBillingPortalSession = useAction(api.billing.createPortalSession);
   const createProfileImageTarget = useAction(api.users.createProfileImageTarget);
   const completeProfileImageUpload = useAction(api.users.completeProfileImageUpload);
   const removeProfileImage = useAction(api.users.removeProfileImage);
@@ -77,6 +89,10 @@ export default function SettingsScreen() {
   const removeCircleImage = useAction(api.circles.removeImage);
 
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [connectionCheck, setConnectionCheck] = useState<ConnectionCheck | null>(null);
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | undefined>();
+  const [isBillingBusy, setIsBillingBusy] = useState(false);
+  const [isCheckingStorage, setIsCheckingStorage] = useState(false);
   const [isProfileImageBusy, setIsProfileImageBusy] = useState(false);
   const [busyCircleId, setBusyCircleId] = useState<string | null>(null);
 
@@ -87,7 +103,25 @@ export default function SettingsScreen() {
   const circlesAnim = useFadeIn(150);
   const createAnim = useFadeIn(250);
   const storageAnim = useFadeIn(350);
-  const accountAnim = useFadeIn(450);
+  const billingAnim = useFadeIn(450);
+  const accountAnim = useFadeIn(550);
+
+  const refreshBillingStatus = useCallback(async () => {
+    if (!hasViewer) {
+      setBillingStatus(undefined);
+      return;
+    }
+
+    try {
+      setBillingStatus(await loadBillingStatus({}));
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Abrechnung konnte nicht geladen werden.');
+    }
+  }, [hasViewer, loadBillingStatus]);
+
+  useEffect(() => {
+    void refreshBillingStatus();
+  }, [refreshBillingStatus]);
 
   const handleCreateCircle = useCallback(
     async (name: string, description: string) => {
@@ -138,6 +172,7 @@ export default function SettingsScreen() {
         uploadId: prepared.uploadId,
         objectKey: uploaded.objectKey,
         storageId: uploaded.storageId,
+        sizeBytes: processedAsset.sizeBytes,
       });
       setFeedback('Profilbild aktualisiert.');
     } catch (error) {
@@ -212,6 +247,7 @@ export default function SettingsScreen() {
           uploadId: prepared.uploadId,
           objectKey: uploaded.objectKey,
           storageId: uploaded.storageId,
+          sizeBytes: processedAsset.sizeBytes,
         });
         setFeedback(`Bild für „${circle.name}" aktualisiert.`);
       } catch (error) {
@@ -269,6 +305,83 @@ export default function SettingsScreen() {
     void refreshSession();
   }, [refreshSession]);
 
+  const handleCheckStorageConnection = useCallback(async () => {
+    setIsCheckingStorage(true);
+    setFeedback(null);
+
+    try {
+      const result = await checkStorageConnection({});
+      setConnectionCheck(result);
+    } catch (error) {
+      setConnectionCheck({
+        ok: false,
+        message: error instanceof Error ? error.message : 'Speicherprüfung fehlgeschlagen.',
+      });
+    } finally {
+      setIsCheckingStorage(false);
+    }
+  }, [checkStorageConnection]);
+
+  const handleManageBilling = useCallback(async () => {
+    setIsBillingBusy(true);
+    setFeedback(null);
+
+    try {
+      const result = await createBillingPortalSession({
+        returnUrl: instance.instance.baseUrl,
+      });
+
+      if (!result.billingEnabled) {
+        setFeedback('Self-hosted Instanzen haben keine Abrechnung.');
+        return;
+      }
+
+      if (!result.portalUrl) {
+        setFeedback('Für dieses Konto ist kein Portal verfügbar.');
+        return;
+      }
+
+      await Linking.openURL(result.portalUrl);
+      await refreshBillingStatus();
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Abrechnung konnte nicht geöffnet werden.');
+    } finally {
+      setIsBillingBusy(false);
+    }
+  }, [createBillingPortalSession, instance.instance.baseUrl, refreshBillingStatus]);
+
+  const handleChoosePlan = useCallback(
+    async (planId: string) => {
+      setIsBillingBusy(true);
+      setFeedback(null);
+
+      try {
+        const result = await createBillingCheckout({
+          planId,
+          successUrl: instance.instance.baseUrl,
+        });
+
+        if (!result.billingEnabled) {
+          setFeedback('Self-hosted Instanzen haben keine Tarife.');
+          return;
+        }
+
+        if (result.checkoutUrl) {
+          await Linking.openURL(result.checkoutUrl);
+        } else {
+          setFeedback('Tarif aktualisiert.');
+        }
+
+        await refreshBillingStatus();
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : 'Tarif konnte nicht geöffnet werden.');
+      } finally {
+        setIsBillingBusy(false);
+      }
+    },
+    [createBillingCheckout, instance.instance.baseUrl, refreshBillingStatus],
+  );
+
   const handleSignOut = useCallback(() => {
     void signOut();
   }, [signOut]);
@@ -277,6 +390,7 @@ export default function SettingsScreen() {
 
   const accountLabel = session?.email ?? session?.displayName ?? 'Angemeldet';
   const profileName = viewer?.displayName ?? session?.displayName ?? accountLabel;
+  const isLoadingMoreCircles = circlesPage.status === 'LoadingMore';
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
@@ -298,6 +412,16 @@ export default function SettingsScreen() {
             onPickCircleImage={handlePickCircleImage}
             onRemoveCircleImage={handleRemoveCircleImage}
           />
+          {circles && circlesPage.status !== 'Exhausted' ? (
+            <Button
+              label={isLoadingMoreCircles ? 'Lädt...' : 'Weitere Circles laden'}
+              icon="chevron-down-outline"
+              variant="outline"
+              loading={isLoadingMoreCircles}
+              disabled={isLoadingMoreCircles}
+              onPress={() => circlesPage.loadMore(20)}
+            />
+          ) : null}
         </Animated.View>
 
         <Animated.View style={[createAnim, styles.section]}>
@@ -307,7 +431,22 @@ export default function SettingsScreen() {
 
         <Animated.View style={[storageAnim, styles.section]}>
           <SectionHeader icon="cloud-outline" label="Speicher" />
-          <StorageUsageCard stats={storageStats} />
+          <StorageUsageCard
+            stats={storageStats}
+            connectionCheck={connectionCheck}
+            isCheckingConnection={isCheckingStorage}
+            onCheckConnection={handleCheckStorageConnection}
+          />
+        </Animated.View>
+
+        <Animated.View style={[billingAnim, styles.section]}>
+          <SectionHeader icon="card-outline" label="Tarif" />
+          <BillingCard
+            status={billingStatus}
+            isBusy={isBillingBusy}
+            onManageBilling={handleManageBilling}
+            onChoosePlan={handleChoosePlan}
+          />
         </Animated.View>
 
         <Animated.View style={[accountAnim, styles.section]}>

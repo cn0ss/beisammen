@@ -1,25 +1,18 @@
 import * as SecureStore from 'expo-secure-store';
 
-import type { AppSession } from '@beisammen/contracts';
+import type { AppSession, InstanceConfig } from '@beisammen/contracts';
+import { parseInstanceConfig } from '@beisammen/contracts';
 
 import { createLogger } from '@/lib/logger';
+import { buildAuthStorageKey, buildInviteStorageKey } from './session-keys';
 
 const logger = createLogger('auth.store');
-const STORAGE_KEY_PREFIX = 'beisammen.auth.';
-const INVITE_STORAGE_KEY_PREFIX = 'beisammen.invite.';
+const INSTANCE_STORAGE_KEY = 'beisammen.instance.active';
 
 export interface StoredAuthState {
   session: AppSession;
   accessToken: string;
   refreshToken?: string;
-}
-
-function buildStorageKey(instanceUrl: string): string {
-  return `${STORAGE_KEY_PREFIX}${instanceUrl.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-}
-
-function buildInviteStorageKey(instanceUrl: string): string {
-  return `${INVITE_STORAGE_KEY_PREFIX}${instanceUrl.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 }
 
 function isStoredAuthState(value: unknown): value is StoredAuthState {
@@ -47,7 +40,7 @@ function isStoredAuthState(value: unknown): value is StoredAuthState {
 export async function loadStoredAuthState(
   instanceUrl: string,
 ): Promise<StoredAuthState | null> {
-  const raw = await SecureStore.getItemAsync(buildStorageKey(instanceUrl));
+  const raw = await SecureStore.getItemAsync(buildAuthStorageKey(instanceUrl));
 
   if (!raw) {
     return null;
@@ -78,7 +71,7 @@ export async function saveStoredAuthState(
   state: StoredAuthState,
 ): Promise<void> {
   await SecureStore.setItemAsync(
-    buildStorageKey(instanceUrl),
+    buildAuthStorageKey(instanceUrl),
     JSON.stringify(state),
     {
       keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
@@ -87,7 +80,7 @@ export async function saveStoredAuthState(
 }
 
 export async function clearStoredAuthState(instanceUrl: string): Promise<void> {
-  await SecureStore.deleteItemAsync(buildStorageKey(instanceUrl));
+  await SecureStore.deleteItemAsync(buildAuthStorageKey(instanceUrl));
 }
 
 export async function loadStoredInviteToken(instanceUrl: string): Promise<string | null> {
@@ -108,4 +101,30 @@ export async function saveStoredInviteToken(instanceUrl: string, token: string):
 
 export async function clearStoredInviteToken(instanceUrl: string): Promise<void> {
   await SecureStore.deleteItemAsync(buildInviteStorageKey(instanceUrl));
+}
+
+export async function loadStoredInstanceConfig(): Promise<InstanceConfig | null> {
+  const raw = await SecureStore.getItemAsync(INSTANCE_STORAGE_KEY);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return parseInstanceConfig(JSON.parse(raw) as unknown);
+  } catch (error) {
+    logger.warn('Discarding invalid stored instance config', { error });
+    await clearStoredInstanceConfig();
+    return null;
+  }
+}
+
+export async function saveStoredInstanceConfig(instance: InstanceConfig): Promise<void> {
+  await SecureStore.setItemAsync(INSTANCE_STORAGE_KEY, JSON.stringify(instance), {
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+  });
+}
+
+export async function clearStoredInstanceConfig(): Promise<void> {
+  await SecureStore.deleteItemAsync(INSTANCE_STORAGE_KEY);
 }

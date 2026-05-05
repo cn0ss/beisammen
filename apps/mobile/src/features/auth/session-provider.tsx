@@ -18,12 +18,15 @@ import { createAuthAdapter } from '@/features/auth/adapters';
 import {
   clearStoredAuthState,
   clearStoredInviteToken,
+  loadStoredInstanceConfig,
   loadStoredAuthState,
   loadStoredInviteToken,
+  saveStoredInstanceConfig,
   saveStoredInviteToken,
   saveStoredAuthState,
 } from '@/features/auth/session-store';
 import { defaultInstanceConfig } from '@/features/instances/catalog';
+import { clearUploadRecoveryForInstance } from '@/features/media/upload-recovery-runtime';
 import { createLogger } from '@/lib/logger';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -51,6 +54,10 @@ interface SessionContextValue {
   activeCircleId: string | null;
   pendingInviteToken: string | null;
   setActiveCircleId: (circleId: string | null) => void;
+  setActiveInstance: (
+    nextInstance: InstanceConfig,
+    options?: { pendingInviteToken?: string },
+  ) => Promise<void>;
   setPendingInviteToken: (token: string) => Promise<void>;
   clearPendingInviteToken: () => Promise<void>;
   signIn: () => Promise<void>;
@@ -70,7 +77,7 @@ function isTokenExpiringSoon(session: AppSession | null, leewayMs = TOKEN_REFRES
 }
 
 export function SessionProvider({ children }: PropsWithChildren) {
-  const [instance] = useState(defaultInstanceConfig);
+  const [instance, setInstanceState] = useState(defaultInstanceConfig);
   const [session, setSession] = useState<AppSession | null>(null);
   const [tokens, setTokens] = useState<AuthTokens | null>(null);
   const [instanceError, setInstanceError] = useState<string | null>(null);
@@ -78,10 +85,37 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const [pendingInviteToken, setPendingInviteTokenState] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [isInstanceReady, setIsInstanceReady] = useState(false);
   const adapter = useMemo(() => createAuthAdapter(instance), [instance]);
   const refreshInFlightRef = useRef<Promise<string | null> | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const restoredInstanceUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadActiveInstance() {
+      try {
+        const storedInstance = await loadStoredInstanceConfig();
+
+        if (!isCancelled && storedInstance) {
+          setInstanceState(storedInstance);
+        }
+      } catch (error) {
+        logger.warn('Failed to load stored instance config', { error });
+      } finally {
+        if (!isCancelled) {
+          setIsInstanceReady(true);
+        }
+      }
+    }
+
+    void loadActiveInstance();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   const persistAuthState = useEffectEvent(async (
     nextSession: AppSession,
@@ -127,6 +161,55 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const clearPendingInviteToken = useEffectEvent(async () => {
     setPendingInviteTokenState(null);
     await clearStoredInviteToken(instance.instance.baseUrl);
+  });
+
+  const setActiveInstance = useEffectEvent(async (
+    nextInstance: InstanceConfig,
+    options?: { pendingInviteToken?: string },
+  ) => {
+    const nextInstanceUrl = nextInstance.instance.baseUrl;
+    const normalizedInviteToken = options?.pendingInviteToken?.trim() ?? '';
+
+    await saveStoredInstanceConfig(nextInstance);
+
+    if (normalizedInviteToken) {
+      await saveStoredInviteToken(nextInstanceUrl, normalizedInviteToken);
+    } else if (nextInstanceUrl !== instance.instance.baseUrl) {
+      await clearStoredInviteToken(nextInstanceUrl);
+    }
+
+    if (nextInstanceUrl === instance.instance.baseUrl) {
+      setInstanceState(nextInstance);
+
+      if (normalizedInviteToken) {
+        setPendingInviteTokenState(normalizedInviteToken);
+      }
+
+      return;
+    }
+
+    logger.info('Switching active instance', {
+      previousInstanceUrl: instance.instance.baseUrl,
+      nextInstanceUrl,
+      nextInstanceName: nextInstance.instance.name,
+    });
+
+    await clearUploadRecoveryForInstance(instance.instance.baseUrl).catch((error) => {
+      logger.warn('Failed to clear upload recovery cache while switching instance', {
+        instanceUrl: instance.instance.baseUrl,
+        error,
+      });
+    });
+
+    refreshInFlightRef.current = null;
+    restoredInstanceUrlRef.current = null;
+    setInstanceError(null);
+    setSession(null);
+    setTokens(null);
+    setActiveCircleId(null);
+    setPendingInviteTokenState(normalizedInviteToken || null);
+    setIsReady(false);
+    setInstanceState(nextInstance);
   });
 
   const refreshAccessToken = useEffectEvent(
@@ -216,6 +299,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
   });
 
   useEffect(() => {
+    if (!isInstanceReady) {
+      return;
+    }
+
     const instanceUrl = instance.instance.baseUrl;
 
     if (restoredInstanceUrlRef.current === instanceUrl) {
@@ -295,7 +382,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     return () => {
       isCancelled = true;
     };
-  }, [adapter, instance]);
+  }, [adapter, instance, isInstanceReady]);
 
   useEffect(() => {
     if (!tokens?.refreshToken || !session?.expiresAt) {
@@ -414,6 +501,12 @@ export function SessionProvider({ children }: PropsWithChildren) {
       instance,
       currentSession: session,
     });
+    await clearUploadRecoveryForInstance(instance.instance.baseUrl).catch((error) => {
+      logger.warn('Failed to clear upload recovery cache during sign-out', {
+        instanceUrl: instance.instance.baseUrl,
+        error,
+      });
+    });
     await clearLocalSession('sign_out');
     setInstanceError(null);
   });
@@ -453,13 +546,16 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const value: SessionContextValue = {
     isBusy,
-    isReady,
+    isReady: isInstanceReady && isReady,
     session,
     instance,
     instanceError,
     activeCircleId,
     pendingInviteToken,
     setActiveCircleId,
+    async setActiveInstance(nextInstance, options) {
+      await setActiveInstance(nextInstance, options);
+    },
     async setPendingInviteToken(token: string) {
       await setPendingInviteToken(token);
     },

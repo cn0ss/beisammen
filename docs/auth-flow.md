@@ -21,13 +21,24 @@
 - provider API keys, signing secrets, and cookie infrastructure remain server-only
 - the client reads `EXPO_PUBLIC_DEFAULT_INSTANCE_URL`, not provider secrets
 
-## Current scaffold status
+## Current implementation status
 
 The mobile app now includes:
 
 - an instance loader with built-in official fallbacks
 - invite-link based instance switching via `beisammen://connect?instance=...`
 - a shared auth adapter interface with a single WorkOS implementation
+- hosted-browser and native-client WorkOS sign-in through Convex HTTP actions
+- secure per-instance session, refresh token, and pending-invite persistence
+- automatic token refresh on restore, resume, scheduled expiry, and Convex
+  `fetchAccessToken` refresh requests
 
-Real provider exchanges and secure persisted sessions still need concrete
-backend wiring per deployment.
+Deployment requirements:
+
+- `WORKOS_CLIENT_ID` must match the JWT audience configured in WorkOS
+- `WORKOS_API_KEY` must be set for Convex HTTP auth exchange routes
+- native-client mode requires `PUBLIC_AUTH_CLIENT_ID` /
+  `EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID`
+- hosted-browser mode requires the instance sign-in URL in public config
+- callback URLs must target the app scheme path declared by
+  `auth.publicConfig.redirectPath`

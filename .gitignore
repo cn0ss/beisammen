@@ -1,4 +1,5 @@
 node_modules
+.pnpm-store
 .turbo
 .DS_Store
 
@@ -34,9 +35,10 @@ apps/mobile/.env.*.local
 convex/.env.local
 convex/.generated
 
-# Local assistant tooling
+# Local developer tooling
 .agents
 .claude
+docs/superpowers/
 
 # Expo account/build linkage
 eas.json

@@ -172,7 +172,7 @@ export async function createS3ReadUrl(input: {
 
 export async function verifyS3ObjectExists(input: {
   storage: S3StorageReference;
-}): Promise<void> {
+}): Promise<{ sizeBytes: number }> {
   const target = await presignRequest({
     url: buildS3Url(input.storage),
     region: getS3Region(input.storage),
@@ -184,7 +184,16 @@ export async function verifyS3ObjectExists(input: {
   });
 
   if (response.ok) {
-    return;
+    const contentLength = response.headers.get('content-length');
+    const sizeBytes = contentLength ? Number(contentLength) : Number.NaN;
+
+    if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
+      throw new Error('S3 object verification did not return a valid content length.');
+    }
+
+    return {
+      sizeBytes,
+    };
   }
 
   if (response.status === 404) {

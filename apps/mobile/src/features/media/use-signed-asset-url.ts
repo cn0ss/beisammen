@@ -4,7 +4,7 @@ import { useAction } from 'convex/react';
 
 import { api } from '@/features/convex/api';
 
-export function useSignedAssetUrl(assetId?: string | null) {
+export function useSignedAssetUrl(assetId?: string | null, variant: 'preview' | 'original' = 'preview') {
   const getReadUrl = useAction(api.assets.getReadUrl);
   const [url, setUrl] = useState<string | null>(null);
 
@@ -18,7 +18,7 @@ export function useSignedAssetUrl(assetId?: string | null) {
       };
     }
 
-    void getReadUrl({ assetId })
+    void getReadUrl({ assetId, variant })
       .then((result) => {
         if (!isCancelled) {
           setUrl(result.url ?? null);
@@ -33,7 +33,7 @@ export function useSignedAssetUrl(assetId?: string | null) {
     return () => {
       isCancelled = true;
     };
-  }, [assetId, getReadUrl]);
+  }, [assetId, getReadUrl, variant]);
 
   return url;
 }

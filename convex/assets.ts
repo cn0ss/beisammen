@@ -3,7 +3,16 @@ import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { action, internalMutation, internalQuery, query } from './_generated/server';
-import { api, internal } from './_generated/api';
+import { internal } from './_generated/api';
+import { adjustCircleStats, assetStatsDelta } from './circleStats';
+import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
+import {
+  type BillingOwner,
+  resolveCircleBillingOwner,
+  trackCloudOwnerUsage,
+} from './lib/billing/owner';
+import { getDeploymentPolicyFromEnv } from './lib/instance';
+import { listShareAssetsForDisplay } from './lib/shareAssets';
 import { createS3ReadUrl } from './lib/storage/s3';
 import {
   deleteStorageReference,
@@ -18,8 +27,13 @@ export const assetFunctionSurface = [
   'assets.deleteDraftAsset',
 ] as const;
 
+const ASSET_LINKED_UPLOAD_DELETE_LIMIT = 20;
+
+type AssetVisibilityCtx = QueryCtx;
+
 interface ReadContext {
   assetId: Id<'assets'>;
+  variant: 'preview' | 'original';
   storage:
     | {
         provider: 'convex-files';
@@ -35,9 +49,39 @@ interface ReadContext {
       };
 }
 
-export const getReadContext = query({
+async function requireAssetVisibleToViewer(
+  ctx: AssetVisibilityCtx,
+  asset: Doc<'assets'>,
+  viewerId: Id<'users'>,
+) {
+  await requireCircleMembership(ctx, viewerId, asset.circleId);
+
+  const shareBatch = await ctx.db.get(asset.shareBatchId);
+
+  if (!shareBatch || shareBatch.circleId !== asset.circleId) {
+    throw new Error('Share batch not found for asset.');
+  }
+
+  if (shareBatch.status === 'draft' && shareBatch.authorId !== viewerId) {
+    throw new Error('Draft assets are only visible to the draft author.');
+  }
+
+  return shareBatch;
+}
+
+function requireShareBatchVisibleToViewer(
+  shareBatch: Doc<'shareBatches'>,
+  viewerId: Id<'users'>,
+) {
+  if (shareBatch.status === 'draft' && shareBatch.authorId !== viewerId) {
+    throw new Error('Draft assets are only visible to the draft author.');
+  }
+}
+
+export const getReadContext = internalQuery({
   args: {
     assetId: v.id('assets'),
+    variant: v.optional(v.union(v.literal('preview'), v.literal('original'))),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -47,10 +91,13 @@ export const getReadContext = query({
       throw new Error('Asset not found.');
     }
 
-    await requireCircleMembership(ctx, viewer._id, asset.circleId);
+    await requireAssetVisibleToViewer(ctx, asset, viewer._id);
+    const variant = args.variant ?? 'preview';
+
     return {
       assetId: asset._id,
-      storage: asset.previewStorage ?? asset.storage,
+      variant,
+      storage: variant === 'original' ? asset.storage : asset.previewStorage ?? asset.storage,
     };
   },
 });
@@ -68,11 +115,9 @@ export const listForShareBatch = query({
     }
 
     await requireCircleMembership(ctx, viewer._id, shareBatch.circleId);
+    requireShareBatchVisibleToViewer(shareBatch, viewer._id);
 
-    const assets = await ctx.db
-      .query('assets')
-      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
-      .collect();
+    const assets = await listShareAssetsForDisplay(ctx, args.shareBatchId);
 
     return assets.map((asset) => ({
       _id: asset._id,
@@ -94,13 +139,15 @@ export const listForShareBatch = query({
 export const getReadUrl = action({
   args: {
     assetId: v.id('assets'),
+    variant: v.optional(v.union(v.literal('preview'), v.literal('original'))),
   },
   handler: async (
     ctx,
     args,
   ): Promise<{ url: string | null; expiresAt: number | null }> => {
-    const context: ReadContext = await ctx.runQuery(api.assets.getReadContext, {
+    const context: ReadContext = await ctx.runQuery(internal.assets.getReadContext, {
       assetId: args.assetId,
+      ...(args.variant ? { variant: args.variant } : {}),
     });
 
     if (context.storage.provider === 'convex-files') {
@@ -137,21 +184,33 @@ export const getDeleteContext = internalQuery({
       throw new Error('Only draft assets owned by the author can be deleted.');
     }
 
-    const uploads = await ctx.db
+    const linkedUploads = await ctx.db
       .query('uploads')
-      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
-      .collect();
-    const linkedUploads = uploads.filter((upload) => upload.assetId === asset._id);
+      .withIndex('by_asset', (q) => q.eq('assetId', asset._id))
+      .take(ASSET_LINKED_UPLOAD_DELETE_LIMIT + 1);
+
+    if (linkedUploads.length > ASSET_LINKED_UPLOAD_DELETE_LIMIT) {
+      throw new Error('Asset has too many linked uploads to delete in one request.');
+    }
+
+    const billingOwner = await resolveCircleBillingOwner(ctx, asset.circleId);
 
     return {
       assetId: asset._id,
       shareBatchId: shareBatch._id,
+      circleId: asset.circleId,
+      billingOwner,
+      storageBytesDelta: -(asset.sizeBytes ?? 0),
       uploadIds: linkedUploads.map((upload) => upload._id),
       storageReferences: [
         asset.storage,
         ...(asset.previewStorage ? [asset.previewStorage] : []),
         ...linkedUploads.flatMap((upload) => (upload.storage ? [upload.storage] : [])),
+        ...linkedUploads.flatMap((upload) => (upload.previewStorage ? [upload.previewStorage] : [])),
         ...linkedUploads.flatMap((upload) => (upload.pendingStorage ? [upload.pendingStorage] : [])),
+        ...linkedUploads.flatMap((upload) =>
+          upload.previewPendingStorage ? [upload.previewPendingStorage] : [],
+        ),
       ],
     };
   },
@@ -164,14 +223,26 @@ export const finalizeDelete = internalMutation({
     uploadIds: v.array(v.id('uploads')),
   },
   handler: async (ctx, args) => {
+    const asset = await ctx.db.get(args.assetId);
+    const shareBatch = await ctx.db.get(args.shareBatchId);
+
     for (const uploadId of args.uploadIds) {
       await ctx.db.delete(uploadId);
     }
 
     await ctx.db.delete(args.assetId);
+    if (!shareBatch) {
+      throw new Error('Share batch not found.');
+    }
+
     await ctx.db.patch(args.shareBatchId, {
+      assetCount: Math.max(0, shareBatch.assetCount - 1),
       updatedAt: Date.now(),
     });
+
+    if (asset) {
+      await adjustCircleStats(ctx, asset.circleId, assetStatsDelta(asset, -1));
+    }
 
     return {
       assetId: args.assetId,
@@ -192,11 +263,23 @@ export const deleteDraftAsset = action({
     const deleteContext: {
       assetId: Id<'assets'>;
       shareBatchId: Id<'shareBatches'>;
+      circleId: Id<'circles'>;
+      billingOwner: BillingOwner;
+      storageBytesDelta: number;
       uploadIds: Id<'uploads'>[];
       storageReferences: Doc<'assets'>['storage'][];
     } = await ctx.runQuery(internal.assets.getDeleteContext, {
       assetId: args.assetId,
-    });
+    }) as unknown as {
+      assetId: Id<'assets'>;
+      shareBatchId: Id<'shareBatches'>;
+      circleId: Id<'circles'>;
+      billingOwner: BillingOwner;
+      storageBytesDelta: number;
+      uploadIds: Id<'uploads'>[];
+      storageReferences: Doc<'assets'>['storage'][];
+    };
+    const policy = getDeploymentPolicyFromEnv();
 
     const uniqueStorageReferences = new Map<string, Doc<'assets'>['storage']>();
 
@@ -204,14 +287,51 @@ export const deleteDraftAsset = action({
       uniqueStorageReferences.set(storageReferenceKey(storageReference), storageReference);
     }
 
-    for (const storageReference of uniqueStorageReferences.values()) {
-      await deleteStorageReference(ctx, storageReference);
-    }
+    let creditedStorageBytes = 0;
 
-    return await ctx.runMutation(internal.assets.finalizeDelete, {
-      assetId: deleteContext.assetId,
-      shareBatchId: deleteContext.shareBatchId,
-      uploadIds: deleteContext.uploadIds,
-    });
+    try {
+      if (policy.isCloud && deleteContext.storageBytesDelta < 0) {
+        await trackCloudOwnerUsage(ctx, {
+          owner: deleteContext.billingOwner,
+          entityId: deleteContext.circleId,
+          featureId: BILLING_FEATURE_IDS.storageBytes,
+          value: deleteContext.storageBytesDelta,
+          properties: {
+            assetId: deleteContext.assetId,
+            circleId: deleteContext.circleId,
+          },
+        });
+        creditedStorageBytes = -deleteContext.storageBytesDelta;
+      }
+
+      for (const storageReference of uniqueStorageReferences.values()) {
+        await deleteStorageReference(ctx, storageReference);
+      }
+
+      return await ctx.runMutation(internal.assets.finalizeDelete, {
+        assetId: deleteContext.assetId,
+        shareBatchId: deleteContext.shareBatchId,
+        uploadIds: deleteContext.uploadIds,
+      });
+    } catch (error) {
+      if (policy.isCloud && creditedStorageBytes > 0) {
+        try {
+          await trackCloudOwnerUsage(ctx, {
+            owner: deleteContext.billingOwner,
+            entityId: deleteContext.circleId,
+            featureId: BILLING_FEATURE_IDS.storageBytes,
+            value: creditedStorageBytes,
+            properties: {
+              assetId: deleteContext.assetId,
+              circleId: deleteContext.circleId,
+            },
+          });
+        } catch (refundError) {
+          console.error('Failed to refund Autumn storage credit after asset delete failure.', refundError);
+        }
+      }
+
+      throw error;
+    }
   },
 });

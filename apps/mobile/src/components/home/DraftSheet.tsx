@@ -12,7 +12,11 @@ import {
   View,
 } from 'react-native';
 
-import type { CircleListItem, ShareDraftRecord } from '@/features/convex/api';
+import type {
+  CircleListItem,
+  DraftUploadRecord,
+  ShareDraftRecord,
+} from '@/features/convex/api';
 import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
 import type { UploadQueueState } from '@beisammen/upload-client';
 
@@ -36,12 +40,14 @@ interface DraftSheetProps {
   isDeletingDraft: boolean;
   canPublish: boolean;
   uploadQueue: UploadQueueState;
+  persistedUploads: DraftUploadRecord[];
   onPickMedia: () => void;
   onPublish: () => void;
   onDeleteDraft: () => void;
   onDeleteAsset: (assetId: string) => void;
   onRetryFailedUpload: (itemId: string) => void;
   onRemoveFailedUpload: (itemId: string) => void;
+  onDiscardPersistedUpload: (uploadId: string) => void;
   onClose: () => void;
 }
 
@@ -57,12 +63,14 @@ export const DraftSheet = memo(function DraftSheet({
   isDeletingDraft,
   canPublish,
   uploadQueue,
+  persistedUploads,
   onPickMedia,
   onPublish,
   onDeleteDraft,
   onDeleteAsset,
   onRetryFailedUpload,
   onRemoveFailedUpload,
+  onDiscardPersistedUpload,
   onClose,
 }: DraftSheetProps) {
   const theme = useTheme();
@@ -222,6 +230,23 @@ export const DraftSheet = memo(function DraftSheet({
                       onRemove={
                         item.status === 'failed' ? () => onRemoveFailedUpload(item.id) : undefined
                       }
+                    />
+                  ))}
+                </View>
+              ) : null}
+
+              {persistedUploads.length > 0 ? (
+                <View style={styles.queueList}>
+                  {persistedUploads.map((upload) => (
+                    <UploadQueueItem
+                      key={upload._id}
+                      item={{
+                        id: upload._id,
+                        fileName: upload.fileName,
+                        status: upload.status,
+                        errorMessage: upload.failureReason,
+                      }}
+                      onRemove={() => onDiscardPersistedUpload(upload._id)}
                     />
                   ))}
                 </View>

@@ -8,12 +8,13 @@ const publicEnv = {
   EXPO_PUBLIC_DEFAULT_INSTANCE_URL: process.env.EXPO_PUBLIC_DEFAULT_INSTANCE_URL ?? '',
   EXPO_PUBLIC_DEFAULT_CONVEX_URL: process.env.EXPO_PUBLIC_DEFAULT_CONVEX_URL ?? '',
   EXPO_PUBLIC_DEFAULT_AUTH_MODE: process.env.EXPO_PUBLIC_DEFAULT_AUTH_MODE ?? '',
+  EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND:
+    process.env.EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND ?? '',
   EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID:
     process.env.EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID ?? '',
   EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL:
     process.env.EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL ?? '',
   EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL ?? '',
-  EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN ?? '',
 } as const;
 
 const scheme = publicEnv.EXPO_PUBLIC_APP_SCHEME;
@@ -21,7 +22,6 @@ const scheme = publicEnv.EXPO_PUBLIC_APP_SCHEME;
 const config: ExpoConfig = {
   name: 'beisammen',
   slug: 'beisammen-mobile',
-  owner: 'noss',
   version: '0.1.0',
   scheme,
   orientation: 'portrait',
@@ -85,9 +85,6 @@ const config: ExpoConfig = {
     reactCompiler: true,
   },
   extra: {
-    eas: {
-      projectId: '542d4e0c-87c8-4d9b-bbb9-6ee280fe8d91',
-    },
     publicEnv,
   },
 };

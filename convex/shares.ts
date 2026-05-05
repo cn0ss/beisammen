@@ -1,9 +1,19 @@
+import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import { internal } from './_generated/api';
+import { adjustCircleStats, assetStatsDelta } from './circleStats';
+import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
+import {
+  type BillingOwner,
+  resolveCircleBillingOwner,
+  trackCloudOwnerUsage,
+} from './lib/billing/owner';
+import { getDeploymentPolicyFromEnv } from './lib/instance';
+import { listShareAssetsForDisplay } from './lib/shareAssets';
 import {
   deleteStorageReference,
   formatFeedTimestamp,
@@ -20,6 +30,14 @@ export const shareFunctionSurface = [
   'shares.deleteShare',
   'shares.listForCircle',
 ] as const;
+
+const SHARE_DELETE_BATCH_SIZE = 50;
+const DRAFT_UNRESOLVED_UPLOAD_DISPLAY_LIMIT = 50;
+const UNRESOLVED_UPLOAD_STATUSES: Doc<'uploads'>['status'][] = [
+  'draft',
+  'uploading',
+  'failed',
+];
 
 function mapAsset(asset: Doc<'assets'>) {
   return {
@@ -42,12 +60,80 @@ async function listAssets(
   ctx: QueryCtx | MutationCtx,
   shareBatchId: Id<'shareBatches'>,
 ) {
-  const assets = await ctx.db
-    .query('assets')
-    .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatchId))
-    .collect();
+  const assets = await listShareAssetsForDisplay(ctx, shareBatchId);
 
   return assets.map(mapAsset);
+}
+
+function mapUnresolvedUpload(upload: Doc<'uploads'>) {
+  return {
+    _id: upload._id,
+    _creationTime: upload._creationTime,
+    shareBatchId: upload.shareBatchId,
+    circleId: upload.circleId,
+    kind: upload.kind,
+    fileName: upload.fileName,
+    mimeType: upload.mimeType,
+    status: upload.status,
+    failureReason: upload.failureReason,
+    createdAt: upload.createdAt,
+  };
+}
+
+async function listUnresolvedDraftUploads(
+  ctx: QueryCtx | MutationCtx,
+  shareBatchId: Id<'shareBatches'>,
+) {
+  const uploads: Doc<'uploads'>[] = [];
+
+  for (const status of UNRESOLVED_UPLOAD_STATUSES) {
+    const remaining = DRAFT_UNRESOLVED_UPLOAD_DISPLAY_LIMIT - uploads.length;
+
+    if (remaining <= 0) {
+      break;
+    }
+
+    const rows = await ctx.db
+      .query('uploads')
+      .withIndex('by_share_batch_and_status', (q) =>
+        q.eq('shareBatchId', shareBatchId).eq('status', status),
+      )
+      .take(remaining);
+
+    uploads.push(...rows);
+  }
+
+  return uploads.map(mapUnresolvedUpload);
+}
+
+async function assertNoUnresolvedUploadsBeforePublish(
+  ctx: QueryCtx | MutationCtx,
+  shareBatchId: Id<'shareBatches'>,
+) {
+  for (const status of UNRESOLVED_UPLOAD_STATUSES) {
+    const [upload] = await ctx.db
+      .query('uploads')
+      .withIndex('by_share_batch_and_status', (q) =>
+        q.eq('shareBatchId', shareBatchId).eq('status', status),
+      )
+      .take(1);
+
+    if (upload) {
+      throw new Error('Resolve failed or in-progress uploads before publishing this draft.');
+    }
+  }
+}
+
+async function getHeroAsset(
+  ctx: QueryCtx | MutationCtx,
+  shareBatchId: Id<'shareBatches'>,
+) {
+  const [asset] = await ctx.db
+    .query('assets')
+    .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatchId))
+    .take(1);
+
+  return asset ? mapAsset(asset) : null;
 }
 
 async function buildPublishedShareRecord(
@@ -72,6 +158,31 @@ async function buildPublishedShareRecord(
     publishedAt: shareBatch.publishedAt ?? shareBatch.createdAt,
     canDelete: shareBatch.authorId === viewerId,
     assets,
+  };
+}
+
+async function buildFeedShareRecord(
+  ctx: QueryCtx | MutationCtx,
+  shareBatch: Doc<'shareBatches'>,
+  viewerId: Id<'users'>,
+) {
+  const author = await ctx.db.get(shareBatch.authorId);
+  const heroAsset = await getHeroAsset(ctx, shareBatch._id);
+
+  return {
+    _id: shareBatch._id,
+    _creationTime: shareBatch._creationTime,
+    circleId: shareBatch.circleId,
+    caption: shareBatch.caption ?? '',
+    assetCount: shareBatch.assetCount,
+    authorId: shareBatch.authorId,
+    authorName: author?.displayName ?? author?.email ?? 'Unbekannt',
+    authorAvatarUrl: author?.avatarUrl,
+    authorHasProfileImage: Boolean(author?.profileImageStorage),
+    createdAtLabel: formatFeedTimestamp(shareBatch.publishedAt ?? shareBatch.createdAt),
+    publishedAt: shareBatch.publishedAt ?? shareBatch.createdAt,
+    canDelete: shareBatch.authorId === viewerId,
+    heroAsset,
   };
 }
 
@@ -133,15 +244,17 @@ export const getDraftForCircle = query({
     }
 
     const assets = await listAssets(ctx, draft._id);
+    const unresolvedUploads = await listUnresolvedDraftUploads(ctx, draft._id);
 
     return {
       _id: draft._id,
       _creationTime: draft._creationTime,
       circleId: draft.circleId,
       caption: draft.caption ?? '',
-      assetCount: assets.length,
+      assetCount: Math.max(draft.assetCount, assets.length),
       updatedAt: draft.updatedAt,
       assets,
+      unresolvedUploads,
     };
   },
 });
@@ -199,19 +312,21 @@ export const publish = mutation({
       throw new Error('Only drafts can be published.');
     }
 
-    const assets = await ctx.db
+    const [asset] = await ctx.db
       .query('assets')
       .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
-      .collect();
+      .take(1);
 
-    if (assets.length === 0) {
+    if (!asset) {
       throw new Error('At least one uploaded asset is required before publishing.');
     }
+
+    await assertNoUnresolvedUploadsBeforePublish(ctx, shareBatch._id);
 
     const now = Date.now();
     await ctx.db.patch(shareBatch._id, {
       status: 'published',
-      assetCount: assets.length,
+      assetCount: Math.max(shareBatch.assetCount, 1),
       ...(args.caption !== undefined ? { caption: args.caption.trim() || undefined } : {}),
       updatedAt: now,
       publishedAt: now,
@@ -226,7 +341,7 @@ export const publish = mutation({
 
     return {
       shareBatchId: shareBatch._id,
-      assetCount: assets.length,
+      assetCount: Math.max(shareBatch.assetCount, 1),
     };
   },
 });
@@ -256,6 +371,7 @@ export const getById = query({
 export const listForCircle = query({
   args: {
     circleId: v.id('circles'),
+    paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -267,11 +383,15 @@ export const listForCircle = query({
         q.eq('circleId', args.circleId).eq('status', 'published'),
       )
       .order('desc')
-      .collect();
-
-    return await Promise.all(
-      shareBatches.map((shareBatch) => buildPublishedShareRecord(ctx, shareBatch, viewer._id)),
+      .paginate(args.paginationOpts);
+    const page = await Promise.all(
+      shareBatches.page.map((shareBatch) => buildFeedShareRecord(ctx, shareBatch, viewer._id)),
     );
+
+    return {
+      ...shareBatches,
+      page,
+    };
   },
 });
 
@@ -293,24 +413,40 @@ export const getDeleteContext = internalQuery({
       throw new Error('Only the author can delete this post.');
     }
 
-    const assets = await ctx.db
+    const assetsPage = await ctx.db
       .query('assets')
       .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
-      .collect();
-    const uploads = await ctx.db
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const uploadsPage = await ctx.db
       .query('uploads')
       .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
-      .collect();
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const assets = assetsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const uploads = uploadsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const storageBytesDelta = -assets.reduce((total, asset) => total + (asset.sizeBytes ?? 0), 0);
+    const billingOwner = await resolveCircleBillingOwner(ctx, shareBatch.circleId);
 
     return {
       shareBatchId: shareBatch._id,
       circleId: shareBatch.circleId,
+      billingOwner,
       assetIds: assets.map((asset) => asset._id),
       uploadIds: uploads.map((upload) => upload._id),
+      storageBytesDelta,
+      isFinalBatch:
+        assetsPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        uploadsPage.length <= SHARE_DELETE_BATCH_SIZE,
       storageReferences: [
-        ...assets.flatMap((asset) => [asset.storage, ...(asset.previewStorage ? [asset.previewStorage] : [])]),
+        ...assets.flatMap((asset) => [
+          asset.storage,
+          ...(asset.previewStorage ? [asset.previewStorage] : []),
+        ]),
         ...uploads.flatMap((upload) => (upload.storage ? [upload.storage] : [])),
+        ...uploads.flatMap((upload) => (upload.previewStorage ? [upload.previewStorage] : [])),
         ...uploads.flatMap((upload) => (upload.pendingStorage ? [upload.pendingStorage] : [])),
+        ...uploads.flatMap((upload) =>
+          upload.previewPendingStorage ? [upload.previewPendingStorage] : [],
+        ),
       ],
     };
   },
@@ -322,8 +458,30 @@ export const finalizeDelete = internalMutation({
     circleId: v.id('circles'),
     assetIds: v.array(v.id('assets')),
     uploadIds: v.array(v.id('uploads')),
+    isFinalBatch: v.boolean(),
   },
   handler: async (ctx, args) => {
+    const assets = await Promise.all(args.assetIds.map((assetId) => ctx.db.get(assetId)));
+    const statsDelta = assets.reduce(
+      (delta, asset) => {
+        if (!asset) {
+          return delta;
+        }
+
+        const assetDelta = assetStatsDelta(asset, -1);
+        return {
+          imageCount: delta.imageCount + (assetDelta.imageCount ?? 0),
+          videoCount: delta.videoCount + (assetDelta.videoCount ?? 0),
+          totalSizeBytes: delta.totalSizeBytes + (assetDelta.totalSizeBytes ?? 0),
+        };
+      },
+      {
+        imageCount: 0,
+        videoCount: 0,
+        totalSizeBytes: 0,
+      },
+    );
+
     for (const assetId of args.assetIds) {
       await ctx.db.delete(assetId);
     }
@@ -332,21 +490,39 @@ export const finalizeDelete = internalMutation({
       await ctx.db.delete(uploadId);
     }
 
-    const activityEvents = await ctx.db
-      .query('activityEvents')
-      .withIndex('by_circle', (q) => q.eq('circleId', args.circleId))
-      .take(100);
+    await adjustCircleStats(ctx, args.circleId, statsDelta);
 
-    for (const event of activityEvents) {
-      if (event.entityId === args.shareBatchId) {
+    const [remainingAsset] = args.isFinalBatch
+      ? await ctx.db
+          .query('assets')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const [remainingUpload] = args.isFinalBatch
+      ? await ctx.db
+          .query('uploads')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const deletedShareBatch = args.isFinalBatch && !remainingAsset && !remainingUpload;
+
+    if (deletedShareBatch) {
+      const activityEvents = ctx.db
+        .query('activityEvents')
+        .withIndex('by_circle_and_entity_id', (q) =>
+          q.eq('circleId', args.circleId).eq('entityId', args.shareBatchId),
+        );
+
+      for await (const event of activityEvents) {
         await ctx.db.delete(event._id);
       }
-    }
 
-    await ctx.db.delete(args.shareBatchId);
+      await ctx.db.delete(args.shareBatchId);
+    }
 
     return {
       shareBatchId: args.shareBatchId,
+      deletedShareBatch,
     };
   },
 });
@@ -361,31 +537,105 @@ export const deleteShare = action({
   ): Promise<{
     shareBatchId: Id<'shareBatches'>;
   }> => {
-    const deleteContext: {
-      shareBatchId: Id<'shareBatches'>;
-      circleId: Id<'circles'>;
-      assetIds: Id<'assets'>[];
-      uploadIds: Id<'uploads'>[];
-      storageReferences: Doc<'assets'>['storage'][];
-    } = await ctx.runQuery(internal.shares.getDeleteContext, {
-      shareBatchId: args.shareBatchId,
-    });
+    const policy = getDeploymentPolicyFromEnv();
+    let deletedShareBatchId: Id<'shareBatches'> | null = null;
 
-    const uniqueStorageReferences = new Map<string, Doc<'assets'>['storage']>();
+    while (deletedShareBatchId === null) {
+      const deleteContext: {
+        shareBatchId: Id<'shareBatches'>;
+        circleId: Id<'circles'>;
+        billingOwner: BillingOwner;
+        assetIds: Id<'assets'>[];
+        uploadIds: Id<'uploads'>[];
+        storageBytesDelta: number;
+        isFinalBatch: boolean;
+        storageReferences: Doc<'assets'>['storage'][];
+      } = await ctx.runQuery(internal.shares.getDeleteContext, {
+        shareBatchId: args.shareBatchId,
+      }) as unknown as {
+        shareBatchId: Id<'shareBatches'>;
+        circleId: Id<'circles'>;
+        billingOwner: BillingOwner;
+        assetIds: Id<'assets'>[];
+        uploadIds: Id<'uploads'>[];
+        storageBytesDelta: number;
+        isFinalBatch: boolean;
+        storageReferences: Doc<'assets'>['storage'][];
+      };
 
-    for (const storageReference of deleteContext.storageReferences) {
-      uniqueStorageReferences.set(storageReferenceKey(storageReference), storageReference);
+      if (
+        !deleteContext.isFinalBatch &&
+        deleteContext.assetIds.length === 0 &&
+        deleteContext.uploadIds.length === 0
+      ) {
+        throw new Error('Share deletion could not make progress.');
+      }
+
+      const uniqueStorageReferences = new Map<string, Doc<'assets'>['storage']>();
+
+      for (const storageReference of deleteContext.storageReferences) {
+        uniqueStorageReferences.set(storageReferenceKey(storageReference), storageReference);
+      }
+
+      let creditedStorageBytes = 0;
+
+      try {
+        if (policy.isCloud && deleteContext.storageBytesDelta < 0) {
+          await trackCloudOwnerUsage(ctx, {
+            owner: deleteContext.billingOwner,
+            entityId: deleteContext.circleId,
+            featureId: BILLING_FEATURE_IDS.storageBytes,
+            value: deleteContext.storageBytesDelta,
+            properties: {
+              shareBatchId: deleteContext.shareBatchId,
+              circleId: deleteContext.circleId,
+            },
+          });
+          creditedStorageBytes = -deleteContext.storageBytesDelta;
+        }
+
+        for (const storageReference of uniqueStorageReferences.values()) {
+          await deleteStorageReference(ctx, storageReference);
+        }
+
+        const finalized: {
+          shareBatchId: Id<'shareBatches'>;
+          deletedShareBatch: boolean;
+        } = await ctx.runMutation(internal.shares.finalizeDelete, {
+          shareBatchId: deleteContext.shareBatchId,
+          circleId: deleteContext.circleId,
+          assetIds: deleteContext.assetIds,
+          uploadIds: deleteContext.uploadIds,
+          isFinalBatch: deleteContext.isFinalBatch,
+        });
+
+        if (finalized.deletedShareBatch) {
+          deletedShareBatchId = finalized.shareBatchId;
+        }
+      } catch (error) {
+        if (policy.isCloud && creditedStorageBytes > 0) {
+          try {
+            await trackCloudOwnerUsage(ctx, {
+              owner: deleteContext.billingOwner,
+              entityId: deleteContext.circleId,
+              featureId: BILLING_FEATURE_IDS.storageBytes,
+              value: creditedStorageBytes,
+              properties: {
+                shareBatchId: deleteContext.shareBatchId,
+                circleId: deleteContext.circleId,
+              },
+            });
+          } catch (refundError) {
+            console.error('Failed to refund Autumn storage credit after delete failure.', refundError);
+          }
+        }
+
+        throw error;
+      }
     }
 
-    for (const storageReference of uniqueStorageReferences.values()) {
-      await deleteStorageReference(ctx, storageReference);
-    }
-
-    return await ctx.runMutation(internal.shares.finalizeDelete, {
-      shareBatchId: deleteContext.shareBatchId,
-      circleId: deleteContext.circleId,
-      assetIds: deleteContext.assetIds,
-      uploadIds: deleteContext.uploadIds,
-    });
+    return {
+      shareBatchId: deletedShareBatchId,
+    };
   },
 });

@@ -2,6 +2,10 @@ import { makeFunctionReference } from 'convex/server';
 
 import type {
   AuthProvider,
+  BillingCheckoutResult,
+  BillingPortalSessionResult,
+  BillingStatus,
+  ConnectionCheck,
   MediaLocation,
   SignedReadUrl,
   StorageReference,
@@ -105,6 +109,22 @@ export interface ShareAssetRecord {
   location?: MediaLocation;
 }
 
+export interface ShareFeedItem {
+  _id: string;
+  _creationTime: number;
+  circleId: string;
+  caption: string;
+  assetCount: number;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl?: string;
+  authorHasProfileImage: boolean;
+  createdAtLabel: string;
+  publishedAt: number;
+  canDelete: boolean;
+  heroAsset: ShareAssetRecord | null;
+}
+
 export interface ShareBatchRecord {
   _id: string;
   _creationTime: number;
@@ -121,6 +141,19 @@ export interface ShareBatchRecord {
   assets: ShareAssetRecord[];
 }
 
+export interface DraftUploadRecord {
+  _id: string;
+  _creationTime: number;
+  shareBatchId: string;
+  circleId: string;
+  kind: 'image' | 'video';
+  fileName: string;
+  mimeType: string;
+  status: 'draft' | 'uploading' | 'failed';
+  failureReason?: string;
+  createdAt: number;
+}
+
 export interface ShareDraftRecord {
   _id: string;
   _creationTime: number;
@@ -129,6 +162,7 @@ export interface ShareDraftRecord {
   assetCount: number;
   updatedAt: number;
   assets: ShareAssetRecord[];
+  unresolvedUploads: DraftUploadRecord[];
 }
 
 export type UpsertViewerArgs = {
@@ -182,9 +216,21 @@ export type CreateUploadTargetArgs = {
   fileName: string;
 };
 
+export type PaginationOpts = {
+  numItems: number;
+  cursor: string | null;
+};
+
+export type PaginatedResult<T> = {
+  page: T[];
+  isDone: boolean;
+  continueCursor: string;
+};
+
 export type PreparedUploadTarget = {
   uploadId: string;
   target: UploadTarget;
+  previewTarget?: UploadTarget;
 };
 
 export type PreparedImageUploadTarget = PreparedUploadTarget;
@@ -193,6 +239,8 @@ export type CompleteUploadArgs = {
   uploadId: string;
   storageId?: string;
   objectKey?: string;
+  previewStorageId?: string;
+  previewObjectKey?: string;
   fileName?: string;
   sizeBytes?: number;
   width?: number;
@@ -221,7 +269,7 @@ export const api = {
     >('users:createProfileImageTarget'),
     completeProfileImageUpload: makeFunctionReference<
       'action',
-      { uploadId: string; objectKey?: string; storageId?: string },
+      { uploadId: string; objectKey?: string; storageId?: string; sizeBytes?: number },
       { uploadId: string }
     >('users:completeProfileImageUpload'),
     removeProfileImage: makeFunctionReference<'action', Record<string, never>, { removed: boolean }>(
@@ -260,7 +308,11 @@ export const api = {
     create: makeFunctionReference<'mutation', CreateCircleArgs, { circleId: string }>(
       'circles:create',
     ),
-    listForViewer: makeFunctionReference<'query', Record<string, never>, CircleListItem[]>(
+    listForViewer: makeFunctionReference<
+      'query',
+      { paginationOpts: PaginationOpts },
+      PaginatedResult<CircleListItem>
+    >(
       'circles:listForViewer',
     ),
     getById: makeFunctionReference<'query', { circleId: string }, CircleDetail>(
@@ -297,7 +349,7 @@ export const api = {
     >('circles:createImageTarget'),
     completeImageUpload: makeFunctionReference<
       'action',
-      { uploadId: string; objectKey?: string; storageId?: string },
+      { uploadId: string; objectKey?: string; storageId?: string; sizeBytes?: number },
       { uploadId: string }
     >('circles:completeImageUpload'),
     removeImage: makeFunctionReference<
@@ -331,9 +383,11 @@ export const api = {
       PublishArgs,
       { shareBatchId: string; assetCount: number }
     >('shares:publish'),
-    listForCircle: makeFunctionReference<'query', { circleId: string }, ShareBatchRecord[]>(
-      'shares:listForCircle',
-    ),
+    listForCircle: makeFunctionReference<
+      'query',
+      { circleId: string; paginationOpts: PaginationOpts },
+      PaginatedResult<ShareFeedItem>
+    >('shares:listForCircle'),
     delete: makeFunctionReference<'action', { shareBatchId: string }, { shareBatchId: string }>(
       'shares:deleteShare',
     ),
@@ -356,7 +410,11 @@ export const api = {
     listForShareBatch: makeFunctionReference<'query', { shareBatchId: string }, ShareAssetRecord[]>(
       'assets:listForShareBatch',
     ),
-    getReadUrl: makeFunctionReference<'action', { assetId: string }, SignedReadUrl>(
+    getReadUrl: makeFunctionReference<
+      'action',
+      { assetId: string; variant?: 'preview' | 'original' },
+      SignedReadUrl
+    >(
       'assets:getReadUrl',
     ),
     deleteDraftAsset: makeFunctionReference<'action', { assetId: string }, { assetId: string }>(
@@ -367,5 +425,26 @@ export const api = {
     forViewer: makeFunctionReference<'query', Record<string, never>, StorageUsageStats>(
       'storageStats:forViewer',
     ),
+    checkConnection: makeFunctionReference<'action', Record<string, never>, ConnectionCheck>(
+      'storageStats:checkConnection',
+    ),
+  },
+  billing: {
+    status: makeFunctionReference<'action', Record<string, never>, BillingStatus>(
+      'billing:status',
+    ),
+    statusForCircle: makeFunctionReference<'action', { circleId: string }, BillingStatus>(
+      'billing:statusForCircle',
+    ),
+    createCheckout: makeFunctionReference<
+      'action',
+      { planId: string; successUrl?: string },
+      BillingCheckoutResult
+    >('billing:createCheckout'),
+    createPortalSession: makeFunctionReference<
+      'action',
+      { returnUrl?: string },
+      BillingPortalSessionResult
+    >('billing:createPortalSession'),
   },
 } as const;

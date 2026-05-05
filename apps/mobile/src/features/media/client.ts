@@ -1,5 +1,4 @@
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
@@ -7,22 +6,14 @@ import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
 import {
   Image as CompressorImage,
-  Video as CompressorVideo,
+  createVideoThumbnail,
   getRealPath,
-  getVideoMetaData,
 } from 'react-native-compressor';
 
 import type { AssetKind, MediaLocation, UploadTarget } from '@beisammen/contracts';
 
 import type { ShareAssetRecord } from '@/features/convex/api';
 
-const IMAGE_MAX_DIMENSION = 1600;
-const IMAGE_SIZE_THRESHOLD = 750 * 1024;
-const IMAGE_QUALITY = 0.72;
-const VIDEO_MAX_DIMENSION = 1280;
-const VIDEO_SIZE_THRESHOLD = 8 * 1024 * 1024;
-const VIDEO_MAX_DURATION_SECONDS = 30;
-const VIDEO_BITRATE = 2_500_000;
 const LOCATION_COORDINATE_PRECISION = 4;
 const DOWNLOAD_DIRECTORY = `${FileSystem.cacheDirectory ?? ''}share-downloads/`;
 
@@ -42,6 +33,14 @@ export interface PreparedUploadAsset {
   location?: MediaLocation;
 }
 
+export interface PreparedPreviewAsset {
+  uri: string;
+  mimeType: 'image/jpeg';
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+}
+
 function sanitizeFileName(fileName: string): string {
   return fileName.replace(/[^a-zA-Z0-9._-]+/g, '-');
 }
@@ -56,11 +55,6 @@ function normalizeFileUri(uri: string): string {
   }
 
   return uri;
-}
-
-function replaceExtension(fileName: string, nextExtension: string): string {
-  const baseName = fileName.replace(/\.[^.]+$/, '');
-  return `${baseName}.${nextExtension}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -403,21 +397,6 @@ export function assetKind(asset: ImagePicker.ImagePickerAsset): AssetKind {
   return asset.type === 'video' ? 'video' : 'image';
 }
 
-function shouldCompressImage(asset: ImagePicker.ImagePickerAsset): boolean {
-  return (
-    (asset.fileSize ?? 0) > IMAGE_SIZE_THRESHOLD ||
-    Math.max(asset.width ?? 0, asset.height ?? 0) > IMAGE_MAX_DIMENSION
-  );
-}
-
-function shouldCompressVideo(asset: ImagePicker.ImagePickerAsset): boolean {
-  return (
-    (asset.fileSize ?? 0) > VIDEO_SIZE_THRESHOLD ||
-    Math.max(asset.width ?? 0, asset.height ?? 0) > VIDEO_MAX_DIMENSION ||
-    (asset.duration ?? 0) / 1000 > VIDEO_MAX_DURATION_SECONDS
-  );
-}
-
 async function getFileSize(uri: string): Promise<number | undefined> {
   const info = await FileSystem.getInfoAsync(uri);
 
@@ -432,43 +411,15 @@ async function processImageAsset(
   asset: ImagePicker.ImagePickerAsset,
   location?: MediaLocation,
 ): Promise<PreparedUploadAsset> {
-  const originalFileName = fileNameFromPickerAsset(asset);
-
-  if (!shouldCompressImage(asset)) {
-    return {
-      uri: asset.uri,
-      previewUri: asset.uri,
-      fileName: originalFileName,
-      mimeType: mimeTypeForPickerAsset(asset),
-      kind: 'image',
-      sizeBytes: asset.fileSize ?? (await getFileSize(asset.uri)),
-      width: asset.width,
-      height: asset.height,
-      location,
-    };
-  }
-
-  const largestSide = Math.max(asset.width ?? 0, asset.height ?? 0);
-  const resizeAction =
-    largestSide > IMAGE_MAX_DIMENSION
-      ? asset.width >= asset.height
-        ? [{ resize: { width: IMAGE_MAX_DIMENSION } }]
-        : [{ resize: { height: IMAGE_MAX_DIMENSION } }]
-      : [];
-  const result = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
-    compress: IMAGE_QUALITY,
-    format: ImageManipulator.SaveFormat.JPEG,
-  });
-
   return {
-    uri: result.uri,
-    previewUri: result.uri,
-    fileName: replaceExtension(originalFileName, 'jpg'),
-    mimeType: 'image/jpeg',
+    uri: asset.uri,
+    previewUri: asset.uri,
+    fileName: fileNameFromPickerAsset(asset),
+    mimeType: mimeTypeForPickerAsset(asset),
     kind: 'image',
-    sizeBytes: await getFileSize(result.uri),
-    width: result.width,
-    height: result.height,
+    sizeBytes: asset.fileSize ?? (await getFileSize(asset.uri)),
+    width: asset.width,
+    height: asset.height,
     location,
   };
 }
@@ -477,46 +428,19 @@ async function processVideoAsset(
   asset: ImagePicker.ImagePickerAsset,
   location?: MediaLocation,
 ): Promise<PreparedUploadAsset> {
-  const originalFileName = fileNameFromPickerAsset(asset);
   const originalDurationSeconds =
     asset.duration !== null && asset.duration !== undefined ? asset.duration / 1000 : undefined;
 
-  if (!shouldCompressVideo(asset)) {
-    return {
-      uri: asset.uri,
-      previewUri: asset.uri,
-      fileName: originalFileName,
-      mimeType: mimeTypeForPickerAsset(asset),
-      kind: 'video',
-      sizeBytes: asset.fileSize ?? (await getFileSize(asset.uri)),
-      width: asset.width,
-      height: asset.height,
-      durationSeconds: originalDurationSeconds,
-      location,
-    };
-  }
-
-  const realPath = await getRealPath(asset.uri, 'video').catch(() => asset.uri);
-  const compressedUri = normalizeFileUri(
-    await CompressorVideo.compress(realPath, {
-      bitrate: VIDEO_BITRATE,
-      compressionMethod: 'manual',
-      maxSize: VIDEO_MAX_DIMENSION,
-      minimumFileSizeForCompress: VIDEO_SIZE_THRESHOLD,
-    }),
-  );
-  const metadata = await getVideoMetaData(compressedUri).catch(() => null);
-
   return {
-    uri: compressedUri,
+    uri: asset.uri,
     previewUri: asset.uri,
-    fileName: replaceExtension(originalFileName, metadata?.extension || 'mp4'),
-    mimeType: 'video/mp4',
+    fileName: fileNameFromPickerAsset(asset),
+    mimeType: mimeTypeForPickerAsset(asset),
     kind: 'video',
-    sizeBytes: metadata?.size ?? (await getFileSize(compressedUri)),
-    width: metadata?.width ?? asset.width,
-    height: metadata?.height ?? asset.height,
-    durationSeconds: metadata?.duration ?? originalDurationSeconds,
+    sizeBytes: asset.fileSize ?? (await getFileSize(asset.uri)),
+    width: asset.width,
+    height: asset.height,
+    durationSeconds: originalDurationSeconds,
     location,
   };
 }
@@ -620,14 +544,29 @@ export function formatBytes(sizeBytes?: number): string | null {
 export async function createCompressedPreview(input: {
   uri: string;
   kind: AssetKind;
-}): Promise<string> {
+}): Promise<PreparedPreviewAsset> {
   if (input.kind === 'image') {
-    return await CompressorImage.compress(input.uri, {
+    const uri = await CompressorImage.compress(input.uri, {
       maxHeight: 600,
       maxWidth: 600,
       quality: 0.7,
     });
+
+    return {
+      uri: normalizeFileUri(uri),
+      mimeType: 'image/jpeg',
+      sizeBytes: await getFileSize(normalizeFileUri(uri)),
+    };
   }
 
-  return input.uri;
+  const realPath = await getRealPath(input.uri, 'video').catch(() => input.uri);
+  const thumbnail = await createVideoThumbnail(realPath);
+
+  return {
+    uri: normalizeFileUri(thumbnail.path),
+    mimeType: 'image/jpeg',
+    sizeBytes: thumbnail.size,
+    width: thumbnail.width,
+    height: thumbnail.height,
+  };
 }

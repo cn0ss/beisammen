@@ -1,4 +1,3 @@
-import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -12,41 +11,25 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAction, useConvexAuth, useMutation, useQuery } from 'convex/react';
-
-import {
-  enqueue,
-  initialUploadQueueState,
-  markUploadStatus,
-  patchUploadQueueItem,
-  removeUploadQueueItems,
-  uploadQueueItemToPreparedAsset,
-  type UploadQueueState,
-} from '@beisammen/upload-client';
+import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 
 import { BottomTabInset, Fonts, FontSize, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
-import {
-  assetKind,
-  fileNameFromPickerAsset,
-  formatMediaLocation,
-  mimeTypeForPickerAsset,
-  optimizePickerAsset,
-  type PreparedUploadAsset,
-  resolvePickerAssetLocations,
-  uploadPreparedFile,
-} from '@/features/media/client';
 import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
+import { useShareUploadFlow } from '@/features/media/use-share-upload-flow';
 import { useTheme } from '@/hooks/use-theme';
+import { createLogger } from '@/lib/logger';
 
-import { EmptyState, FeedbackToast, LoadingBox } from '@/components/ui';
+import { Button, EmptyState, FeedbackToast, LoadingBox } from '@/components/ui';
 import { CircleSelector } from '@/components/home/CircleSelector';
 import { ComposeFab } from '@/components/home/ComposeFab';
 import { DraftSheet } from '@/components/home/DraftSheet';
 import { FeedCard } from '@/components/home/FeedCard';
 import { HomeHeader } from '@/components/home/HomeHeader';
 import { Ornament } from '@/components/home/Ornament';
+
+const logger = createLogger('home');
 
 function useFadeIn(delay: number) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -74,41 +57,58 @@ export default function HomeScreen() {
   const viewerState = useQuery(api.users.viewerState, convexAuth.isAuthenticated ? {} : 'skip');
   const viewer = viewerState?.viewer;
   const hasViewer = viewerState?.isAuthenticated === true && viewer !== null;
-  const circles = useQuery(api.circles.listForViewer, hasViewer ? {} : 'skip');
+  const circlesPage = usePaginatedQuery(
+    api.circles.listForViewer,
+    hasViewer ? {} : 'skip',
+    { initialNumItems: 20 },
+  );
+  const circles = hasViewer ? circlesPage.results : undefined;
   const selectedCircle = circles?.find((circle) => circle._id === activeCircleId) ?? null;
-  const shareFeed = useQuery(
+  const shareFeed = usePaginatedQuery(
     api.shares.listForCircle,
     hasViewer && activeCircleId ? { circleId: activeCircleId } : 'skip',
+    { initialNumItems: 10 },
   );
   const activeDraft = useQuery(
     api.shares.getDraftForCircle,
     hasViewer && activeCircleId ? { circleId: activeCircleId } : 'skip',
   );
-  const getOrCreateDraft = useMutation(api.shares.getOrCreateDraft);
   const updateDraft = useMutation(api.shares.updateDraft);
   const publishDraft = useMutation(api.shares.publish);
-  const createTarget = useAction(api.uploads.createTarget);
-  const retryUpload = useAction(api.uploads.retry);
-  const completeUpload = useAction(api.uploads.complete);
-  const discardUpload = useAction(api.uploads.discard);
   const deleteDraftAsset = useAction(api.assets.deleteDraftAsset);
   const deleteShare = useAction(api.shares.delete);
 
   const [draftCaption, setDraftCaption] = useState('');
-  const [uploadQueue, setUploadQueue] =
-    useState<UploadQueueState<ImagePicker.ImagePickerAsset>>(initialUploadQueueState);
-  const [isUploading, setIsUploading] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [deletingShareId, setDeletingShareId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isDraftSheetOpen, setIsDraftSheetOpen] = useState(false);
   const customProfileImageUrl = useProfileImageUrl(Boolean(viewer?.hasProfileImage));
+  const {
+    selectedQueueItems,
+    hasUnresolvedUploads,
+    isUploading,
+    handlePickMedia,
+    handleRetryFailedUpload,
+    handleRemoveFailedUpload,
+    handleDiscardUpload,
+    removeItemsForShareBatch,
+  } = useShareUploadFlow({
+    selectedCircle,
+    activeDraft,
+    existingDraftAssetCount: activeDraft?.assetCount ?? 0,
+    onFeedback: setFeedback,
+  });
 
   // ---------------------------------------------------------------------------
   //  Auto-select first circle
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
+    if (hasViewer && circlesPage.status === 'LoadingFirstPage') {
+      return;
+    }
+
     if (!circles || circles.length === 0) {
       if (activeCircleId) setActiveCircleId(null);
       return;
@@ -116,7 +116,7 @@ export default function HomeScreen() {
     if (!activeCircleId || !circles.some((circle) => circle._id === activeCircleId)) {
       setActiveCircleId(circles[0]?._id ?? null);
     }
-  }, [activeCircleId, circles, setActiveCircleId]);
+  }, [activeCircleId, circles, circlesPage.status, hasViewer, setActiveCircleId]);
 
   // ---------------------------------------------------------------------------
   //  Draft caption sync
@@ -135,6 +135,10 @@ export default function HomeScreen() {
         shareBatchId: activeDraft._id,
         caption: draftCaption.trim() || undefined,
       }).catch((error) => {
+        logger.warn('Draft update failed', {
+          shareBatchId: activeDraft._id,
+          error,
+        });
         setFeedback(error instanceof Error ? error.message : 'Entwurf konnte nicht aktualisiert werden.');
       });
     }, 400);
@@ -157,6 +161,8 @@ export default function HomeScreen() {
   const displayName = session?.displayName ?? session?.email ?? 'beisammen';
   const profileImageUrl = customProfileImageUrl ?? session?.avatarUrl ?? null;
   const hasCircles = Boolean(circles && circles.length > 0);
+  const isCirclesLoading = hasViewer && circlesPage.status === 'LoadingFirstPage';
+  const isLoadingMoreCircles = circlesPage.status === 'LoadingMore';
   const isViewerBootstrapping =
     Boolean(session) &&
     (
@@ -166,13 +172,20 @@ export default function HomeScreen() {
       (viewerState.isAuthenticated && !viewer)
     );
 
-  const selectedQueueItems = selectedCircle
-    ? uploadQueue.items.filter((item) => item.circleId === selectedCircle._id)
-    : [];
-  const hasPendingUploads = selectedQueueItems.some(
-    (item) => item.status === 'processing' || item.status === 'uploading',
+  const feedItems = shareFeed.results;
+  const isFeedLoading = Boolean(activeCircleId) && shareFeed.status === 'LoadingFirstPage';
+  const isLoadingMoreFeed = shareFeed.status === 'LoadingMore';
+  const visiblePersistedUploads =
+    activeDraft?.unresolvedUploads.filter(
+      (upload) => !selectedQueueItems.some((item) => item.uploadId === upload._id),
+    ) ?? [];
+  const hasPersistedUnresolvedUploads = visiblePersistedUploads.length > 0;
+  const canPublish = Boolean(
+    activeDraft &&
+      activeDraft.assets.length > 0 &&
+      !hasUnresolvedUploads &&
+      !hasPersistedUnresolvedUploads,
   );
-  const canPublish = Boolean(activeDraft && activeDraft.assets.length > 0 && !hasPendingUploads);
   const isDraftLoading = Boolean(activeCircleId) && activeDraft === undefined;
 
   // ---------------------------------------------------------------------------
@@ -189,20 +202,22 @@ export default function HomeScreen() {
       setDeletingShareId(shareBatchId);
       try {
         await deleteShare({ shareBatchId });
-        setUploadQueue((state) =>
-          removeUploadQueueItems(state, (item) => item.shareBatchId === shareBatchId),
-        );
+        removeItemsForShareBatch(shareBatchId);
         if (activeDraft?._id === shareBatchId) {
           setDraftCaption('');
         }
         setFeedback(successMessage);
       } catch (error) {
+        logger.warn('Share delete failed', {
+          shareBatchId,
+          error,
+        });
         setFeedback(error instanceof Error ? error.message : 'Beitrag konnte nicht gelöscht werden.');
       } finally {
         setDeletingShareId(null);
       }
     },
-    [activeDraft?._id, deleteShare],
+    [activeDraft?._id, deleteShare, removeItemsForShareBatch],
   );
 
   const handleDeleteDraft = useCallback(() => {
@@ -260,6 +275,10 @@ export default function HomeScreen() {
                   setFeedback('Medium wurde entfernt.');
                 })
                 .catch((error) => {
+                  logger.warn('Draft asset delete failed', {
+                    assetId,
+                    error,
+                  });
                   setFeedback(
                     error instanceof Error ? error.message : 'Medium konnte nicht entfernt werden.',
                   );
@@ -272,251 +291,25 @@ export default function HomeScreen() {
     [deleteDraftAsset],
   );
 
-  const handleRemoveFailedUpload = useCallback(
-    async (itemId: string) => {
-      const queueItem = uploadQueue.items.find((item) => item.id === itemId);
-
-      if (!queueItem) {
-        return;
-      }
-
-      if (queueItem.uploadId) {
-        try {
-          await discardUpload({
-            uploadId: queueItem.uploadId,
+  const handleDiscardPersistedUpload = useCallback(
+    (uploadId: string) => {
+      void handleDiscardUpload(uploadId)
+        .then(() => {
+          setFeedback('Unterbrochener Upload wurde entfernt.');
+        })
+        .catch((error) => {
+          logger.warn('Persisted upload discard failed', {
+            uploadId,
+            error,
           });
-        } catch (error) {
           setFeedback(
             error instanceof Error
               ? error.message
-              : 'Fehlgeschlagener Upload konnte nicht entfernt werden.',
+              : 'Unterbrochener Upload konnte nicht entfernt werden.',
           );
-          return;
-        }
-      }
-
-      setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === itemId));
-    },
-    [discardUpload, uploadQueue.items],
-  );
-
-  const handlePickMedia = useCallback(async () => {
-    if (!selectedCircle) {
-      setFeedback('Bitte wähle zuerst einen Circle aus.');
-      return;
-    }
-
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setFeedback('Ohne Mediathek-Zugriff können keine Fotos oder Videos ausgewählt werden.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      allowsMultipleSelection: true,
-      exif: true,
-      quality: 1,
-      selectionLimit: 10,
-    });
-
-    if (result.canceled || !result.assets.length) return;
-
-    setFeedback(null);
-    setIsUploading(true);
-
-    try {
-      const draft = await getOrCreateDraft({ circleId: selectedCircle._id });
-      const resolvedLocations = await resolvePickerAssetLocations(result.assets);
-
-      let successCount = 0;
-
-      for (const [index, asset] of result.assets.entries()) {
-        const resolvedLocation = resolvedLocations[index];
-        const queueId = `${draft.shareBatchId}:${asset.assetId ?? asset.uri}:${index}:${Date.now()}`;
-        setUploadQueue((state) =>
-          enqueue(state, {
-            id: queueId,
-            circleId: selectedCircle._id,
-            shareBatchId: draft.shareBatchId,
-            sourceAsset: asset,
-            kind: assetKind(asset),
-            fileName: fileNameFromPickerAsset(asset),
-            mimeType: mimeTypeForPickerAsset(asset),
-            fileUri: asset.uri,
-            previewUri: asset.uri,
-            location: resolvedLocation,
-            locationLabel: formatMediaLocation(resolvedLocation) ?? undefined,
-            status: 'processing',
-            attempts: 0,
-          }),
-        );
-
-        try {
-          const processedAsset = await optimizePickerAsset(asset, resolvedLocation);
-          setUploadQueue((state) =>
-            patchUploadQueueItem(state, queueId, {
-              fileUri: processedAsset.uri,
-              previewUri: processedAsset.previewUri,
-              kind: processedAsset.kind,
-              fileName: processedAsset.fileName,
-              mimeType: processedAsset.mimeType,
-              sizeBytes: processedAsset.sizeBytes,
-              width: processedAsset.width,
-              height: processedAsset.height,
-              durationSeconds: processedAsset.durationSeconds,
-              location: processedAsset.location,
-              locationLabel: formatMediaLocation(processedAsset.location) ?? undefined,
-              prepared: true,
-            }),
-          );
-          const prepared = await createTarget({
-            circleId: selectedCircle._id,
-            shareBatchId: draft.shareBatchId,
-            kind: processedAsset.kind,
-            mimeType: processedAsset.mimeType,
-            fileName: processedAsset.fileName,
-          });
-          setUploadQueue((state) =>
-            patchUploadQueueItem(state, queueId, {
-              uploadId: prepared.uploadId,
-            }),
-          );
-
-          setUploadQueue((state) => markUploadStatus(state, queueId, 'uploading'));
-
-          const uploaded = await uploadPreparedFile({
-            target: prepared.target,
-            asset: processedAsset,
-          });
-
-          await completeUpload({
-            uploadId: prepared.uploadId,
-            storageId: uploaded.storageId,
-            objectKey: uploaded.objectKey,
-            fileName: processedAsset.fileName,
-            sizeBytes: processedAsset.sizeBytes,
-            width: processedAsset.width,
-            height: processedAsset.height,
-            durationSeconds: processedAsset.durationSeconds,
-            location: processedAsset.location,
-          });
-
-          successCount += 1;
-          setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === queueId));
-        } catch (error) {
-          setUploadQueue((state) =>
-            markUploadStatus(
-              state,
-              queueId,
-              'failed',
-              error instanceof Error ? error.message : 'Upload fehlgeschlagen.',
-            ),
-          );
-        }
-      }
-
-      if (successCount > 0) {
-        setFeedback(
-          successCount === result.assets.length
-            ? 'Medien wurden zum Entwurf hinzugefügt.'
-            : `${successCount} von ${result.assets.length} Medien wurden zum Entwurf hinzugefügt.`,
-        );
-      } else {
-        setFeedback('Kein Asset konnte hochgeladen werden.');
-      }
-    } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Medien konnten nicht hinzugefügt werden.');
-    } finally {
-      setIsUploading(false);
-    }
-  }, [completeUpload, createTarget, getOrCreateDraft, selectedCircle]);
-
-  const handleRetryFailedUpload = useCallback(
-    async (itemId: string) => {
-      const queueItem = uploadQueue.items.find((item) => item.id === itemId);
-
-      if (!queueItem) {
-        return;
-      }
-
-      setFeedback(null);
-      setIsUploading(true);
-      setUploadQueue((state) => markUploadStatus(state, itemId, 'processing'));
-
-      try {
-        let preparedAsset: PreparedUploadAsset;
-
-        if (queueItem.uploadId || !queueItem.sourceAsset) {
-          preparedAsset = uploadQueueItemToPreparedAsset(queueItem);
-        } else {
-          preparedAsset = await optimizePickerAsset(queueItem.sourceAsset, queueItem.location);
-          setUploadQueue((state) =>
-            patchUploadQueueItem(state, itemId, {
-              fileUri: preparedAsset.uri,
-              previewUri: preparedAsset.previewUri,
-              kind: preparedAsset.kind,
-              fileName: preparedAsset.fileName,
-              mimeType: preparedAsset.mimeType,
-              sizeBytes: preparedAsset.sizeBytes,
-              width: preparedAsset.width,
-              height: preparedAsset.height,
-              durationSeconds: preparedAsset.durationSeconds,
-              location: preparedAsset.location,
-              locationLabel: formatMediaLocation(preparedAsset.location) ?? undefined,
-              prepared: true,
-            }),
-          );
-        }
-
-        const prepared = queueItem.uploadId
-          ? await retryUpload({ uploadId: queueItem.uploadId })
-          : await createTarget({
-              circleId: queueItem.circleId,
-              shareBatchId: queueItem.shareBatchId,
-              kind: preparedAsset.kind,
-              mimeType: preparedAsset.mimeType,
-              fileName: preparedAsset.fileName,
-            });
-
-        if (!queueItem.uploadId) {
-          setUploadQueue((state) =>
-            patchUploadQueueItem(state, itemId, {
-              uploadId: prepared.uploadId,
-            }),
-          );
-        }
-
-        setUploadQueue((state) => markUploadStatus(state, itemId, 'uploading'));
-
-        const uploaded = await uploadPreparedFile({
-          target: prepared.target,
-          asset: preparedAsset,
         });
-
-        await completeUpload({
-          uploadId: prepared.uploadId,
-          storageId: uploaded.storageId,
-          objectKey: uploaded.objectKey,
-          fileName: preparedAsset.fileName,
-          sizeBytes: preparedAsset.sizeBytes,
-          width: preparedAsset.width,
-          height: preparedAsset.height,
-          durationSeconds: preparedAsset.durationSeconds,
-          location: preparedAsset.location,
-        });
-
-        setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === itemId));
-        setFeedback('Upload wurde abgeschlossen.');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Upload fehlgeschlagen.';
-        setUploadQueue((state) => markUploadStatus(state, itemId, 'failed', message));
-        setFeedback(message);
-      } finally {
-        setIsUploading(false);
-      }
     },
-    [completeUpload, createTarget, retryUpload, uploadQueue.items],
+    [handleDiscardUpload],
   );
 
   const handlePublishDraft = useCallback(async () => {
@@ -529,18 +322,20 @@ export default function HomeScreen() {
         shareBatchId: activeDraft._id,
         caption: draftCaption.trim() || undefined,
       });
-      setUploadQueue((state) =>
-        removeUploadQueueItems(state, (item) => item.shareBatchId === activeDraft._id),
-      );
+      removeItemsForShareBatch(activeDraft._id);
       setDraftCaption('');
       setIsDraftSheetOpen(false);
       setFeedback('Beitrag wurde veröffentlicht.');
     } catch (error) {
+      logger.warn('Draft publish failed', {
+        shareBatchId: activeDraft._id,
+        error,
+      });
       setFeedback(error instanceof Error ? error.message : 'Beitrag konnte nicht veröffentlicht werden.');
     } finally {
       setIsPublishing(false);
     }
-  }, [activeDraft, draftCaption, publishDraft]);
+  }, [activeDraft, draftCaption, publishDraft, removeItemsForShareBatch]);
 
   const handleOpenShare = useCallback(
     (shareId: string) => router.push(`/share/${shareId}` as never),
@@ -601,12 +396,24 @@ export default function HomeScreen() {
                 activeCircleId={activeCircleId}
                 onSelect={handleSelectCircle}
               />
+              {circlesPage.status !== 'Exhausted' ? (
+                <View style={styles.circleLoadMore}>
+                  <Button
+                    label={isLoadingMoreCircles ? 'Lädt...' : 'Weitere Circles'}
+                    icon="chevron-down-outline"
+                    variant="outline"
+                    loading={isLoadingMoreCircles}
+                    disabled={isLoadingMoreCircles}
+                    onPress={() => circlesPage.loadMore(20)}
+                  />
+                </View>
+              ) : null}
             </Animated.View>
           ) : null}
 
           {/* Feed */}
           <Animated.View style={[feedAnim, styles.feedSection]}>
-            {isViewerBootstrapping || circles === undefined ? (
+            {isViewerBootstrapping || circles === undefined || isCirclesLoading ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color={theme.primary} />
               </View>
@@ -620,11 +427,11 @@ export default function HomeScreen() {
                 icon="albums-outline"
                 message="Wähle einen Circle aus, um den Feed zu sehen."
               />
-            ) : shareFeed === undefined ? (
+            ) : isFeedLoading ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color={theme.primary} />
               </View>
-            ) : shareFeed.length === 0 ? (
+            ) : feedItems.length === 0 ? (
               <EmptyState
                 icon="images-outline"
                 title="Noch keine Beiträge"
@@ -644,7 +451,7 @@ export default function HomeScreen() {
                   </Text>
                 </View>
                 <View style={styles.feedList}>
-                  {shareFeed.map((share, idx) => (
+                  {feedItems.map((share, idx) => (
                     <View key={share._id}>
                       {idx > 0 ? <Ornament /> : null}
                       <FeedCard
@@ -657,6 +464,16 @@ export default function HomeScreen() {
                       />
                     </View>
                   ))}
+                  {shareFeed.status !== 'Exhausted' ? (
+                    <Button
+                      label={isLoadingMoreFeed ? 'Lädt...' : 'Mehr laden'}
+                      icon="chevron-down-outline"
+                      variant="outline"
+                      loading={isLoadingMoreFeed}
+                      disabled={isLoadingMoreFeed}
+                      onPress={() => shareFeed.loadMore(10)}
+                    />
+                  ) : null}
                 </View>
               </>
             )}
@@ -686,12 +503,14 @@ export default function HomeScreen() {
           isDeletingDraft={Boolean(activeDraft && deletingShareId === activeDraft._id)}
           canPublish={canPublish}
           uploadQueue={{ items: selectedQueueItems }}
+          persistedUploads={visiblePersistedUploads}
           onPickMedia={() => void handlePickMedia()}
           onPublish={() => void handlePublishDraft()}
           onDeleteDraft={handleDeleteDraft}
           onDeleteAsset={handleDeleteAsset}
           onRetryFailedUpload={(itemId) => void handleRetryFailedUpload(itemId)}
           onRemoveFailedUpload={(itemId) => void handleRemoveFailedUpload(itemId)}
+          onDiscardPersistedUpload={handleDiscardPersistedUpload}
           onClose={() => setIsDraftSheetOpen(false)}
         />
 
@@ -718,6 +537,10 @@ const styles = StyleSheet.create({
   circlesBlock: {
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.xs,
+  },
+  circleLoadMore: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
   },
   circlesLabelRow: {
     flexDirection: 'row',

@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
-import type { ShareBatchRecord } from '@/features/convex/api';
+import type { ShareFeedItem } from '@/features/convex/api';
 import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
 import { useTheme } from '@/hooks/use-theme';
 import { Avatar } from '@/components/ui';
@@ -68,7 +68,7 @@ const CaptionText = memo(function CaptionText({
 });
 
 interface FeedCardProps {
-  share: ShareBatchRecord;
+  share: ShareFeedItem;
   currentUserId?: string | null;
   currentProfileImageUrl?: string | null;
   isDeleting?: boolean;
@@ -85,9 +85,12 @@ export const FeedCard = memo(function FeedCard({
   onDeleteShare,
 }: FeedCardProps) {
   const theme = useTheme();
-  const heroAsset = share.assets[0];
-  const heroUrl = useSignedAssetUrl(heroAsset?._id);
-  const hasMultipleAssets = share.assets.length > 1;
+  const heroAsset = share.heroAsset;
+  const heroUrl = useSignedAssetUrl(
+    heroAsset && (heroAsset.kind === 'image' || heroAsset.previewStorage) ? heroAsset._id : null,
+    'preview',
+  );
+  const hasMultipleAssets = share.assetCount > 1;
   const { day, month } = useMemo(
     () => formatDayMonth(share.publishedAt ?? share._creationTime),
     [share.publishedAt, share._creationTime],
@@ -166,7 +169,7 @@ export const FeedCard = memo(function FeedCard({
           <View style={styles.topLeftChip}>
             <Ionicons name="albums-outline" size={12} color="#FFFFFF" />
             <Text allowFontScaling={false} style={styles.topLeftChipText}>
-              {share.assets.length}
+              {share.assetCount}
             </Text>
           </View>
         ) : null}

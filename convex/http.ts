@@ -1,5 +1,6 @@
 import { httpRouter } from 'convex/server';
 import { isRateLimitError } from '@convex-dev/rate-limiter';
+import { INSTANCE_DISCOVERY_PATH } from '@beisammen/contracts';
 
 import { internal } from './_generated/api';
 import { httpAction } from './_generated/server';
@@ -8,6 +9,13 @@ import {
   getWorkOSClientId,
   refreshWorkOSSession,
 } from './lib/workos';
+import {
+  appendParamsToUrl,
+  buildCallbackUrlFromEnv,
+  buildPublicInstanceConfigFromEnv,
+  isRecord,
+  normalizeWorkOSHttpSessionPayload,
+} from './lib/httpHelpers';
 import { isValidEmailAddress, normalizeEmailAddress } from './waitlist';
 
 const http = httpRouter();
@@ -18,28 +26,11 @@ export const httpSurface = [
   'auth.nativeAuthenticate',
   'auth.refresh',
   'healthz',
+  'instance.discovery',
   'waitlist.join',
 ] as const;
 
 const WORKOS_API_BASE_URL = 'https://api.workos.com';
-
-function trimTrailingSlashes(value: string): string {
-  return value.replace(/\/+$/, '');
-}
-
-function readBaseUrl(): string {
-  const configured =
-    process.env.INSTANCE_BASE_URL ??
-    process.env.CONVEX_SITE_URL ??
-    process.env.CONVEX_SITE_ORIGIN ??
-    'http://127.0.0.1:3211';
-
-  return trimTrailingSlashes(configured);
-}
-
-function buildCallbackUrl(): string {
-  return `${readBaseUrl()}/auth/callback`;
-}
 
 function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
@@ -56,7 +47,7 @@ function createPublicJsonResponse(body: unknown, init?: ResponseInit): Response 
     ...init,
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       ...(init?.headers ?? {}),
     },
@@ -68,7 +59,7 @@ function createPublicResponse(init?: ResponseInit): Response {
     ...init,
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       ...(init?.headers ?? {}),
     },
@@ -94,45 +85,6 @@ function createRateLimitedResponse(retryAfterMs?: number): Response {
       },
     },
   );
-}
-
-function appendParamsToUrl(baseUrl: string, params: Record<string, string>): string {
-  const target = new URL(baseUrl);
-
-  for (const [key, value] of Object.entries(params)) {
-    target.searchParams.set(key, value);
-  }
-
-  return target.toString();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function getString(
-  value: Record<string, unknown>,
-  ...keys: string[]
-): string | undefined {
-  for (const key of keys) {
-    const candidate = value[key];
-
-    if (typeof candidate === 'string') {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
-
-function getRecord(value: Record<string, unknown>, key: string): Record<string, unknown> | null {
-  const candidate = value[key];
-
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return null;
-  }
-
-  return candidate as Record<string, unknown>;
 }
 
 function readClientIp(request: Request): string | null {
@@ -222,6 +174,22 @@ http.route({
 });
 
 http.route({
+  path: INSTANCE_DISCOVERY_PATH,
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return createPublicResponse({ status: 204 });
+  }),
+});
+
+http.route({
+  path: INSTANCE_DISCOVERY_PATH,
+  method: 'GET',
+  handler: httpAction(async () => {
+    return createPublicJsonResponse(buildPublicInstanceConfigFromEnv());
+  }),
+});
+
+http.route({
   path: '/waitlist/join',
   method: 'OPTIONS',
   handler: httpAction(async () => {
@@ -307,7 +275,7 @@ http.route({
     authorizeUrl.searchParams.set('provider', 'authkit');
     authorizeUrl.searchParams.set('response_type', 'code');
     authorizeUrl.searchParams.set('client_id', getWorkOSClientId());
-    authorizeUrl.searchParams.set('redirect_uri', buildCallbackUrl());
+    authorizeUrl.searchParams.set('redirect_uri', buildCallbackUrlFromEnv());
     authorizeUrl.searchParams.set('screen_hint', 'sign-in');
     authorizeUrl.searchParams.set(
       'state',
@@ -356,23 +324,18 @@ http.route({
         code,
         request,
       });
-      const responseRecord = response as unknown as Record<string, unknown>;
-      const user = getRecord(responseRecord, 'user');
+      const normalized = normalizeWorkOSHttpSessionPayload(response);
 
       const redirectTarget = appendParamsToUrl(state.appRedirectUri, {
         state: state.appState ?? '',
-        access_token: getString(responseRecord, 'access_token', 'accessToken') ?? '',
-        refresh_token: getString(responseRecord, 'refresh_token', 'refreshToken') ?? '',
-        user_id: getString(user ?? {}, 'id') ?? '',
-        email: getString(user ?? {}, 'email') ?? '',
-        first_name: getString(user ?? {}, 'first_name', 'firstName') ?? '',
-        last_name: getString(user ?? {}, 'last_name', 'lastName') ?? '',
-        display_name:
-          [getString(user ?? {}, 'first_name', 'firstName'), getString(user ?? {}, 'last_name', 'lastName')]
-            .filter(Boolean)
-            .join(' ')
-            .trim() || getString(user ?? {}, 'email') || '',
-        avatar_url: getString(user ?? {}, 'profile_picture_url', 'profilePictureUrl') ?? '',
+        access_token: normalized.accessToken,
+        refresh_token: normalized.refreshToken,
+        user_id: normalized.subject,
+        email: normalized.email,
+        first_name: normalized.firstName,
+        last_name: normalized.lastName,
+        display_name: normalized.displayName,
+        avatar_url: normalized.avatarUrl,
       });
 
       return Response.redirect(redirectTarget, 302);
@@ -420,24 +383,17 @@ http.route({
         codeVerifier,
         request,
       });
-      const responseRecord = response as unknown as Record<string, unknown>;
-      const user = getRecord(responseRecord, 'user');
+      const normalized = normalizeWorkOSHttpSessionPayload(response);
 
       return createJsonResponse({
-        accessToken: getString(responseRecord, 'access_token', 'accessToken'),
-        refreshToken: getString(responseRecord, 'refresh_token', 'refreshToken'),
-        subject:
-          getString(user ?? {}, 'id') ??
-          getString(responseRecord, 'user_id', 'userId', 'subject'),
-        email: getString(user ?? {}, 'email'),
-        firstName: getString(user ?? {}, 'first_name', 'firstName'),
-        lastName: getString(user ?? {}, 'last_name', 'lastName'),
-        displayName:
-          [getString(user ?? {}, 'first_name', 'firstName'), getString(user ?? {}, 'last_name', 'lastName')]
-            .filter(Boolean)
-            .join(' ')
-            .trim() || getString(user ?? {}, 'email'),
-        avatarUrl: getString(user ?? {}, 'profile_picture_url', 'profilePictureUrl'),
+        accessToken: normalized.accessToken,
+        refreshToken: normalized.refreshToken,
+        subject: normalized.subject,
+        email: normalized.email,
+        firstName: normalized.firstName,
+        lastName: normalized.lastName,
+        displayName: normalized.displayName,
+        avatarUrl: normalized.avatarUrl,
       });
     } catch (error) {
       return createJsonResponse(
@@ -471,22 +427,15 @@ http.route({
         refreshToken: body.refreshToken,
         request,
       });
-      const responseRecord = response as unknown as Record<string, unknown>;
-      const user = getRecord(responseRecord, 'user');
+      const normalized = normalizeWorkOSHttpSessionPayload(response);
 
       return createJsonResponse({
-        accessToken: getString(responseRecord, 'access_token', 'accessToken'),
-        refreshToken: getString(responseRecord, 'refresh_token', 'refreshToken'),
-        subject:
-          getString(user ?? {}, 'id') ??
-          getString(responseRecord, 'user_id', 'userId', 'subject'),
-        email: getString(user ?? {}, 'email'),
-        displayName:
-          [getString(user ?? {}, 'first_name', 'firstName'), getString(user ?? {}, 'last_name', 'lastName')]
-            .filter(Boolean)
-            .join(' ')
-            .trim() || getString(user ?? {}, 'email'),
-        avatarUrl: getString(user ?? {}, 'profile_picture_url', 'profilePictureUrl'),
+        accessToken: normalized.accessToken,
+        refreshToken: normalized.refreshToken,
+        subject: normalized.subject,
+        email: normalized.email,
+        displayName: normalized.displayName,
+        avatarUrl: normalized.avatarUrl,
       });
     } catch (error) {
       return createJsonResponse(

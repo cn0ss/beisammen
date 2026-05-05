@@ -60,6 +60,11 @@ function isSensitiveKey(key: string): boolean {
     normalized === 'authorization' ||
     normalized === 'cookie' ||
     normalized.endsWith('cookie') ||
+    normalized === 'authurl' ||
+    normalized === 'callbackurl' ||
+    normalized === 'downloadurl' ||
+    normalized === 'signedurl' ||
+    normalized === 'uploadurl' ||
     normalized === 'password' ||
     normalized.endsWith('password') ||
     normalized === 'secret' ||

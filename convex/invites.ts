@@ -1,7 +1,9 @@
 import { v } from 'convex/values';
 
 import type { Doc } from './_generated/dataModel';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import { mutation, query } from './_generated/server';
+import { adjustCircleStats } from './circleStats';
 import { isManageRole, requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const inviteFunctionSurface = [
@@ -11,6 +13,8 @@ export const inviteFunctionSurface = [
   'invites.accept',
   'invites.revoke',
 ] as const;
+
+export const CIRCLE_INVITE_LIST_LIMIT = 100;
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
@@ -43,6 +47,47 @@ function buildInvitedByLabel(user: Doc<'users'> | null) {
   return user.displayName?.trim() || user.email?.trim() || 'Unbekannte Person';
 }
 
+function toHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function hashInviteToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(token.trim()),
+  );
+
+  return `sha256:${toHex(digest)}`;
+}
+
+async function findInviteByToken(
+  ctx: QueryCtx | MutationCtx,
+  token: string,
+): Promise<Doc<'invites'> | null> {
+  const normalizedToken = token.trim();
+
+  if (!normalizedToken) {
+    return null;
+  }
+
+  const hashedToken = await hashInviteToken(normalizedToken);
+  const hashedInvite = await ctx.db
+    .query('invites')
+    .withIndex('by_token_hash', (q) => q.eq('tokenHash', hashedToken))
+    .unique();
+
+  if (hashedInvite) {
+    return hashedInvite;
+  }
+
+  return await ctx.db
+    .query('invites')
+    .withIndex('by_token_hash', (q) => q.eq('tokenHash', normalizedToken))
+    .unique();
+}
+
 export const create = mutation({
   args: {
     circleId: v.id('circles'),
@@ -59,11 +104,12 @@ export const create = mutation({
 
     const now = Date.now();
     const token = crypto.randomUUID();
+    const tokenHash = await hashInviteToken(token);
     const inviteId = await ctx.db.insert('invites', {
       circleId: args.circleId,
       invitedEmail: args.invitedEmail.trim().toLowerCase(),
       role: args.role,
-      tokenHash: token,
+      tokenHash,
       status: 'pending',
       invitedBy: viewer._id,
       expiresAt: now + 7 * 24 * 60 * 60 * 1000,
@@ -86,8 +132,9 @@ export const listForCircle = query({
     const membership = await requireCircleMembership(ctx, viewer._id, args.circleId);
     const invites = await ctx.db
       .query('invites')
-      .withIndex('by_circle', (q) => q.eq('circleId', args.circleId))
-      .collect();
+      .withIndex('by_circle_and_expires_at', (q) => q.eq('circleId', args.circleId))
+      .order('desc')
+      .take(CIRCLE_INVITE_LIST_LIMIT);
 
     const rows = await Promise.all(
       invites.map(async (invite) => {
@@ -122,10 +169,7 @@ export const preview = query({
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
-    const invite = await ctx.db
-      .query('invites')
-      .withIndex('by_token_hash', (q) => q.eq('tokenHash', args.token))
-      .unique();
+    const invite = await findInviteByToken(ctx, args.token);
 
     if (!invite) {
       return null;
@@ -163,10 +207,7 @@ export const accept = mutation({
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
-    const invite = await ctx.db
-      .query('invites')
-      .withIndex('by_token_hash', (q) => q.eq('tokenHash', args.token))
-      .unique();
+    const invite = await findInviteByToken(ctx, args.token);
 
     if (!invite) {
       throw new Error('Invite not found.');
@@ -200,6 +241,9 @@ export const accept = mutation({
         userId: viewer._id,
         role: invite.role,
         joinedAt: Date.now(),
+      });
+      await adjustCircleStats(ctx, invite.circleId, {
+        memberCount: 1,
       });
     }
 

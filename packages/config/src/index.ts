@@ -8,7 +8,6 @@ export const publicExpoEnvNames = [
   'EXPO_PUBLIC_DEFAULT_AUTH_MODE',
   'EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID',
   'EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL',
-  'EXPO_PUBLIC_SENTRY_DSN',
 ] as const;
 
 export const serverSecretEnvNames = [
@@ -22,7 +21,6 @@ export const serverSecretEnvNames = [
   'S3_BASE_PATH',
   'S3_ACCESS_KEY_ID',
   'S3_SECRET_ACCESS_KEY',
-  'SENTRY_AUTH_TOKEN',
   'EXPO_TOKEN',
 ] as const;
 

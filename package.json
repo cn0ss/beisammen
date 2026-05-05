@@ -9,17 +9,29 @@
     "android:mobile": "pnpm --filter @beisammen/mobile android",
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && pnpm typecheck:convex",
+    "typecheck:convex": "tsc -p convex/tsconfig.json --noEmit",
+    "test": "turbo run test && pnpm test:scripts && pnpm test:convex",
+    "test:convex": "vitest run --config vitest.config.ts convex",
+    "test:scripts": "vitest run --config vitest.scripts.config.ts",
+    "smoke:beta": "node scripts/smoke-beta.mjs",
+    "release:beta": "node scripts/beta-release.mjs",
     "check": "pnpm typecheck"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@types/node": "^25.6.0",
     "@workos-inc/node": "^8.13.0",
     "convex": "^1.28.2",
+    "convex-test": "^0.0.51",
     "turbo": "^2.5.8",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@convex-dev/rate-limiter": "^0.3.2"
+    "@convex-dev/rate-limiter": "^0.3.2",
+    "@useautumn/convex": "^0.0.23",
+    "autumn-js": "^0.1.85"
   }
 }

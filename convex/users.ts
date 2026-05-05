@@ -1,8 +1,15 @@
 import { v } from 'convex/values';
 
 import type { Doc, Id } from './_generated/dataModel';
+import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
+import {
+  BILLING_FEATURE_IDS,
+  requireCloudFeatureAccess,
+  trackCloudUsage,
+} from './lib/billing/autumn';
+import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { createS3ReadUrl, createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
 import {
   buildImageUploadObjectKey,
@@ -49,6 +56,40 @@ interface PreparedProfileImageUpload {
 interface ProfileImageCompleteContext {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
+}
+
+async function refundCloudImageUsage(input: {
+  ctx: ActionCtx;
+  mediaUploads: number;
+  storageBytes: number;
+  properties: Record<string, unknown>;
+}) {
+  const refunds: Array<{ featureId: string; value: number }> = [];
+
+  if (input.mediaUploads > 0) {
+    refunds.push({
+      featureId: BILLING_FEATURE_IDS.mediaUploads,
+      value: -input.mediaUploads,
+    });
+  }
+
+  if (input.storageBytes > 0) {
+    refunds.push({
+      featureId: BILLING_FEATURE_IDS.storageBytes,
+      value: -input.storageBytes,
+    });
+  }
+
+  for (const refund of refunds) {
+    try {
+      await trackCloudUsage(input.ctx, {
+        ...refund,
+        properties: input.properties,
+      });
+    } catch (error) {
+      console.error('Failed to refund Autumn profile image usage.', error);
+    }
+  }
 }
 
 export const viewer = query({
@@ -147,7 +188,7 @@ export const upsertFromIdentity = mutation({
       return updated ? serializeViewer(updated) : null;
     }
 
-    return await ctx.db.insert('users', {
+    const userId = await ctx.db.insert('users', {
       tokenIdentifier: identity.tokenIdentifier,
       authProvider: 'workos',
       authSubject: identity.subject,
@@ -156,6 +197,9 @@ export const upsertFromIdentity = mutation({
       ...(args.displayName !== undefined ? { displayName: args.displayName } : {}),
       ...(args.avatarUrl !== undefined ? { avatarUrl: args.avatarUrl } : {}),
     });
+
+    const created = await ctx.db.get(userId);
+    return created ? serializeViewer(created) : null;
   },
 });
 
@@ -197,6 +241,17 @@ export const prepareProfileImageUpload = internalMutation({
       uploadId,
       pendingStorage,
       mimeType: args.mimeType.trim(),
+    };
+  },
+});
+
+export const authorizeProfileImageUpload = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const viewer = await requireViewer(ctx);
+
+    return {
+      userId: viewer._id,
     };
   },
 });
@@ -244,6 +299,7 @@ export const getProfileImageCompleteContext = internalQuery({
     return {
       uploadId: upload._id,
       pendingStorage: upload.pendingStorage,
+      previousSizeBytes: viewer.profileImageSizeBytes ?? 0,
     };
   },
 });
@@ -265,6 +321,7 @@ export const finalizeProfileImageUpload = internalMutation({
         basePath: v.optional(v.string()),
       }),
     ),
+    sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -278,10 +335,12 @@ export const finalizeProfileImageUpload = internalMutation({
 
     await ctx.db.patch(viewer._id, {
       profileImageStorage: args.storage,
+      profileImageSizeBytes: args.sizeBytes,
     });
     await ctx.db.patch(upload._id, {
       storage: args.storage,
       pendingStorage: undefined,
+      sizeBytes: args.sizeBytes,
       status: 'uploaded',
       failureReason: undefined,
       completedAt: Date.now(),
@@ -289,6 +348,7 @@ export const finalizeProfileImageUpload = internalMutation({
 
     return {
       previousStorage: previousStorage ?? null,
+      previousSizeBytes: viewer.profileImageSizeBytes ?? 0,
       nextStorage: args.storage,
     };
   },
@@ -302,10 +362,24 @@ export const clearProfileImage = internalMutation({
 
     await ctx.db.patch(viewer._id, {
       profileImageStorage: undefined,
+      profileImageSizeBytes: undefined,
     });
 
     return {
       previousStorage: previousStorage ?? null,
+      previousSizeBytes: viewer.profileImageSizeBytes ?? 0,
+    };
+  },
+});
+
+export const getProfileImageDeleteContext = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const viewer = await requireViewer(ctx);
+
+    return {
+      previousStorage: viewer.profileImageStorage ?? null,
+      previousSizeBytes: viewer.profileImageSizeBytes ?? 0,
     };
   },
 });
@@ -327,6 +401,15 @@ export const createProfileImageTarget = action({
     fileName: v.string(),
   },
   handler: async (ctx, args) => {
+    const policy = getDeploymentPolicyFromEnv();
+    await ctx.runQuery(internal.users.authorizeProfileImageUpload, {});
+
+    if (policy.isCloud) {
+      await requireCloudFeatureAccess(ctx, {
+        featureId: BILLING_FEATURE_IDS.mediaUploads,
+      });
+    }
+
     const prepared: PreparedProfileImageUpload = await ctx.runMutation(
       internal.users.prepareProfileImageUpload,
       args,
@@ -351,15 +434,23 @@ export const completeProfileImageUpload = action({
     uploadId: v.id('imageUploads'),
     objectKey: v.optional(v.string()),
     storageId: v.optional(v.id('_storage')),
+    sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const policy = getDeploymentPolicyFromEnv();
+    const chargedUsage = {
+      mediaUploads: 0,
+      storageBytes: 0,
+    };
+
     try {
-      const completeContext: ProfileImageCompleteContext = await ctx.runQuery(
-        internal.users.getProfileImageCompleteContext,
-        {
-          uploadId: args.uploadId,
-        },
-      );
+      const completeContext: ProfileImageCompleteContext & { previousSizeBytes: number } =
+        await ctx.runQuery(
+          internal.users.getProfileImageCompleteContext,
+          {
+            uploadId: args.uploadId,
+          },
+        );
 
       if (completeContext.pendingStorage.provider !== 's3') {
         throw new Error('Profile image upload is missing its S3 storage reference.');
@@ -373,25 +464,79 @@ export const completeProfileImageUpload = action({
         storage: completeContext.pendingStorage,
       });
 
+      if (policy.isCloud) {
+        await trackCloudUsage(ctx, {
+          featureId: BILLING_FEATURE_IDS.mediaUploads,
+          value: 1,
+          properties: {
+            uploadId: args.uploadId,
+            targetKind: 'user-profile',
+          },
+        });
+        chargedUsage.mediaUploads = 1;
+
+        if (args.sizeBytes !== undefined && args.sizeBytes > 0) {
+          await trackCloudUsage(ctx, {
+            featureId: BILLING_FEATURE_IDS.storageBytes,
+            value: args.sizeBytes,
+            properties: {
+              uploadId: args.uploadId,
+              targetKind: 'user-profile',
+            },
+          });
+          chargedUsage.storageBytes = args.sizeBytes;
+        }
+      }
+
       const finalized: {
         previousStorage: Doc<'users'>['profileImageStorage'] | null;
+        previousSizeBytes: number;
         nextStorage: NonNullable<Doc<'users'>['profileImageStorage']>;
       } = await ctx.runMutation(internal.users.finalizeProfileImageUpload, {
         uploadId: args.uploadId,
         storage: completeContext.pendingStorage,
+        ...(args.sizeBytes !== undefined ? { sizeBytes: args.sizeBytes } : {}),
       });
+      chargedUsage.mediaUploads = 0;
+      chargedUsage.storageBytes = 0;
 
       if (
         finalized.previousStorage &&
         storageReferenceKey(finalized.previousStorage) !== storageReferenceKey(finalized.nextStorage)
       ) {
         await deleteStorageReference(ctx, finalized.previousStorage);
+
+        if (policy.isCloud && finalized.previousSizeBytes > 0) {
+          try {
+            await trackCloudUsage(ctx, {
+              featureId: BILLING_FEATURE_IDS.storageBytes,
+              value: -finalized.previousSizeBytes,
+              properties: {
+                uploadId: args.uploadId,
+                targetKind: 'user-profile',
+              },
+            });
+          } catch (creditError) {
+            console.error('Failed to credit replaced profile image storage.', creditError);
+          }
+        }
       }
 
       return {
         uploadId: args.uploadId,
       };
     } catch (error) {
+      if (policy.isCloud && (chargedUsage.mediaUploads > 0 || chargedUsage.storageBytes > 0)) {
+        await refundCloudImageUsage({
+          ctx,
+          ...chargedUsage,
+          properties: {
+            uploadId: args.uploadId,
+            targetKind: 'user-profile',
+          },
+        });
+      }
+
       await ctx.runMutation(internal.users.markProfileImageUploadFailed, {
         uploadId: args.uploadId,
         message: error instanceof Error ? error.message : 'Profile image upload failed.',
@@ -404,16 +549,54 @@ export const completeProfileImageUpload = action({
 export const removeProfileImage = action({
   args: {},
   handler: async (ctx) => {
-    const cleared: {
+    const policy = getDeploymentPolicyFromEnv();
+    const deleteContext: {
       previousStorage: Doc<'users'>['profileImageStorage'] | null;
-    } = await ctx.runMutation(internal.users.clearProfileImage, {});
+      previousSizeBytes: number;
+    } = await ctx.runQuery(internal.users.getProfileImageDeleteContext, {});
 
-    if (cleared.previousStorage) {
-      await deleteStorageReference(ctx, cleared.previousStorage);
+    if (!deleteContext.previousStorage) {
+      return {
+        removed: false,
+      };
+    }
+
+    let creditedStorageBytes = 0;
+
+    try {
+      if (policy.isCloud && deleteContext.previousSizeBytes > 0) {
+        await trackCloudUsage(ctx, {
+          featureId: BILLING_FEATURE_IDS.storageBytes,
+          value: -deleteContext.previousSizeBytes,
+          properties: {
+            targetKind: 'user-profile',
+          },
+        });
+        creditedStorageBytes = deleteContext.previousSizeBytes;
+      }
+
+      await deleteStorageReference(ctx, deleteContext.previousStorage);
+      await ctx.runMutation(internal.users.clearProfileImage, {});
+    } catch (error) {
+      if (policy.isCloud && creditedStorageBytes > 0) {
+        try {
+          await trackCloudUsage(ctx, {
+            featureId: BILLING_FEATURE_IDS.storageBytes,
+            value: creditedStorageBytes,
+            properties: {
+              targetKind: 'user-profile',
+            },
+          });
+        } catch (refundError) {
+          console.error('Failed to refund Autumn profile image storage credit.', refundError);
+        }
+      }
+
+      throw error;
     }
 
     return {
-      removed: Boolean(cleared.previousStorage),
+      removed: true,
     };
   },
 });

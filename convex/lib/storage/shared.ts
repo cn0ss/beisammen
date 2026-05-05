@@ -50,6 +50,14 @@ export function buildS3ObjectKey(
   ].join('/');
 }
 
+export function buildS3PreviewObjectKey(objectKey: string): string {
+  const parts = objectKey.split('/').filter(Boolean);
+  const fileName = parts.pop() ?? 'preview';
+  const baseName = fileName.replace(/\.[^.]+$/, '') || 'preview';
+
+  return [...parts, 'previews', `${baseName}-preview.jpg`].join('/');
+}
+
 export function buildImageUploadObjectKey(input: {
   targetKind: 'user-profile' | 'circle-image';
   userId: Id<'users'>;

@@ -2,21 +2,29 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { StorageUsageStats } from '@beisammen/contracts';
+import type { ConnectionCheck, StorageUsageStats } from '@beisammen/contracts';
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatBytes } from '@/features/media/client';
 
-import { Card, LoadingBox } from '@/components/ui';
+import { Button, Card, LoadingBox } from '@/components/ui';
 
 interface StorageUsageCardProps {
   stats: StorageUsageStats | undefined;
+  connectionCheck?: ConnectionCheck | null;
+  isCheckingConnection?: boolean;
+  onCheckConnection?: () => void;
 }
 
 export const StorageUsageCard = memo(function StorageUsageCard({
   stats,
+  connectionCheck = null,
+  isCheckingConnection = false,
+  onCheckConnection,
 }: StorageUsageCardProps) {
+  const theme = useTheme();
+
   if (stats === undefined) {
     return (
       <Card>
@@ -27,24 +35,78 @@ export const StorageUsageCard = memo(function StorageUsageCard({
 
   return (
     <Card>
-      <View style={styles.grid}>
-        <StatColumn
-          icon="image-outline"
-          value={String(stats.imageCount)}
-          label="Fotos"
-        />
-        <StatColumn
-          icon="videocam-outline"
-          value={String(stats.videoCount)}
-          label="Videos"
-        />
-        <StatColumn
-          icon="cloud-outline"
-          value={formatBytes(stats.totalSizeBytes) ?? '0 KB'}
-          label="Speicher"
-        />
+      <View style={styles.content}>
+        <View style={styles.grid}>
+          <StatColumn
+            icon="image-outline"
+            value={String(stats.imageCount)}
+            label="Fotos"
+          />
+          <StatColumn
+            icon="videocam-outline"
+            value={String(stats.videoCount)}
+            label="Videos"
+          />
+          <StatColumn
+            icon="cloud-outline"
+            value={formatBytes(stats.totalSizeBytes) ?? '0 KB'}
+            label="Speicher"
+          />
+          <StatColumn
+            icon="albums-outline"
+            value={stats.isTruncated ? `${stats.circleCount}+` : String(stats.circleCount)}
+            label="Circles"
+          />
+        </View>
+        {stats.isTruncated ? (
+          <Text style={[styles.truncatedHint, { color: theme.textSecondary }]}>
+            Speicherwerte zeigen die zuletzt geladenen {stats.circleCount} Circles.
+          </Text>
+        ) : null}
+
+        {onCheckConnection ? (
+          <ConnectionCheckRow
+            connectionCheck={connectionCheck}
+            isCheckingConnection={isCheckingConnection}
+            onCheckConnection={onCheckConnection}
+          />
+        ) : null}
       </View>
     </Card>
+  );
+});
+
+const ConnectionCheckRow = memo(function ConnectionCheckRow({
+  connectionCheck,
+  isCheckingConnection,
+  onCheckConnection,
+}: {
+  connectionCheck: ConnectionCheck | null;
+  isCheckingConnection: boolean;
+  onCheckConnection: () => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <View style={[styles.connection, { borderTopColor: theme.borderLight }]}>
+      <Button
+        label={isCheckingConnection ? 'Prüft...' : 'Speicher prüfen'}
+        icon={connectionCheck?.ok ? 'checkmark-circle-outline' : 'cloud-outline'}
+        variant="outline"
+        loading={isCheckingConnection}
+        onPress={onCheckConnection}
+      />
+      {connectionCheck ? (
+        <Text
+          style={[
+            styles.connectionMessage,
+            { color: connectionCheck.ok ? theme.primary : theme.danger },
+          ]}
+        >
+          {connectionCheck.message}
+        </Text>
+      ) : null}
+    </View>
   );
 });
 
@@ -71,10 +133,29 @@ const StatColumn = memo(function StatColumn({
 });
 
 const styles = StyleSheet.create({
+  content: {
+    gap: Spacing.md,
+  },
   grid: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: Spacing.sm,
+  },
+  truncatedHint: {
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  connection: {
+    borderTopWidth: 1,
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+  },
+  connectionMessage: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    lineHeight: 18,
   },
   stat: {
     alignItems: 'center',

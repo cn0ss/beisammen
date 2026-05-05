@@ -1,8 +1,19 @@
+import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 
 import type { Doc, Id } from './_generated/dataModel';
+import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
+import { adjustCircleStats, getCircleStatsOrFallback } from './circleStats';
+import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
+import {
+  type BillingOwner,
+  requireCloudOwnerFeatureAccess,
+  resolveCircleBillingOwner,
+  trackCloudOwnerUsage,
+} from './lib/billing/owner';
+import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { canManageCircle, isOwnerRole } from './lib/permissions';
 import { createS3ReadUrl, createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
 import {
@@ -32,6 +43,8 @@ export const circleFunctionSurface = [
   'circles.getImageReadUrl',
 ] as const;
 
+export const CIRCLE_MEMBER_LIST_LIMIT = 200;
+
 interface PreparedCircleImageUpload {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
@@ -41,6 +54,47 @@ interface PreparedCircleImageUpload {
 interface CircleImageCompleteContext {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
+  circleId: Id<'circles'>;
+  billingOwner: BillingOwner;
+  previousSizeBytes: number;
+}
+
+async function refundCloudCircleImageUsage(input: {
+  ctx: ActionCtx;
+  owner: BillingOwner;
+  entityId: string;
+  mediaUploads: number;
+  storageBytes: number;
+  properties: Record<string, unknown>;
+}) {
+  const refunds: Array<{ featureId: string; value: number }> = [];
+
+  if (input.mediaUploads > 0) {
+    refunds.push({
+      featureId: BILLING_FEATURE_IDS.mediaUploads,
+      value: -input.mediaUploads,
+    });
+  }
+
+  if (input.storageBytes > 0) {
+    refunds.push({
+      featureId: BILLING_FEATURE_IDS.storageBytes,
+      value: -input.storageBytes,
+    });
+  }
+
+  for (const refund of refunds) {
+    try {
+      await trackCloudOwnerUsage(input.ctx, {
+        owner: input.owner,
+        entityId: input.entityId,
+        ...refund,
+        properties: input.properties,
+      });
+    } catch (error) {
+      console.error('Failed to refund Autumn circle image usage.', error);
+    }
+  }
 }
 
 function buildCircleSummary(
@@ -98,6 +152,7 @@ export const create = mutation({
       name: args.name.trim(),
       ...(args.description ? { description: args.description.trim() } : {}),
       createdBy: viewer._id,
+      billingOwnerId: viewer._id,
       createdAt: now,
     });
     await ctx.db.insert('circleMembers', {
@@ -105,6 +160,9 @@ export const create = mutation({
       userId: viewer._id,
       role: 'owner',
       joinedAt: now,
+    });
+    await adjustCircleStats(ctx, circleId, {
+      memberCount: 1,
     });
 
     return {
@@ -114,34 +172,35 @@ export const create = mutation({
 });
 
 export const listForViewer = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
     const memberships = await ctx.db
       .query('circleMembers')
-      .withIndex('by_user', (q) => q.eq('userId', viewer._id))
-      .collect();
+      .withIndex('by_user_and_joined_at', (q) => q.eq('userId', viewer._id))
+      .order('desc')
+      .paginate(args.paginationOpts);
 
     const circles = await Promise.all(
-      memberships.map(async (membership) => {
+      memberships.page.map(async (membership) => {
         const circle = await ctx.db.get(membership.circleId);
 
         if (!circle) {
           return null;
         }
 
-        const members = await ctx.db
-          .query('circleMembers')
-          .withIndex('by_circle', (q) => q.eq('circleId', circle._id))
-          .collect();
+        const stats = await getCircleStatsOrFallback(ctx, circle._id);
 
-        return buildCircleSummary(circle, membership, members.length);
+        return buildCircleSummary(circle, membership, stats.memberCount);
       }),
     );
 
-    return circles
-      .filter((circle): circle is NonNullable<typeof circle> => circle !== null)
-      .sort((left, right) => right.createdAt - left.createdAt);
+    return {
+      ...memberships,
+      page: circles.filter((circle): circle is NonNullable<typeof circle> => circle !== null),
+    };
   },
 });
 
@@ -158,12 +217,9 @@ export const getById = query({
       throw new Error('Circle not found.');
     }
 
-    const members = await ctx.db
-      .query('circleMembers')
-      .withIndex('by_circle', (q) => q.eq('circleId', args.circleId))
-      .collect();
+    const stats = await getCircleStatsOrFallback(ctx, args.circleId);
 
-    return buildCircleSummary(circle, membership, members.length);
+    return buildCircleSummary(circle, membership, stats.memberCount);
   },
 });
 
@@ -209,7 +265,7 @@ export const listMembers = query({
     const memberships = await ctx.db
       .query('circleMembers')
       .withIndex('by_circle', (q) => q.eq('circleId', args.circleId))
-      .collect();
+      .take(CIRCLE_MEMBER_LIST_LIMIT);
 
     const members = await Promise.all(
       memberships.map(async (membership) => {
@@ -316,6 +372,9 @@ export const removeMember = mutation({
     }
 
     await ctx.db.delete(targetMembership._id);
+    await adjustCircleStats(ctx, args.circleId, {
+      memberCount: -1,
+    });
 
     return {
       memberId: targetMembership._id,
@@ -356,6 +415,9 @@ export const transferOwnership = mutation({
     await ctx.db.patch(targetMembership._id, {
       role: 'owner',
     });
+    await ctx.db.patch(args.circleId, {
+      billingOwnerId: targetMembership.userId,
+    });
 
     return {
       circleId: args.circleId,
@@ -377,9 +439,13 @@ export const leave = mutation({
     }
 
     await ctx.db.delete(membership._id);
+    await adjustCircleStats(ctx, args.circleId, {
+      memberCount: -1,
+    });
 
     return {
       circleId: args.circleId,
+      billingOwner: await resolveCircleBillingOwner(ctx, args.circleId),
     };
   },
 });
@@ -431,6 +497,25 @@ export const prepareImageUpload = internalMutation({
       uploadId,
       pendingStorage,
       mimeType: args.mimeType.trim(),
+    };
+  },
+});
+
+export const authorizeImageUpload = internalQuery({
+  args: {
+    circleId: v.id('circles'),
+  },
+  handler: async (ctx, args) => {
+    const viewer = await requireViewer(ctx);
+    const membership = await requireCircleMembership(ctx, viewer._id, args.circleId);
+
+    if (!canManageCircle(membership.role)) {
+      throw new Error('Only owners and admins can update the circle image.');
+    }
+
+    return {
+      circleId: args.circleId,
+      billingOwner: await resolveCircleBillingOwner(ctx, args.circleId),
     };
   },
 });
@@ -489,6 +574,12 @@ export const getImageCompleteContext = internalQuery({
       throw new Error('Only owners and admins can update the circle image.');
     }
 
+    const circle = await ctx.db.get(upload.circleId);
+
+    if (!circle) {
+      throw new Error('Circle not found.');
+    }
+
     if (!upload.pendingStorage) {
       throw new Error('Circle image upload is missing its storage target.');
     }
@@ -497,6 +588,8 @@ export const getImageCompleteContext = internalQuery({
       uploadId: upload._id,
       pendingStorage: upload.pendingStorage,
       circleId: upload.circleId,
+      billingOwner: await resolveCircleBillingOwner(ctx, upload.circleId),
+      previousSizeBytes: circle.imageSizeBytes ?? 0,
     };
   },
 });
@@ -518,6 +611,7 @@ export const finalizeImageUpload = internalMutation({
         basePath: v.optional(v.string()),
       }),
     ),
+    sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -547,10 +641,12 @@ export const finalizeImageUpload = internalMutation({
 
     await ctx.db.patch(circle._id, {
       imageStorage: args.storage,
+      imageSizeBytes: args.sizeBytes,
     });
     await ctx.db.patch(upload._id, {
       storage: args.storage,
       pendingStorage: undefined,
+      sizeBytes: args.sizeBytes,
       status: 'uploaded',
       failureReason: undefined,
       completedAt: Date.now(),
@@ -558,6 +654,7 @@ export const finalizeImageUpload = internalMutation({
 
     return {
       previousStorage: previousStorage ?? null,
+      previousSizeBytes: circle.imageSizeBytes ?? 0,
       nextStorage: args.storage,
     };
   },
@@ -585,10 +682,39 @@ export const clearImage = internalMutation({
 
     await ctx.db.patch(circle._id, {
       imageStorage: undefined,
+      imageSizeBytes: undefined,
     });
 
     return {
       previousStorage: previousStorage ?? null,
+      previousSizeBytes: circle.imageSizeBytes ?? 0,
+    };
+  },
+});
+
+export const getImageDeleteContext = internalQuery({
+  args: {
+    circleId: v.id('circles'),
+  },
+  handler: async (ctx, args) => {
+    const viewer = await requireViewer(ctx);
+    const membership = await requireCircleMembership(ctx, viewer._id, args.circleId);
+
+    if (!canManageCircle(membership.role)) {
+      throw new Error('Only owners and admins can update the circle image.');
+    }
+
+    const circle = await ctx.db.get(args.circleId);
+
+    if (!circle) {
+      throw new Error('Circle not found.');
+    }
+
+    return {
+      circleId: args.circleId,
+      billingOwner: await resolveCircleBillingOwner(ctx, args.circleId),
+      previousStorage: circle.imageStorage ?? null,
+      previousSizeBytes: circle.imageSizeBytes ?? 0,
     };
   },
 });
@@ -620,6 +746,29 @@ export const createImageTarget = action({
     fileName: v.string(),
   },
   handler: async (ctx, args) => {
+    const policy = getDeploymentPolicyFromEnv();
+    const billingContext: {
+      circleId: Id<'circles'>;
+      billingOwner: BillingOwner;
+    } = await ctx.runQuery(internal.circles.authorizeImageUpload, {
+      circleId: args.circleId,
+    }) as unknown as {
+      circleId: Id<'circles'>;
+      billingOwner: BillingOwner;
+    };
+
+    if (policy.isCloud) {
+      await requireCloudOwnerFeatureAccess(ctx, {
+        owner: billingContext.billingOwner,
+        entityId: billingContext.circleId,
+        featureId: BILLING_FEATURE_IDS.mediaUploads,
+        properties: {
+          circleId: args.circleId,
+          targetKind: 'circle-image',
+        },
+      });
+    }
+
     const prepared: PreparedCircleImageUpload = await ctx.runMutation(
       internal.circles.prepareImageUpload,
       args,
@@ -644,15 +793,27 @@ export const completeImageUpload = action({
     uploadId: v.id('imageUploads'),
     objectKey: v.optional(v.string()),
     storageId: v.optional(v.id('_storage')),
+    sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const policy = getDeploymentPolicyFromEnv();
+    const chargedUsage = {
+      mediaUploads: 0,
+      storageBytes: 0,
+    };
+    let billingContext: { owner: BillingOwner; entityId: string } | null = null;
+
     try {
       const completeContext: CircleImageCompleteContext = await ctx.runQuery(
         internal.circles.getImageCompleteContext,
         {
           uploadId: args.uploadId,
         },
-      );
+      ) as unknown as CircleImageCompleteContext;
+      billingContext = {
+        owner: completeContext.billingOwner,
+        entityId: completeContext.circleId,
+      };
 
       if (completeContext.pendingStorage.provider !== 's3') {
         throw new Error('Circle image upload is missing its S3 storage reference.');
@@ -666,25 +827,88 @@ export const completeImageUpload = action({
         storage: completeContext.pendingStorage,
       });
 
+      const billingProperties = {
+        uploadId: args.uploadId,
+        circleId: completeContext.circleId,
+        targetKind: 'circle-image',
+      };
+
+      if (policy.isCloud) {
+        await trackCloudOwnerUsage(ctx, {
+          owner: completeContext.billingOwner,
+          entityId: completeContext.circleId,
+          featureId: BILLING_FEATURE_IDS.mediaUploads,
+          value: 1,
+          properties: billingProperties,
+        });
+        chargedUsage.mediaUploads = 1;
+
+        if (args.sizeBytes !== undefined && args.sizeBytes > 0) {
+          await trackCloudOwnerUsage(ctx, {
+            owner: completeContext.billingOwner,
+            entityId: completeContext.circleId,
+            featureId: BILLING_FEATURE_IDS.storageBytes,
+            value: args.sizeBytes,
+            properties: billingProperties,
+          });
+          chargedUsage.storageBytes = args.sizeBytes;
+        }
+      }
+
       const finalized: {
         previousStorage: Doc<'circles'>['imageStorage'] | null;
+        previousSizeBytes: number;
         nextStorage: NonNullable<Doc<'circles'>['imageStorage']>;
       } = await ctx.runMutation(internal.circles.finalizeImageUpload, {
         uploadId: args.uploadId,
         storage: completeContext.pendingStorage,
+        ...(args.sizeBytes !== undefined ? { sizeBytes: args.sizeBytes } : {}),
       });
+      chargedUsage.mediaUploads = 0;
+      chargedUsage.storageBytes = 0;
 
       if (
         finalized.previousStorage &&
         storageReferenceKey(finalized.previousStorage) !== storageReferenceKey(finalized.nextStorage)
       ) {
         await deleteStorageReference(ctx, finalized.previousStorage);
+
+        if (policy.isCloud && finalized.previousSizeBytes > 0) {
+          try {
+            await trackCloudOwnerUsage(ctx, {
+              owner: completeContext.billingOwner,
+              entityId: completeContext.circleId,
+              featureId: BILLING_FEATURE_IDS.storageBytes,
+              value: -finalized.previousSizeBytes,
+              properties: billingProperties,
+            });
+          } catch (creditError) {
+            console.error('Failed to credit replaced circle image storage.', creditError);
+          }
+        }
       }
 
       return {
         uploadId: args.uploadId,
       };
     } catch (error) {
+      if (
+        policy.isCloud &&
+        billingContext &&
+        (chargedUsage.mediaUploads > 0 || chargedUsage.storageBytes > 0)
+      ) {
+        await refundCloudCircleImageUsage({
+          ctx,
+          owner: billingContext.owner,
+          entityId: billingContext.entityId,
+          ...chargedUsage,
+          properties: {
+            uploadId: args.uploadId,
+            targetKind: 'circle-image',
+          },
+        });
+      }
+
       await ctx.runMutation(internal.circles.markImageUploadFailed, {
         uploadId: args.uploadId,
         message: error instanceof Error ? error.message : 'Circle image upload failed.',
@@ -699,18 +923,71 @@ export const removeImage = action({
     circleId: v.id('circles'),
   },
   handler: async (ctx, args) => {
-    const cleared: {
+    const policy = getDeploymentPolicyFromEnv();
+    const deleteContext: {
+      circleId: Id<'circles'>;
+      billingOwner: BillingOwner;
       previousStorage: Doc<'circles'>['imageStorage'] | null;
-    } = await ctx.runMutation(internal.circles.clearImage, {
+      previousSizeBytes: number;
+    } = await ctx.runQuery(internal.circles.getImageDeleteContext, {
       circleId: args.circleId,
-    });
+    }) as unknown as {
+      circleId: Id<'circles'>;
+      billingOwner: BillingOwner;
+      previousStorage: Doc<'circles'>['imageStorage'] | null;
+      previousSizeBytes: number;
+    };
 
-    if (cleared.previousStorage) {
-      await deleteStorageReference(ctx, cleared.previousStorage);
+    if (!deleteContext.previousStorage) {
+      return {
+        removed: false,
+      };
+    }
+
+    let creditedStorageBytes = 0;
+
+    try {
+      if (policy.isCloud && deleteContext.previousSizeBytes > 0) {
+        await trackCloudOwnerUsage(ctx, {
+          owner: deleteContext.billingOwner,
+          entityId: deleteContext.circleId,
+          featureId: BILLING_FEATURE_IDS.storageBytes,
+          value: -deleteContext.previousSizeBytes,
+          properties: {
+            circleId: args.circleId,
+            targetKind: 'circle-image',
+          },
+        });
+        creditedStorageBytes = deleteContext.previousSizeBytes;
+      }
+
+      await deleteStorageReference(ctx, deleteContext.previousStorage);
+      await ctx.runMutation(internal.circles.clearImage, {
+        circleId: args.circleId,
+      });
+    } catch (error) {
+      if (policy.isCloud && creditedStorageBytes > 0) {
+        try {
+          await trackCloudOwnerUsage(ctx, {
+            owner: deleteContext.billingOwner,
+            entityId: deleteContext.circleId,
+            featureId: BILLING_FEATURE_IDS.storageBytes,
+            value: creditedStorageBytes,
+            properties: {
+              circleId: args.circleId,
+              targetKind: 'circle-image',
+            },
+          });
+        } catch (refundError) {
+          console.error('Failed to refund Autumn circle image storage credit.', refundError);
+        }
+      }
+
+      throw error;
     }
 
     return {
-      removed: Boolean(cleared.previousStorage),
+      removed: true,
     };
   },
 });

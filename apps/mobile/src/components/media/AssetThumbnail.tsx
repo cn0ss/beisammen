@@ -23,7 +23,10 @@ export const AssetThumbnail = memo(function AssetThumbnail({
   onRemove,
 }: AssetThumbnailProps) {
   const theme = useTheme();
-  const signedUrl = useSignedAssetUrl(asset._id);
+  const signedUrl = useSignedAssetUrl(
+    asset.kind === 'image' || asset.previewStorage ? asset._id : null,
+    'preview',
+  );
   const metaLabel = asset.kind === 'video' ? 'Video' : formatBytes(asset.sizeBytes);
   const Container = onPress ? Pressable : View;
 
@@ -40,7 +43,7 @@ export const AssetThumbnail = memo(function AssetThumbnail({
         },
       ]}
     >
-      {asset.kind === 'image' && signedUrl ? (
+      {signedUrl ? (
         <Image source={{ uri: signedUrl }} style={styles.image} contentFit="cover" />
       ) : (
         <View

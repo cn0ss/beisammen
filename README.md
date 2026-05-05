@@ -16,6 +16,8 @@ Read [docs/licensing.md](docs/licensing.md) and [NOTICE](NOTICE) before using or
 - Expo React Native app in `apps/mobile`
 - Convex-first backend in `convex/`
 - WorkOS authentication for official and self-hosted deployments
+- Cloud billing and usage metering through Autumn
+- Official Autumn Convex component integration for cloud billing
 - BYO storage architecture with S3-compatible storage first
 - Central app distribution with official and self-hosted instances
 - Web-ready package boundaries without a web app yet
@@ -44,7 +46,7 @@ services/              Reserved for future Go services
 
 ## Public repository boundaries
 
-- This public repository intentionally excludes local assistant tooling, EAS build configuration, and all real deployment credentials.
+- This public repository intentionally excludes local developer tooling, EAS build configuration, and all real deployment credentials.
 - Only placeholder values belong in `.env.example`.
 - `apps/mobile/app.config.ts` is public app metadata and must stay free of secrets and account-specific linkage.
 - If you need local Expo build configuration, create your own untracked `apps/mobile/eas.json`.
@@ -52,17 +54,31 @@ services/              Reserved for future Go services
 ## Instance model
 
 - the mobile app boots from `EXPO_PUBLIC_DEFAULT_INSTANCE_URL`
-- official instance configuration is currently bundled into the app
-- auth mode is selected from local app configuration, not via backend discovery
+- the bundled default instance configuration is local app configuration and
+  defaults to `cloud`
+- custom/self-hosted instances are discovered at
+  `/.well-known/beisammen-instance.json`
+- discovered instance manifests provide the public Convex URL, auth mode, and
+  public WorkOS client settings plus deployment and billing mode
+- discovered instance manifests include `client.minimumAppVersion`; custom
+  instance links are rejected by older app builds before switching instances
 - every deployment uses WorkOS as the auth provider
 - self-hosted deployments can point the same app binary at their own instance URL
+- cloud deployments advertise paid Autumn plans only and use server-side
+  usage gates before storage-generating uploads; self-hosted deployments set
+  `billing.enabled=false` and do not enforce app-level media limits
+- operators can check deployment compatibility with
+  `pnpm smoke:beta -- <instance-url> --app-version=<current-mobile-version>`
+- paired cloud/self-hosted release checks can be run with
+  `pnpm release:beta -- --cloud-url=<cloud-site-url> --self-hosted-url=<self-hosted-site-url> --app-version=<current-mobile-version>`
 
 ## Secret handling rules
 
 - Only `EXPO_PUBLIC_*` variables may be referenced from React Native code.
 - `app.config.ts` is treated as public app metadata. Do not put secrets there.
-- auth provider secrets, storage credentials, APNs/FCM keys, real EAS tokens, and local assistant metadata must stay out of git.
+- auth provider secrets, storage credentials, APNs/FCM keys, real EAS tokens, and local developer metadata must stay out of git.
 - `apps/mobile/eas.json` is intentionally not tracked in the public repository.
 - Expo account/project linkage should stay out of `apps/mobile/app.config.ts` in the public snapshot.
 
 See [docs/architecture.md](docs/architecture.md) for the environment boundary.
+See [docs/private-beta-qa.md](docs/private-beta-qa.md) for the current device QA checklist.

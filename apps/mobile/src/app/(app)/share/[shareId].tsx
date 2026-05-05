@@ -69,7 +69,7 @@ function formatDuration(durationSeconds?: number): string | null {
 function ShareAssetViewer({ asset }: { asset: ShareAssetRecord | null }) {
   const theme = useTheme();
   const isFocused = useIsFocused();
-  const signedUrl = useSignedAssetUrl(asset?._id);
+  const signedUrl = useSignedAssetUrl(asset?._id, 'original');
   const player = useVideoPlayer(asset?.kind === 'video' ? signedUrl : null, (instance) => {
     instance.pause();
   });
@@ -177,7 +177,7 @@ export default function ShareDetailScreen() {
     () => share?.assets.find((asset) => asset._id === activeAssetId) ?? share?.assets[0] ?? null,
     [activeAssetId, share],
   );
-  const activeAssetUrl = useSignedAssetUrl(activeAsset?._id);
+  const activeAssetUrl = useSignedAssetUrl(activeAsset?._id, 'original');
 
   const handleBack = useCallback(() => {
     router.back();
@@ -191,7 +191,9 @@ export default function ShareDetailScreen() {
     setIsSaving(true);
     try {
       const signed =
-        activeAssetUrl ? { url: activeAssetUrl } : await getReadUrl({ assetId: activeAsset._id });
+        activeAssetUrl
+          ? { url: activeAssetUrl }
+          : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
       if (!signed.url) {
         throw new Error('Datei ist nicht mehr im Speicher vorhanden.');
       }
@@ -216,7 +218,9 @@ export default function ShareDetailScreen() {
     setIsSharing(true);
     try {
       const signed =
-        activeAssetUrl ? { url: activeAssetUrl } : await getReadUrl({ assetId: activeAsset._id });
+        activeAssetUrl
+          ? { url: activeAssetUrl }
+          : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
       if (!signed.url) {
         throw new Error('Datei ist nicht mehr im Speicher vorhanden.');
       }

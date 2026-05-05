@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-import type { AuthMode } from '@beisammen/contracts';
+import type { AuthMode, DeploymentKind } from '@beisammen/contracts';
 
 function readExpoExtra(name: string): string | undefined {
   const maybePublicEnv = Constants.expoConfig?.extra?.publicEnv;
@@ -48,11 +48,24 @@ function readAuthMode(): AuthMode {
   );
 }
 
+function readDeploymentKind(): DeploymentKind {
+  const deploymentKind = readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND', 'cloud');
+
+  if (deploymentKind === 'cloud' || deploymentKind === 'self-hosted') {
+    return deploymentKind;
+  }
+
+  throw new Error(
+    `Invalid EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND "${deploymentKind}". Expected "cloud" or "self-hosted".`,
+  );
+}
+
 const defaultInstanceUrl = requirePublicEnv('EXPO_PUBLIC_DEFAULT_INSTANCE_URL');
 const defaultConvexUrl = requirePublicEnv('EXPO_PUBLIC_DEFAULT_CONVEX_URL');
 
 export const appEnv = {
   appEnv: readOptionalPublicEnv('EXPO_PUBLIC_APP_ENV', 'development'),
+  appVersion: Constants.expoConfig?.version ?? '0.1.0',
   appScheme: readOptionalPublicEnv('EXPO_PUBLIC_APP_SCHEME', 'beisammen'),
   defaultInstanceId: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_INSTANCE_ID', 'default'),
   defaultInstanceName: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_INSTANCE_NAME', 'beisammen'),
@@ -60,8 +73,8 @@ export const appEnv = {
   defaultConvexUrl,
   defaultAuthProvider: 'workos' as const,
   defaultAuthMode: readAuthMode(),
+  defaultDeploymentKind: readDeploymentKind(),
   defaultAuthClientId: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID'),
   defaultAuthSignInUrl: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL'),
   logLevel: readOptionalPublicEnv('EXPO_PUBLIC_LOG_LEVEL'),
-  sentryDsn: readOptionalPublicEnv('EXPO_PUBLIC_SENTRY_DSN'),
 };

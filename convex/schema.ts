@@ -38,6 +38,7 @@ export default defineSchema({
     displayName: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
     profileImageStorage: v.optional(storageReference),
+    profileImageSizeBytes: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index('by_token_identifier', ['tokenIdentifier'])
@@ -48,6 +49,8 @@ export default defineSchema({
     name: v.string(),
     description: v.optional(v.string()),
     imageStorage: v.optional(storageReference),
+    imageSizeBytes: v.optional(v.number()),
+    billingOwnerId: v.optional(v.id('users')),
     createdBy: v.id('users'),
     createdAt: v.number(),
   }).index('by_created_by', ['createdBy']),
@@ -60,7 +63,18 @@ export default defineSchema({
   })
     .index('by_circle', ['circleId'])
     .index('by_user', ['userId'])
-    .index('by_circle_and_user', ['circleId', 'userId']),
+    .index('by_user_and_joined_at', ['userId', 'joinedAt'])
+    .index('by_circle_and_user', ['circleId', 'userId'])
+    .index('by_circle_and_role', ['circleId', 'role']),
+
+  circleStats: defineTable({
+    circleId: v.id('circles'),
+    memberCount: v.number(),
+    imageCount: v.number(),
+    videoCount: v.number(),
+    totalSizeBytes: v.number(),
+    updatedAt: v.number(),
+  }).index('by_circle', ['circleId']),
 
   invites: defineTable({
     circleId: v.id('circles'),
@@ -78,6 +92,7 @@ export default defineSchema({
     acceptedAt: v.optional(v.number()),
   })
     .index('by_circle', ['circleId'])
+    .index('by_circle_and_expires_at', ['circleId', 'expiresAt'])
     .index('by_invited_email', ['invitedEmail'])
     .index('by_token_hash', ['tokenHash']),
 
@@ -122,10 +137,12 @@ export default defineSchema({
     assetId: v.optional(v.id('assets')),
     providerKind: storageProviderKind,
     pendingStorage: v.optional(storageReference),
+    previewPendingStorage: v.optional(storageReference),
     kind: v.union(v.literal('image'), v.literal('video')),
     fileName: v.string(),
     mimeType: v.string(),
     storage: v.optional(storageReference),
+    previewStorage: v.optional(storageReference),
     status: v.union(
       v.literal('draft'),
       v.literal('uploading'),
@@ -138,6 +155,8 @@ export default defineSchema({
   })
     .index('by_circle', ['circleId'])
     .index('by_status', ['status'])
+    .index('by_status_and_created_at', ['status', 'createdAt'])
+    .index('by_asset', ['assetId'])
     .index('by_share_batch', ['shareBatchId'])
     .index('by_share_batch_and_status', ['shareBatchId', 'status']),
 
@@ -150,6 +169,7 @@ export default defineSchema({
     storage: v.optional(storageReference),
     fileName: v.string(),
     mimeType: v.string(),
+    sizeBytes: v.optional(v.number()),
     status: v.union(
       v.literal('uploading'),
       v.literal('uploaded'),
@@ -161,6 +181,7 @@ export default defineSchema({
   })
     .index('by_user', ['userId'])
     .index('by_circle', ['circleId'])
+    .index('by_status_and_created_at', ['status', 'createdAt'])
     .index('by_target_kind_and_user', ['targetKind', 'userId']),
 
   waitlistEntries: defineTable({
@@ -181,5 +202,7 @@ export default defineSchema({
     type: v.string(),
     entityId: v.string(),
     createdAt: v.number(),
-  }).index('by_circle', ['circleId']),
+  })
+    .index('by_circle', ['circleId'])
+    .index('by_circle_and_entity_id', ['circleId', 'entityId']),
 });
