@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useConvexAuth } from 'convex/react';
+import { useConvexAuth, useQuery } from 'convex/react';
 import { Redirect, Tabs } from 'expo-router';
 import { Platform } from 'react-native';
 
+import { api } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -10,6 +11,15 @@ export default function AppLayout() {
   const { isReady, session } = useSession();
   const convexAuth = useConvexAuth();
   const theme = useTheme();
+  const activitySummary = useQuery(
+    api.activity.summaryForViewer,
+    session && convexAuth.isAuthenticated ? {} : 'skip',
+  );
+  const activityBadge = activitySummary?.hasUnread
+    ? activitySummary.unreadCount >= 99
+      ? '99+'
+      : activitySummary.unreadCount
+    : undefined;
 
   if (!isReady || (session && (convexAuth.isLoading || !convexAuth.isAuthenticated))) {
     return null;
@@ -54,6 +64,16 @@ export default function AppLayout() {
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="activity"
+        options={{
+          title: 'Aktivität',
+          tabBarBadge: activityBadge,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications-outline" size={size} color={color} />
           ),
         }}
       />

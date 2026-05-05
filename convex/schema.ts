@@ -201,8 +201,72 @@ export default defineSchema({
     actorId: v.id('users'),
     type: v.string(),
     entityId: v.string(),
+    shareBatchId: v.optional(v.id('shareBatches')),
+    assetId: v.optional(v.id('assets')),
+    commentId: v.optional(v.id('comments')),
+    reactionId: v.optional(v.id('reactions')),
     createdAt: v.number(),
   })
     .index('by_circle', ['circleId'])
-    .index('by_circle_and_entity_id', ['circleId', 'entityId']),
+    .index('by_share_batch', ['shareBatchId'])
+    .index('by_circle_and_entity_id', ['circleId', 'entityId'])
+    .index('by_circle_and_created_at', ['circleId', 'createdAt']),
+
+  activityInboxItems: defineTable({
+    activityEventId: v.id('activityEvents'),
+    userId: v.id('users'),
+    circleId: v.id('circles'),
+    actorId: v.id('users'),
+    type: v.string(),
+    shareBatchId: v.id('shareBatches'),
+    assetId: v.optional(v.id('assets')),
+    status: v.union(v.literal('unread'), v.literal('read')),
+    createdAt: v.number(),
+    readAt: v.optional(v.number()),
+  })
+    .index('by_user_and_created_at', ['userId', 'createdAt'])
+    .index('by_user_and_status_and_created_at', ['userId', 'status', 'createdAt'])
+    .index('by_activity_event_id', ['activityEventId'])
+    .index('by_share_batch', ['shareBatchId']),
+
+  comments: defineTable({
+    shareBatchId: v.id('shareBatches'),
+    assetId: v.optional(v.id('assets')),
+    circleId: v.id('circles'),
+    authorId: v.id('users'),
+    targetKind: v.union(v.literal('share'), v.literal('asset')),
+    targetKey: v.string(),
+    body: v.string(),
+    status: v.union(v.literal('active'), v.literal('deleted')),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+  })
+    .index('by_share_batch', ['shareBatchId'])
+    .index('by_asset', ['assetId'])
+    .index('by_circle_and_share_batch', ['circleId', 'shareBatchId'])
+    .index('by_share_batch_and_status', ['shareBatchId', 'status'])
+    .index('by_share_target_status_created_at', [
+      'shareBatchId',
+      'targetKey',
+      'status',
+      'createdAt',
+    ]),
+
+  reactions: defineTable({
+    shareBatchId: v.id('shareBatches'),
+    assetId: v.optional(v.id('assets')),
+    circleId: v.id('circles'),
+    userId: v.id('users'),
+    targetKind: v.union(v.literal('share'), v.literal('asset')),
+    targetKey: v.string(),
+    emoji: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_share_batch', ['shareBatchId'])
+    .index('by_asset', ['assetId'])
+    .index('by_circle_and_share_batch', ['circleId', 'shareBatchId'])
+    .index('by_share_target', ['shareBatchId', 'targetKey'])
+    .index('by_share_target_user', ['shareBatchId', 'targetKey', 'userId']),
 });

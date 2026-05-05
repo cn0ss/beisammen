@@ -67,6 +67,54 @@ const CaptionText = memo(function CaptionText({
   );
 });
 
+function formatCompactCount(count: number): string {
+  if (count >= 1000) {
+    return `${Math.floor(count / 100) / 10}k`;
+  }
+
+  return String(count);
+}
+
+const EngagementSummaryRow = memo(function EngagementSummaryRow({
+  share,
+}: {
+  share: ShareFeedItem;
+}) {
+  const theme = useTheme();
+  const hasComments = share.engagement.commentCount > 0;
+  const hasReactions = share.engagement.reactionCount > 0;
+
+  if (!hasComments && !hasReactions) {
+    return null;
+  }
+
+  return (
+    <View style={styles.engagementRow}>
+      {hasReactions ? (
+        <View style={[styles.reactionStack, { backgroundColor: theme.accentMuted }]}>
+          {share.engagement.topReactions.map((reaction) => (
+            <Text key={reaction.emoji} style={styles.reactionEmoji}>
+              {reaction.emoji}
+            </Text>
+          ))}
+          <Text style={[styles.engagementText, { color: theme.accent }]}>
+            {formatCompactCount(share.engagement.reactionCount)}
+          </Text>
+        </View>
+      ) : null}
+
+      {hasComments ? (
+        <View style={[styles.commentPill, { backgroundColor: theme.primaryMuted }]}>
+          <Ionicons name="chatbubble-ellipses-outline" size={13} color={theme.primary} />
+          <Text style={[styles.engagementText, { color: theme.primary }]}>
+            {formatCompactCount(share.engagement.commentCount)}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+});
+
 interface FeedCardProps {
   share: ShareFeedItem;
   currentUserId?: string | null;
@@ -217,6 +265,8 @@ export const FeedCard = memo(function FeedCard({
       {share.caption ? (
         <CaptionText caption={share.caption} accentColor={theme.accent} baseColor={theme.text} />
       ) : null}
+
+      <EngagementSummaryRow share={share} />
     </View>
   );
 });
@@ -360,5 +410,36 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.display,
     fontStyle: 'italic',
     fontSize: FontSize.md,
+  },
+  engagementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
+  },
+  reactionStack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  reactionEmoji: {
+    fontSize: FontSize.sm,
+    lineHeight: 16,
+  },
+  commentPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  engagementText: {
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

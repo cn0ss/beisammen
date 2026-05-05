@@ -1,13 +1,17 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  COMMENT_MAX_BODY_LENGTH,
   INSTANCE_DISCOVERY_PATH,
+  REACTION_TOP_EMOJI_LIMIT,
   assertInstanceBaseUrlMatches,
   assertAppVersionSupported,
   buildInstanceDiscoveryUrl,
   buildWorkOSInstanceConfig,
   compareAppVersions,
   isAppVersionSupported,
+  normalizeCommentBody,
+  normalizeReactionEmoji,
   parseInstanceConfig,
 } from './index';
 
@@ -348,5 +352,26 @@ describe('instance discovery', () => {
         },
       }),
     ).toThrow(/Convex client URL/i);
+  });
+});
+
+describe('engagement contracts', () => {
+  test('normalizes comment bodies with the shared beta limit', () => {
+    expect(COMMENT_MAX_BODY_LENGTH).toBe(1000);
+    expect(normalizeCommentBody('  Hallo\r\nzusammen.  ')).toBe('Hallo\nzusammen.');
+    expect(normalizeCommentBody('x'.repeat(COMMENT_MAX_BODY_LENGTH))).toBe(
+      'x'.repeat(COMMENT_MAX_BODY_LENGTH),
+    );
+    expect(() => normalizeCommentBody('   \n  ')).toThrow(/comment body/i);
+    expect(() => normalizeCommentBody('x'.repeat(COMMENT_MAX_BODY_LENGTH + 1))).toThrow(/1000/i);
+  });
+
+  test('normalizes one emoji grapheme for reactions and caps top reaction summaries', () => {
+    expect(REACTION_TOP_EMOJI_LIMIT).toBe(3);
+    expect(normalizeReactionEmoji('  👍🏽  ')).toBe('👍🏽');
+    expect(normalizeReactionEmoji('❤️')).toBe('❤️');
+    expect(normalizeReactionEmoji('7️⃣')).toBe('7️⃣');
+    expect(() => normalizeReactionEmoji('ok')).toThrow(/emoji/i);
+    expect(() => normalizeReactionEmoji('👍👍')).toThrow(/single emoji/i);
   });
 });

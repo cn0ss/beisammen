@@ -25,6 +25,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 import { AssetThumbnail } from '@/components/media/AssetThumbnail';
 import { Button, FeedbackToast, LoadingBox } from '@/components/ui';
+import { EngagementPanel } from '@/components/share/EngagementPanel';
 
 function splitLead(caption: string): { lead: string; tail: string | null } {
   const trimmed = caption.trim();
@@ -128,8 +129,12 @@ export default function ShareDetailScreen() {
   const router = useRouter();
   const { session } = useSession();
   const convexAuth = useConvexAuth();
-  const params = useLocalSearchParams<{ shareId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    shareId?: string | string[];
+    assetId?: string | string[];
+  }>();
   const shareId = Array.isArray(params.shareId) ? params.shareId[0] : params.shareId;
+  const requestedAssetId = Array.isArray(params.assetId) ? params.assetId[0] : params.assetId;
   const theme = useTheme();
 
   const [isDeleted, setIsDeleted] = useState(false);
@@ -169,9 +174,11 @@ export default function ShareDetailScreen() {
     setActiveAssetId((current) =>
       current && share.assets.some((asset) => asset._id === current)
         ? current
+        : requestedAssetId && share.assets.some((asset) => asset._id === requestedAssetId)
+          ? requestedAssetId
         : share.assets[0]?._id ?? null,
     );
-  }, [share]);
+  }, [requestedAssetId, share]);
 
   const activeAsset = useMemo(
     () => share?.assets.find((asset) => asset._id === activeAssetId) ?? share?.assets[0] ?? null,
@@ -296,7 +303,11 @@ export default function ShareDetailScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.headerRow}>
           <Pressable
             onPress={handleBack}
@@ -405,6 +416,8 @@ export default function ShareDetailScreen() {
             }}
           />
         </View>
+
+        <EngagementPanel share={share} activeAsset={activeAsset} onFeedback={setFeedback} />
       </ScrollView>
 
       <FeedbackToast message={feedback} onDismiss={() => setFeedback(null)} />

@@ -191,6 +191,7 @@ export default function CircleManagementScreen() {
         uploadId: prepared.uploadId,
         objectKey: uploaded.objectKey,
         storageId: uploaded.storageId,
+        sizeBytes: processedAsset.sizeBytes,
       });
       setFeedback(`Bild für "${circle.name}" aktualisiert.`);
     } catch (error) {

@@ -1,5 +1,6 @@
 import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
+import type { EngagementSummary } from '@beisammen/contracts';
 
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -7,6 +8,7 @@ import { action, internalMutation, internalQuery, mutation, query } from './_gen
 import { internal } from './_generated/api';
 import { adjustCircleStats, assetStatsDelta } from './circleStats';
 import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
+import { createActivityEventWithInbox } from './lib/activity';
 import {
   type BillingOwner,
   resolveCircleBillingOwner,
@@ -19,6 +21,13 @@ import {
   formatFeedTimestamp,
   storageReferenceKey,
 } from './lib/storage/shared';
+import {
+  buildAssetEngagementSummaries,
+  buildShareEngagementSummary,
+  buildTargetEngagementSummary,
+  engagementTargetKey,
+  fallbackEngagementSummary,
+} from './lib/engagement';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const shareFunctionSurface = [
@@ -39,7 +48,7 @@ const UNRESOLVED_UPLOAD_STATUSES: Doc<'uploads'>['status'][] = [
   'failed',
 ];
 
-function mapAsset(asset: Doc<'assets'>) {
+function mapAsset(asset: Doc<'assets'>, engagement?: EngagementSummary) {
   return {
     _id: asset._id,
     _creationTime: asset._creationTime,
@@ -53,16 +62,25 @@ function mapAsset(asset: Doc<'assets'>) {
     height: asset.height,
     durationSeconds: asset.durationSeconds,
     location: asset.location,
+    engagement: fallbackEngagementSummary(engagement),
   };
 }
 
 async function listAssets(
   ctx: QueryCtx | MutationCtx,
   shareBatchId: Id<'shareBatches'>,
+  viewerId?: Id<'users'>,
 ) {
   const assets = await listShareAssetsForDisplay(ctx, shareBatchId);
+  const engagementByAsset = viewerId
+    ? await buildAssetEngagementSummaries(ctx, {
+        shareBatchId,
+        assetIds: assets.map((asset) => asset._id),
+        viewerId,
+      })
+    : new Map<Id<'assets'>, EngagementSummary>();
 
-  return assets.map(mapAsset);
+  return assets.map((asset) => mapAsset(asset, engagementByAsset.get(asset._id)));
 }
 
 function mapUnresolvedUpload(upload: Doc<'uploads'>) {
@@ -142,7 +160,13 @@ async function buildPublishedShareRecord(
   viewerId: Id<'users'>,
 ) {
   const author = await ctx.db.get(shareBatch.authorId);
-  const assets = await listAssets(ctx, shareBatch._id);
+  const assets = await listAssets(ctx, shareBatch._id, viewerId);
+  const engagement = await buildShareEngagementSummary(ctx, shareBatch._id, viewerId);
+  const shareTargetEngagement = await buildTargetEngagementSummary(ctx, {
+    shareBatchId: shareBatch._id,
+    targetKey: engagementTargetKey(),
+    viewerId,
+  });
 
   return {
     _id: shareBatch._id,
@@ -157,6 +181,8 @@ async function buildPublishedShareRecord(
     createdAtLabel: formatFeedTimestamp(shareBatch.publishedAt ?? shareBatch.createdAt),
     publishedAt: shareBatch.publishedAt ?? shareBatch.createdAt,
     canDelete: shareBatch.authorId === viewerId,
+    engagement,
+    shareTargetEngagement,
     assets,
   };
 }
@@ -168,6 +194,7 @@ async function buildFeedShareRecord(
 ) {
   const author = await ctx.db.get(shareBatch.authorId);
   const heroAsset = await getHeroAsset(ctx, shareBatch._id);
+  const engagement = await buildShareEngagementSummary(ctx, shareBatch._id, viewerId);
 
   return {
     _id: shareBatch._id,
@@ -182,6 +209,7 @@ async function buildFeedShareRecord(
     createdAtLabel: formatFeedTimestamp(shareBatch.publishedAt ?? shareBatch.createdAt),
     publishedAt: shareBatch.publishedAt ?? shareBatch.createdAt,
     canDelete: shareBatch.authorId === viewerId,
+    engagement,
     heroAsset,
   };
 }
@@ -331,11 +359,11 @@ export const publish = mutation({
       updatedAt: now,
       publishedAt: now,
     });
-    await ctx.db.insert('activityEvents', {
+    await createActivityEventWithInbox(ctx, {
       circleId: shareBatch.circleId,
       actorId: viewer._id,
       type: 'share.published',
-      entityId: shareBatch._id,
+      shareBatchId: shareBatch._id,
       createdAt: now,
     });
 
@@ -421,8 +449,41 @@ export const getDeleteContext = internalQuery({
       .query('uploads')
       .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
       .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const commentsPage = await ctx.db
+      .query('comments')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const reactionsPage = await ctx.db
+      .query('reactions')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const activityInboxPage = await ctx.db
+      .query('activityInboxItems')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const activityEventsByShareBatchPage = await ctx.db
+      .query('activityEvents')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const legacyActivityEventsPage =
+      activityEventsByShareBatchPage.length === 0
+        ? await ctx.db
+            .query('activityEvents')
+            .withIndex('by_circle_and_entity_id', (q) =>
+              q.eq('circleId', shareBatch.circleId).eq('entityId', shareBatch._id),
+            )
+            .take(SHARE_DELETE_BATCH_SIZE + 1)
+        : [];
     const assets = assetsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
     const uploads = uploadsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const comments = commentsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const reactions = reactionsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const activityInboxItems = activityInboxPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const activityEvents = (
+      activityEventsByShareBatchPage.length > 0
+        ? activityEventsByShareBatchPage
+        : legacyActivityEventsPage
+    ).slice(0, SHARE_DELETE_BATCH_SIZE);
     const storageBytesDelta = -assets.reduce((total, asset) => total + (asset.sizeBytes ?? 0), 0);
     const billingOwner = await resolveCircleBillingOwner(ctx, shareBatch.circleId);
 
@@ -432,10 +493,19 @@ export const getDeleteContext = internalQuery({
       billingOwner,
       assetIds: assets.map((asset) => asset._id),
       uploadIds: uploads.map((upload) => upload._id),
+      commentIds: comments.map((comment) => comment._id),
+      reactionIds: reactions.map((reaction) => reaction._id),
+      activityInboxItemIds: activityInboxItems.map((item) => item._id),
+      activityEventIds: activityEvents.map((event) => event._id),
       storageBytesDelta,
       isFinalBatch:
         assetsPage.length <= SHARE_DELETE_BATCH_SIZE &&
-        uploadsPage.length <= SHARE_DELETE_BATCH_SIZE,
+        uploadsPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        commentsPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        reactionsPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        activityInboxPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        activityEventsByShareBatchPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        legacyActivityEventsPage.length <= SHARE_DELETE_BATCH_SIZE,
       storageReferences: [
         ...assets.flatMap((asset) => [
           asset.storage,
@@ -458,6 +528,10 @@ export const finalizeDelete = internalMutation({
     circleId: v.id('circles'),
     assetIds: v.array(v.id('assets')),
     uploadIds: v.array(v.id('uploads')),
+    commentIds: v.array(v.id('comments')),
+    reactionIds: v.array(v.id('reactions')),
+    activityInboxItemIds: v.array(v.id('activityInboxItems')),
+    activityEventIds: v.array(v.id('activityEvents')),
     isFinalBatch: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -490,6 +564,22 @@ export const finalizeDelete = internalMutation({
       await ctx.db.delete(uploadId);
     }
 
+    for (const commentId of args.commentIds) {
+      await ctx.db.delete(commentId);
+    }
+
+    for (const reactionId of args.reactionIds) {
+      await ctx.db.delete(reactionId);
+    }
+
+    for (const activityInboxItemId of args.activityInboxItemIds) {
+      await ctx.db.delete(activityInboxItemId);
+    }
+
+    for (const activityEventId of args.activityEventIds) {
+      await ctx.db.delete(activityEventId);
+    }
+
     await adjustCircleStats(ctx, args.circleId, statsDelta);
 
     const [remainingAsset] = args.isFinalBatch
@@ -504,19 +594,49 @@ export const finalizeDelete = internalMutation({
           .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
           .take(1)
       : [];
-    const deletedShareBatch = args.isFinalBatch && !remainingAsset && !remainingUpload;
+    const [remainingComment] = args.isFinalBatch
+      ? await ctx.db
+          .query('comments')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const [remainingReaction] = args.isFinalBatch
+      ? await ctx.db
+          .query('reactions')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const [remainingActivityInboxItem] = args.isFinalBatch
+      ? await ctx.db
+          .query('activityInboxItems')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const [remainingActivityEventByShareBatch] = args.isFinalBatch
+      ? await ctx.db
+          .query('activityEvents')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const [remainingLegacyActivityEvent] = args.isFinalBatch
+      ? await ctx.db
+          .query('activityEvents')
+          .withIndex('by_circle_and_entity_id', (q) =>
+            q.eq('circleId', args.circleId).eq('entityId', args.shareBatchId),
+          )
+          .take(1)
+      : [];
+    const deletedShareBatch =
+      args.isFinalBatch &&
+      !remainingAsset &&
+      !remainingUpload &&
+      !remainingComment &&
+      !remainingReaction &&
+      !remainingActivityInboxItem &&
+      !remainingActivityEventByShareBatch &&
+      !remainingLegacyActivityEvent;
 
     if (deletedShareBatch) {
-      const activityEvents = ctx.db
-        .query('activityEvents')
-        .withIndex('by_circle_and_entity_id', (q) =>
-          q.eq('circleId', args.circleId).eq('entityId', args.shareBatchId),
-        );
-
-      for await (const event of activityEvents) {
-        await ctx.db.delete(event._id);
-      }
-
       await ctx.db.delete(args.shareBatchId);
     }
 
@@ -547,6 +667,10 @@ export const deleteShare = action({
         billingOwner: BillingOwner;
         assetIds: Id<'assets'>[];
         uploadIds: Id<'uploads'>[];
+        commentIds: Id<'comments'>[];
+        reactionIds: Id<'reactions'>[];
+        activityInboxItemIds: Id<'activityInboxItems'>[];
+        activityEventIds: Id<'activityEvents'>[];
         storageBytesDelta: number;
         isFinalBatch: boolean;
         storageReferences: Doc<'assets'>['storage'][];
@@ -558,6 +682,10 @@ export const deleteShare = action({
         billingOwner: BillingOwner;
         assetIds: Id<'assets'>[];
         uploadIds: Id<'uploads'>[];
+        commentIds: Id<'comments'>[];
+        reactionIds: Id<'reactions'>[];
+        activityInboxItemIds: Id<'activityInboxItems'>[];
+        activityEventIds: Id<'activityEvents'>[];
         storageBytesDelta: number;
         isFinalBatch: boolean;
         storageReferences: Doc<'assets'>['storage'][];
@@ -566,7 +694,11 @@ export const deleteShare = action({
       if (
         !deleteContext.isFinalBatch &&
         deleteContext.assetIds.length === 0 &&
-        deleteContext.uploadIds.length === 0
+        deleteContext.uploadIds.length === 0 &&
+        deleteContext.commentIds.length === 0 &&
+        deleteContext.reactionIds.length === 0 &&
+        deleteContext.activityInboxItemIds.length === 0 &&
+        deleteContext.activityEventIds.length === 0
       ) {
         throw new Error('Share deletion could not make progress.');
       }
@@ -606,6 +738,10 @@ export const deleteShare = action({
           circleId: deleteContext.circleId,
           assetIds: deleteContext.assetIds,
           uploadIds: deleteContext.uploadIds,
+          commentIds: deleteContext.commentIds,
+          reactionIds: deleteContext.reactionIds,
+          activityInboxItemIds: deleteContext.activityInboxItemIds,
+          activityEventIds: deleteContext.activityEventIds,
           isFinalBatch: deleteContext.isFinalBatch,
         });
 

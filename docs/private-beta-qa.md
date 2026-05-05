@@ -33,7 +33,22 @@ tenant and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
 - Upload one image and one video under 30 seconds; confirm the draft remains recoverable if one upload is retried.
 - Publish the draft and confirm the feed shows previews, pagination works, and video cards do not try to render the original video as an image.
 - Open share detail, play the video, save media to the device library, and use native sharing.
+- On share detail, add a share-level comment, switch focus to the active
+  medium, add an asset-level comment, and confirm each list only shows comments
+  for the selected focus.
+- Add a reaction, replace it with a different emoji, remove it, and confirm the
+  feed summary plus share detail counts update after each step.
+- As the comment author, delete your own comment; as the share author or a
+  circle admin, delete another member's comment; confirm a regular member
+  cannot delete another member's comment.
+- Return to Home and confirm the activity section includes the publish,
+  comment, and reaction events for the member's circles only.
+- Open the Activity tab as the recipient, confirm unread badge count is shown,
+  confirm visible rows become read, and confirm tapping share-level and
+  asset-level rows opens the correct share and active medium.
 - Delete a draft asset, delete a published share, remove a member, and confirm counts update.
+- After deleting a published share, confirm its comments, reactions, and
+  activity and inbox rows no longer appear.
 
 ## Self-Hosted Golden Path
 

@@ -6,6 +6,7 @@ import type {
   BillingPortalSessionResult,
   BillingStatus,
   ConnectionCheck,
+  EngagementSummary,
   MediaLocation,
   SignedReadUrl,
   StorageReference,
@@ -107,6 +108,7 @@ export interface ShareAssetRecord {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  engagement: EngagementSummary;
 }
 
 export interface ShareFeedItem {
@@ -122,6 +124,7 @@ export interface ShareFeedItem {
   createdAtLabel: string;
   publishedAt: number;
   canDelete: boolean;
+  engagement: EngagementSummary;
   heroAsset: ShareAssetRecord | null;
 }
 
@@ -138,7 +141,76 @@ export interface ShareBatchRecord {
   createdAtLabel: string;
   publishedAt: number;
   canDelete: boolean;
+  engagement: EngagementSummary;
+  shareTargetEngagement: EngagementSummary;
   assets: ShareAssetRecord[];
+}
+
+export interface CommentRecord {
+  _id: string;
+  _creationTime: number;
+  shareBatchId: string;
+  circleId: string;
+  targetKind: 'share' | 'asset';
+  assetId: string | null;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl?: string;
+  authorHasProfileImage: boolean;
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+  canDelete: boolean;
+}
+
+export interface ReactionTargetRecord {
+  targetKind: 'share' | 'asset';
+  assetId: string | null;
+  reactionCount: number;
+  viewerReaction: string | null;
+  topReactions: EngagementSummary['topReactions'];
+}
+
+export interface ActivityEventRecord {
+  _id: string;
+  _creationTime: number;
+  circleId: string;
+  circleName: string;
+  actorId: string;
+  actorName: string;
+  actorAvatarUrl?: string;
+  actorHasProfileImage: boolean;
+  type: 'share.published' | 'comment.created' | 'reaction.set' | string;
+  shareBatchId: string;
+  assetId: string | null;
+  displayText: string;
+  createdAt: number;
+  createdAtLabel: string;
+}
+
+export interface ActivityInboxSummary {
+  unreadCount: number;
+  hasUnread: boolean;
+}
+
+export interface ActivityInboxItemRecord {
+  _id: string;
+  _creationTime: number;
+  activityEventId: string;
+  circleId: string;
+  circleName: string;
+  actorId: string;
+  actorName: string;
+  actorAvatarUrl?: string;
+  actorHasProfileImage: boolean;
+  type: 'share.published' | 'comment.created' | 'reaction.set' | string;
+  shareBatchId: string;
+  assetId: string | null;
+  status: 'unread' | 'read';
+  readAt: number | null;
+  displayText: string;
+  createdAt: number;
+  createdAtLabel: string;
 }
 
 export interface DraftUploadRecord {
@@ -200,6 +272,27 @@ export type CreateCircleImageTargetArgs = {
 export type PublishArgs = {
   shareBatchId: string;
   caption?: string;
+};
+
+export type ListCommentsArgs = {
+  shareBatchId: string;
+  assetId?: string;
+  paginationOpts: PaginationOpts;
+};
+
+export type CreateCommentArgs = {
+  shareBatchId: string;
+  assetId?: string;
+  body: string;
+};
+
+export type ReactionTargetArgs = {
+  shareBatchId: string;
+  assetId?: string;
+};
+
+export type SetReactionArgs = ReactionTargetArgs & {
+  emoji: string;
 };
 
 export type CreateInviteArgs = {
@@ -420,6 +513,61 @@ export const api = {
     deleteDraftAsset: makeFunctionReference<'action', { assetId: string }, { assetId: string }>(
       'assets:deleteDraftAsset',
     ),
+  },
+  comments: {
+    listForShare: makeFunctionReference<
+      'query',
+      ListCommentsArgs,
+      PaginatedResult<CommentRecord>
+    >('comments:listForShare'),
+    create: makeFunctionReference<'mutation', CreateCommentArgs, { commentId: string }>(
+      'comments:create',
+    ),
+    delete: makeFunctionReference<'mutation', { commentId: string }, { commentId: string }>(
+      'comments:delete',
+    ),
+  },
+  reactions: {
+    listForShare: makeFunctionReference<
+      'query',
+      { shareBatchId: string },
+      { targets: ReactionTargetRecord[] }
+    >('reactions:listForShare'),
+    set: makeFunctionReference<
+      'mutation',
+      SetReactionArgs,
+      { reactionId: string; emoji: string }
+    >('reactions:set'),
+    remove: makeFunctionReference<'mutation', ReactionTargetArgs, { removed: boolean }>(
+      'reactions:remove',
+    ),
+  },
+  activity: {
+    listForViewer: makeFunctionReference<
+      'query',
+      { paginationOpts: PaginationOpts },
+      PaginatedResult<ActivityEventRecord>
+    >('activity:listForViewer'),
+    summaryForViewer: makeFunctionReference<
+      'query',
+      Record<string, never>,
+      ActivityInboxSummary
+    >('activity:summaryForViewer'),
+    listInboxForViewer: makeFunctionReference<
+      'query',
+      { paginationOpts: PaginationOpts },
+      PaginatedResult<ActivityInboxItemRecord>
+    >('activity:listInboxForViewer'),
+    markRead: makeFunctionReference<
+      'mutation',
+      { inboxItemId: string },
+      { inboxItemId: string; status: 'read' }
+    >('activity:markRead'),
+    markManyRead: makeFunctionReference<
+      'mutation',
+      { inboxItemIds: string[] },
+      { readCount: number }
+    >('activity:markManyRead'),
   },
   storageStats: {
     forViewer: makeFunctionReference<'query', Record<string, never>, StorageUsageStats>(

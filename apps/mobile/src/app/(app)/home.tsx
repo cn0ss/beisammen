@@ -16,12 +16,14 @@ import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } fr
 import { BottomTabInset, Fonts, FontSize, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import { buildShareDetailHref } from '@/features/engagement/navigation';
 import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
 import { useShareUploadFlow } from '@/features/media/use-share-upload-flow';
 import { useTheme } from '@/hooks/use-theme';
 import { createLogger } from '@/lib/logger';
 
 import { Button, EmptyState, FeedbackToast, LoadingBox } from '@/components/ui';
+import { ActivityStrip } from '@/components/home/ActivityStrip';
 import { CircleSelector } from '@/components/home/CircleSelector';
 import { ComposeFab } from '@/components/home/ComposeFab';
 import { DraftSheet } from '@/components/home/DraftSheet';
@@ -68,6 +70,11 @@ export default function HomeScreen() {
     api.shares.listForCircle,
     hasViewer && activeCircleId ? { circleId: activeCircleId } : 'skip',
     { initialNumItems: 10 },
+  );
+  const activityFeed = usePaginatedQuery(
+    api.activity.listForViewer,
+    hasViewer ? {} : 'skip',
+    { initialNumItems: 6 },
   );
   const activeDraft = useQuery(
     api.shares.getDraftForCircle,
@@ -173,6 +180,7 @@ export default function HomeScreen() {
     );
 
   const feedItems = shareFeed.results;
+  const activityItems = hasViewer ? activityFeed.results : [];
   const isFeedLoading = Boolean(activeCircleId) && shareFeed.status === 'LoadingFirstPage';
   const isLoadingMoreFeed = shareFeed.status === 'LoadingMore';
   const visiblePersistedUploads =
@@ -338,7 +346,8 @@ export default function HomeScreen() {
   }, [activeDraft, draftCaption, publishDraft, removeItemsForShareBatch]);
 
   const handleOpenShare = useCallback(
-    (shareId: string) => router.push(`/share/${shareId}` as never),
+    (shareId: string, assetId?: string | null) =>
+      router.push(buildShareDetailHref({ shareBatchId: shareId, assetId }) as never),
     [router],
   );
 
@@ -408,6 +417,17 @@ export default function HomeScreen() {
                   />
                 </View>
               ) : null}
+            </Animated.View>
+          ) : null}
+
+          {hasCircles ? (
+            <Animated.View style={[feedAnim, styles.activitySection]}>
+              <ActivityStrip
+                activities={activityItems}
+                status={activityFeed.status}
+                onOpenShare={handleOpenShare}
+                onLoadMore={() => activityFeed.loadMore(6)}
+              />
             </Animated.View>
           ) : null}
 
@@ -561,6 +581,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   feedSection: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+  },
+  activitySection: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
   },

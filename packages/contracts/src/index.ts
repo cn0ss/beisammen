@@ -15,6 +15,8 @@ export const INSTANCE_DISCOVERY_PATH = '/.well-known/beisammen-instance.json';
 
 export const BETA_MAX_MEDIA_SELECTION_COUNT = 10;
 export const BETA_MAX_VIDEO_DURATION_SECONDS = 30;
+export const COMMENT_MAX_BODY_LENGTH = 1000;
+export const REACTION_TOP_EMOJI_LIMIT = 3;
 
 export const SUPPORTED_IMAGE_MIME_TYPES = [
   'image/jpeg',
@@ -40,6 +42,81 @@ export interface MediaLocation {
   region?: string;
   country?: string;
   source: MediaLocationSource;
+}
+
+export interface EngagementReactionSummary {
+  emoji: string;
+  count: number;
+  reactedByViewer: boolean;
+}
+
+export interface EngagementSummary {
+  commentCount: number;
+  reactionCount: number;
+  topReactions: EngagementReactionSummary[];
+}
+
+type GraphemeSegment = {
+  segment: string;
+};
+
+type SegmenterLike = {
+  segment(value: string): Iterable<GraphemeSegment>;
+};
+
+type SegmenterConstructor = new (
+  locale: string | undefined,
+  options: { granularity: 'grapheme' },
+) => SegmenterLike;
+
+function splitGraphemes(value: string): string[] {
+  const segmenterConstructor = (Intl as unknown as { Segmenter?: SegmenterConstructor }).Segmenter;
+
+  if (!segmenterConstructor) {
+    return Array.from(value);
+  }
+
+  const segmenter = new segmenterConstructor(undefined, { granularity: 'grapheme' });
+  return Array.from(segmenter.segment(value), (segment) => segment.segment);
+}
+
+function isEmojiGrapheme(value: string): boolean {
+  return (
+    /\p{Extended_Pictographic}/u.test(value) ||
+    /^(?:\p{Regional_Indicator}){2}$/u.test(value) ||
+    /^[0-9#*]\uFE0F?\u20E3$/u.test(value)
+  );
+}
+
+export function normalizeCommentBody(body: string): string {
+  const normalized = body.replace(/\r\n?/g, '\n').trim();
+
+  if (normalized.length === 0) {
+    throw new Error('Comment body is required.');
+  }
+
+  if (normalized.length > COMMENT_MAX_BODY_LENGTH) {
+    throw new Error(`Comments must be ${COMMENT_MAX_BODY_LENGTH} characters or shorter.`);
+  }
+
+  return normalized;
+}
+
+export function normalizeReactionEmoji(value: string): string {
+  const normalized = value.trim().normalize('NFC');
+  const graphemes = splitGraphemes(normalized);
+
+  if (graphemes.length !== 1) {
+    throw new Error('Reaction must be a single emoji.');
+  }
+
+  const [emoji] = graphemes;
+
+  if (!emoji || !isEmojiGrapheme(emoji)) {
+    throw new Error('Reaction must be an emoji.');
+  }
+
+  return emoji;
 }
 
 export interface InstanceConfig {

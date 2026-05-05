@@ -1,14 +1,16 @@
 /// <reference types="vite/client" />
 
 import { convexTest, type TestConvex } from 'convex-test';
-import type { UserIdentity } from 'convex/server';
+import { makeFunctionReference, type UserIdentity } from 'convex/server';
 import { describe, expect, test, vi } from 'vitest';
 
 import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
+import { activityFunctionSurface } from './activity';
 import { assetFunctionSurface } from './assets';
 import { autumnFunctionSurface } from './autumn';
 import { billingFunctionSurface } from './billing';
+import { commentFunctionSurface } from './comments';
 import { httpSurface } from './http';
 import { billingBackendKind } from './lib/billing/autumn';
 import {
@@ -24,6 +26,7 @@ import {
 } from './lib/instance';
 import { verifyS3ObjectExists } from './lib/storage/s3';
 import { BETA_MAX_MEDIA_SELECTION_COUNT } from './lib/uploadLimits';
+import { reactionFunctionSurface } from './reactions';
 import schema from './schema';
 
 const modules = import.meta.glob(['./**/*.ts', '!./**/*.test.ts']);
@@ -32,6 +35,137 @@ const EXPECTED_CIRCLE_MEMBER_LIST_LIMIT = 200;
 const EXPECTED_STORAGE_STATS_CIRCLE_LIMIT = 100;
 const EXPECTED_SHARE_ASSET_DISPLAY_LIMIT = 100;
 const EXPECTED_ASSET_LINKED_UPLOAD_DELETE_LIMIT = 20;
+const EXPECTED_SHARE_DELETE_BATCH_SIZE = 50;
+const COMMENT_MAX_BODY_LENGTH = 1000;
+
+const commentsApi = {
+  listForShare: makeFunctionReference<
+    'query',
+    {
+      shareBatchId: Id<'shareBatches'>;
+      assetId?: Id<'assets'>;
+      paginationOpts: { numItems: number; cursor: string | null };
+    },
+    {
+      page: Array<{
+        _id: Id<'comments'>;
+        body: string;
+        targetKind: 'share' | 'asset';
+        assetId: Id<'assets'> | null;
+        authorId: Id<'users'>;
+        authorName: string;
+        canDelete: boolean;
+      }>;
+      isDone: boolean;
+      continueCursor: string;
+    }
+  >('comments:listForShare'),
+  create: makeFunctionReference<
+    'mutation',
+    { shareBatchId: Id<'shareBatches'>; assetId?: Id<'assets'>; body: string },
+    { commentId: Id<'comments'> }
+  >('comments:create'),
+  delete: makeFunctionReference<
+    'mutation',
+    { commentId: Id<'comments'> },
+    { commentId: Id<'comments'> }
+  >('comments:delete'),
+};
+
+const reactionsApi = {
+  listForShare: makeFunctionReference<
+    'query',
+    { shareBatchId: Id<'shareBatches'> },
+    {
+      targets: Array<{
+        targetKind: 'share' | 'asset';
+        assetId: Id<'assets'> | null;
+        reactionCount: number;
+        viewerReaction: string | null;
+        topReactions: Array<{
+          emoji: string;
+          count: number;
+          reactedByViewer: boolean;
+        }>;
+      }>;
+    }
+  >('reactions:listForShare'),
+  set: makeFunctionReference<
+    'mutation',
+    { shareBatchId: Id<'shareBatches'>; assetId?: Id<'assets'>; emoji: string },
+    { reactionId: Id<'reactions'>; emoji: string }
+  >('reactions:set'),
+  remove: makeFunctionReference<
+    'mutation',
+    { shareBatchId: Id<'shareBatches'>; assetId?: Id<'assets'> },
+    { removed: boolean }
+  >('reactions:remove'),
+};
+
+const activityApi = {
+  listForViewer: makeFunctionReference<
+    'query',
+    {
+      paginationOpts: { numItems: number; cursor: string | null };
+    },
+    {
+      page: Array<{
+        _id: Id<'activityEvents'>;
+        circleId: Id<'circles'>;
+        circleName: string;
+        actorId: Id<'users'>;
+        actorName: string;
+        type: string;
+        shareBatchId: Id<'shareBatches'>;
+        assetId: Id<'assets'> | null;
+        displayText: string;
+        createdAt: number;
+      }>;
+      isDone: boolean;
+      continueCursor: string;
+    }
+  >('activity:listForViewer'),
+  summaryForViewer: makeFunctionReference<
+    'query',
+    Record<string, never>,
+    {
+      unreadCount: number;
+      hasUnread: boolean;
+    }
+  >('activity:summaryForViewer'),
+  listInboxForViewer: makeFunctionReference<
+    'query',
+    {
+      paginationOpts: { numItems: number; cursor: string | null };
+    },
+    {
+      page: Array<{
+        _id: string;
+        activityEventId: Id<'activityEvents'>;
+        circleId: Id<'circles'>;
+        actorId: Id<'users'>;
+        type: string;
+        shareBatchId: Id<'shareBatches'>;
+        assetId: Id<'assets'> | null;
+        status: 'unread' | 'read';
+        displayText: string;
+        createdAt: number;
+      }>;
+      isDone: boolean;
+      continueCursor: string;
+    }
+  >('activity:listInboxForViewer'),
+  markRead: makeFunctionReference<
+    'mutation',
+    { inboxItemId: string },
+    { inboxItemId: string; status: 'read' }
+  >('activity:markRead'),
+  markManyRead: makeFunctionReference<
+    'mutation',
+    { inboxItemIds: string[] },
+    { readCount: number }
+  >('activity:markManyRead'),
+};
 
 type TestDb = TestConvex<typeof schema>;
 type TestUser = ReturnType<TestDb['withIdentity']>;
@@ -280,6 +414,90 @@ async function createUploadedDraftAsset(input: {
   };
 }
 
+async function createPublishedShare(input: {
+  t: TestDb;
+  user: TestUser;
+  viewerId: Id<'users'>;
+  circleId: Id<'circles'>;
+  fileName?: string;
+  caption?: string;
+}) {
+  const uploaded = await createUploadedDraftAsset({
+    t: input.t,
+    user: input.user,
+    viewerId: input.viewerId,
+    circleId: input.circleId,
+    fileName: input.fileName,
+  });
+
+  await input.user.mutation(api.shares.publish, {
+    shareBatchId: uploaded.shareBatchId,
+    ...(input.caption ? { caption: input.caption } : {}),
+  });
+
+  return uploaded;
+}
+
+async function countEngagementRows(input: {
+  t: TestDb;
+  shareBatchId: Id<'shareBatches'>;
+}) {
+  return await input.t.run(async (ctx) => {
+    const db = ctx.db as unknown as {
+      query: (tableName: string) => {
+        withIndex: (
+          indexName: string,
+          range: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        ) => AsyncIterable<unknown>;
+      };
+    };
+    let comments = 0;
+    let reactions = 0;
+
+    for await (const comment of db
+      .query('comments')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', input.shareBatchId))) {
+      void comment;
+      comments += 1;
+    }
+
+    for await (const reaction of db
+      .query('reactions')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', input.shareBatchId))) {
+      void reaction;
+      reactions += 1;
+    }
+
+    return { comments, reactions };
+  });
+}
+
+async function countActivityInboxRows(input: {
+  t: TestDb;
+  shareBatchId: Id<'shareBatches'>;
+}) {
+  return await input.t.run(async (ctx) => {
+    const db = ctx.db as unknown as {
+      query: (tableName: string) => {
+        withIndex: (
+          indexName: string,
+          range: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        ) => AsyncIterable<unknown>;
+      };
+    };
+    let rows = 0;
+
+    for await (const item of db
+      .query('activityInboxItems')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', input.shareBatchId))) {
+      void item;
+      rows += 1;
+    }
+
+    return rows;
+  });
+}
+
 describe('http surface', () => {
   test('exposes public instance discovery for custom backend links', () => {
     expect(httpSurface).toContain('instance.discovery');
@@ -425,6 +643,26 @@ describe('deployment billing policy', () => {
       'assets.getReadUrl',
       'assets.listForShareBatch',
       'assets.deleteDraftAsset',
+    ]);
+  });
+
+  test('exposes only the intended public engagement functions', () => {
+    expect(activityFunctionSurface).toEqual([
+      'activity.listForViewer',
+      'activity.summaryForViewer',
+      'activity.listInboxForViewer',
+      'activity.markRead',
+      'activity.markManyRead',
+    ]);
+    expect(commentFunctionSurface).toEqual([
+      'comments.listForShare',
+      'comments.create',
+      'comments.delete',
+    ]);
+    expect(reactionFunctionSurface).toEqual([
+      'reactions.listForShare',
+      'reactions.set',
+      'reactions.remove',
     ]);
   });
 
@@ -1656,6 +1894,716 @@ describe('shares, uploads, and feed', () => {
     expect(secondPage.isDone).toBe(true);
   });
 
+  test('published shares expose share-level and asset-level comments and reactions to members', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const invite = await owner.user.mutation(api.invites.create, {
+      circleId: owner.circleId,
+      invitedEmail: 'member@example.com',
+      role: 'member',
+    });
+    const member = await upsertViewer(t, 'member@example.com', 'Member');
+    await member.user.mutation(api.invites.accept, { token: invite.token });
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'engaged.jpg',
+      caption: 'Engaged post',
+    });
+
+    const shareComment = await owner.user.mutation(commentsApi.create, {
+      shareBatchId: published.shareBatchId,
+      body: 'This belongs to the whole post.',
+    });
+    const assetComment = await member.user.mutation(commentsApi.create, {
+      shareBatchId: published.shareBatchId,
+      assetId: published.assetId,
+      body: 'This is about the photo.',
+    });
+    await member.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      emoji: '😍',
+    });
+    await owner.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      assetId: published.assetId,
+      emoji: '👍🏽',
+    });
+
+    await expect(
+      member.user.query(commentsApi.listForShare, {
+        shareBatchId: published.shareBatchId,
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).resolves.toMatchObject({
+      page: [
+        {
+          _id: shareComment.commentId,
+          targetKind: 'share',
+          assetId: null,
+          body: 'This belongs to the whole post.',
+          authorId: owner.viewer._id,
+          canDelete: false,
+        },
+      ],
+    });
+    await expect(
+      owner.user.query(commentsApi.listForShare, {
+        shareBatchId: published.shareBatchId,
+        assetId: published.assetId,
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).resolves.toMatchObject({
+      page: [
+        {
+          _id: assetComment.commentId,
+          targetKind: 'asset',
+          assetId: published.assetId,
+          body: 'This is about the photo.',
+          authorId: member.viewer._id,
+          canDelete: true,
+        },
+      ],
+    });
+
+    const reactions = await member.user.query(reactionsApi.listForShare, {
+      shareBatchId: published.shareBatchId,
+    });
+
+    expect(reactions.targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetKind: 'share',
+          assetId: null,
+          reactionCount: 1,
+          viewerReaction: '😍',
+          topReactions: [
+            {
+              emoji: '😍',
+              count: 1,
+              reactedByViewer: true,
+            },
+          ],
+        }),
+        expect.objectContaining({
+          targetKind: 'asset',
+          assetId: published.assetId,
+          reactionCount: 1,
+          viewerReaction: null,
+          topReactions: [
+            {
+              emoji: '👍🏽',
+              count: 1,
+              reactedByViewer: false,
+            },
+          ],
+        }),
+      ]),
+    );
+
+    const feed = await member.user.query(api.shares.listForCircle, {
+      circleId: owner.circleId,
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    const detail = await member.user.query(api.shares.getById, {
+      shareBatchId: published.shareBatchId,
+    });
+
+    expect(feed.page[0]).toMatchObject({
+      engagement: {
+        commentCount: 2,
+        reactionCount: 2,
+        topReactions: [
+          { emoji: '😍', count: 1, reactedByViewer: true },
+          { emoji: '👍🏽', count: 1, reactedByViewer: false },
+        ],
+      },
+    });
+    expect(detail).toMatchObject({
+      engagement: {
+        commentCount: 2,
+        reactionCount: 2,
+      },
+      shareTargetEngagement: {
+        commentCount: 1,
+        reactionCount: 1,
+        topReactions: [
+          { emoji: '😍', count: 1, reactedByViewer: true },
+        ],
+      },
+      assets: [
+        expect.objectContaining({
+          _id: published.assetId,
+          engagement: expect.objectContaining({
+            commentCount: 1,
+            reactionCount: 1,
+          }),
+        }),
+      ],
+    });
+  });
+
+  test('engagement APIs enforce membership, publication, and asset ownership', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const outsider = await upsertViewer(t, 'outsider@example.com', 'Outsider');
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'published.jpg',
+    });
+    const otherPublished = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'other.jpg',
+    });
+    const draft = await createUploadedDraftAsset({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'draft.jpg',
+    });
+
+    await expect(
+      outsider.user.query(commentsApi.listForShare, {
+        shareBatchId: published.shareBatchId,
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toThrow(/membership/i);
+    await expect(
+      outsider.user.mutation(commentsApi.create, {
+        shareBatchId: published.shareBatchId,
+        body: 'No access.',
+      }),
+    ).rejects.toThrow(/membership/i);
+    await expect(
+      outsider.user.mutation(reactionsApi.set, {
+        shareBatchId: published.shareBatchId,
+        emoji: '🔥',
+      }),
+    ).rejects.toThrow(/membership/i);
+    await expect(
+      owner.user.mutation(commentsApi.create, {
+        shareBatchId: draft.shareBatchId,
+        body: 'Draft comment.',
+      }),
+    ).rejects.toThrow(/published/i);
+    await expect(
+      owner.user.mutation(reactionsApi.set, {
+        shareBatchId: draft.shareBatchId,
+        emoji: '🔥',
+      }),
+    ).rejects.toThrow(/published/i);
+    await expect(
+      owner.user.mutation(commentsApi.create, {
+        shareBatchId: published.shareBatchId,
+        assetId: otherPublished.assetId,
+        body: 'Wrong asset.',
+      }),
+    ).rejects.toThrow(/asset/i);
+    await expect(
+      owner.user.mutation(reactionsApi.set, {
+        shareBatchId: published.shareBatchId,
+        assetId: otherPublished.assetId,
+        emoji: '🔥',
+      }),
+    ).rejects.toThrow(/asset/i);
+  });
+
+  test('reaction replacement and engagement validation keep one emoji reaction per user target', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'reaction.jpg',
+    });
+
+    await owner.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      emoji: '👍',
+    });
+    await owner.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      emoji: '😍',
+    });
+
+    const reactions = await owner.user.query(reactionsApi.listForShare, {
+      shareBatchId: published.shareBatchId,
+    });
+
+    expect(reactions.targets).toEqual([
+      {
+        targetKind: 'share',
+        assetId: null,
+        reactionCount: 1,
+        viewerReaction: '😍',
+        topReactions: [
+          {
+            emoji: '😍',
+            count: 1,
+            reactedByViewer: true,
+          },
+        ],
+      },
+    ]);
+    await expect(
+      owner.user.mutation(reactionsApi.set, {
+        shareBatchId: published.shareBatchId,
+        emoji: 'ok',
+      }),
+    ).rejects.toThrow(/emoji/i);
+    await expect(
+      owner.user.mutation(reactionsApi.set, {
+        shareBatchId: published.shareBatchId,
+        emoji: '👍👍',
+      }),
+    ).rejects.toThrow(/single emoji/i);
+    await expect(
+      owner.user.mutation(commentsApi.create, {
+        shareBatchId: published.shareBatchId,
+        body: '   ',
+      }),
+    ).rejects.toThrow(/comment/i);
+    await expect(
+      owner.user.mutation(commentsApi.create, {
+        shareBatchId: published.shareBatchId,
+        body: 'x'.repeat(COMMENT_MAX_BODY_LENGTH + 1),
+      }),
+    ).rejects.toThrow(/1000/i);
+  });
+
+  test('comment deletion follows author, share author, and admin permissions', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const memberInvite = await owner.user.mutation(api.invites.create, {
+      circleId: owner.circleId,
+      invitedEmail: 'member@example.com',
+      role: 'member',
+    });
+    const adminInvite = await owner.user.mutation(api.invites.create, {
+      circleId: owner.circleId,
+      invitedEmail: 'admin@example.com',
+      role: 'admin',
+    });
+    const member = await upsertViewer(t, 'member@example.com', 'Member');
+    const admin = await upsertViewer(t, 'admin@example.com', 'Admin');
+    await member.user.mutation(api.invites.accept, { token: memberInvite.token });
+    await admin.user.mutation(api.invites.accept, { token: adminInvite.token });
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'comments.jpg',
+    });
+    const memberComment = await member.user.mutation(commentsApi.create, {
+      shareBatchId: published.shareBatchId,
+      body: 'Member comment.',
+    });
+    const ownerComment = await owner.user.mutation(commentsApi.create, {
+      shareBatchId: published.shareBatchId,
+      body: 'Owner comment.',
+    });
+
+    await expect(
+      member.user.mutation(commentsApi.delete, {
+        commentId: ownerComment.commentId,
+      }),
+    ).rejects.toThrow(/delete/i);
+    await expect(
+      owner.user.mutation(commentsApi.delete, {
+        commentId: memberComment.commentId,
+      }),
+    ).resolves.toEqual({ commentId: memberComment.commentId });
+    await expect(
+      admin.user.mutation(commentsApi.delete, {
+        commentId: ownerComment.commentId,
+      }),
+    ).resolves.toEqual({ commentId: ownerComment.commentId });
+
+    const remaining = await owner.user.query(commentsApi.listForShare, {
+      shareBatchId: published.shareBatchId,
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(remaining.page).toEqual([]);
+  });
+
+  test('share deletion removes comments and reactions with the deleted share', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const invite = await owner.user.mutation(api.invites.create, {
+        circleId: owner.circleId,
+        invitedEmail: 'member@example.com',
+        role: 'member',
+      });
+      const member = await upsertViewer(t, 'member@example.com', 'Member');
+      await member.user.mutation(api.invites.accept, { token: invite.token });
+      const published = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'cleanup.jpg',
+      });
+
+      await owner.user.mutation(commentsApi.create, {
+        shareBatchId: published.shareBatchId,
+        body: 'Delete me with the share.',
+      });
+      await owner.user.mutation(commentsApi.create, {
+        shareBatchId: published.shareBatchId,
+        assetId: published.assetId,
+        body: 'Delete this asset comment too.',
+      });
+      await owner.user.mutation(reactionsApi.set, {
+        shareBatchId: published.shareBatchId,
+        emoji: '🔥',
+      });
+      await owner.user.mutation(reactionsApi.set, {
+        shareBatchId: published.shareBatchId,
+        assetId: published.assetId,
+        emoji: '📷',
+      });
+
+      await expect(countEngagementRows({ t, shareBatchId: published.shareBatchId })).resolves.toEqual({
+        comments: 2,
+        reactions: 2,
+      });
+      await expect(
+        listActivityEventsForEntity(t, owner.circleId, published.shareBatchId),
+      ).resolves.toHaveLength(5);
+      await expect(
+        countActivityInboxRows({ t, shareBatchId: published.shareBatchId }),
+      ).resolves.toBeGreaterThan(0);
+
+      await owner.user.action(api.shares.deleteShare, {
+        shareBatchId: published.shareBatchId,
+      });
+
+      await expect(countEngagementRows({ t, shareBatchId: published.shareBatchId })).resolves.toEqual({
+        comments: 0,
+        reactions: 0,
+      });
+      await expect(
+        listActivityEventsForEntity(t, owner.circleId, published.shareBatchId),
+      ).resolves.toHaveLength(0);
+      await expect(
+        countActivityInboxRows({ t, shareBatchId: published.shareBatchId }),
+      ).resolves.toBe(0);
+    });
+  });
+
+  test('activity listing includes publish, comment, and reaction events for members only', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const invite = await owner.user.mutation(api.invites.create, {
+      circleId: owner.circleId,
+      invitedEmail: 'member@example.com',
+      role: 'member',
+    });
+    const member = await upsertViewer(t, 'member@example.com', 'Member');
+    await member.user.mutation(api.invites.accept, { token: invite.token });
+    const outsiderCircle = await createCircleFor(t, 'outsider@example.com', 'Outsider Circle');
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'activity.jpg',
+    });
+
+    await createPublishedShare({
+      t,
+      user: outsiderCircle.user,
+      viewerId: outsiderCircle.viewer._id,
+      circleId: outsiderCircle.circleId,
+      fileName: 'outside.jpg',
+    });
+    await member.user.mutation(commentsApi.create, {
+      shareBatchId: published.shareBatchId,
+      assetId: published.assetId,
+      body: 'Activity comment.',
+    });
+    await owner.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      emoji: '🔥',
+    });
+
+    const activity = await member.user.query(activityApi.listForViewer, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(activity.page).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          circleId: owner.circleId,
+          actorId: owner.viewer._id,
+          type: 'share.published',
+          shareBatchId: published.shareBatchId,
+          assetId: null,
+        }),
+        expect.objectContaining({
+          circleId: owner.circleId,
+          actorId: member.viewer._id,
+          type: 'comment.created',
+          shareBatchId: published.shareBatchId,
+          assetId: published.assetId,
+        }),
+        expect.objectContaining({
+          circleId: owner.circleId,
+          actorId: owner.viewer._id,
+          type: 'reaction.set',
+          shareBatchId: published.shareBatchId,
+          assetId: null,
+        }),
+      ]),
+    );
+    expect(activity.page.map((event) => event.circleId)).not.toContain(outsiderCircle.circleId);
+    expect(activity.page.every((event) => event.displayText.length > 0)).toBe(true);
+  });
+
+  test('activity inbox creates unread recipient rows and excludes actor self-events', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const invite = await owner.user.mutation(api.invites.create, {
+      circleId: owner.circleId,
+      invitedEmail: 'member@example.com',
+      role: 'member',
+    });
+    const member = await upsertViewer(t, 'member@example.com', 'Member');
+    await member.user.mutation(api.invites.accept, { token: invite.token });
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'inbox.jpg',
+    });
+
+    await member.user.mutation(commentsApi.create, {
+      shareBatchId: published.shareBatchId,
+      assetId: published.assetId,
+      body: 'Inbox comment.',
+    });
+    await owner.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      emoji: '🔥',
+    });
+
+    await expect(owner.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+      unreadCount: 1,
+      hasUnread: true,
+    });
+    await expect(member.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+      unreadCount: 2,
+      hasUnread: true,
+    });
+
+    const memberInbox = await member.user.query(activityApi.listInboxForViewer, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(memberInbox.page).toHaveLength(2);
+    expect(memberInbox.page).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: owner.viewer._id,
+          type: 'share.published',
+          shareBatchId: published.shareBatchId,
+          assetId: null,
+          status: 'unread',
+        }),
+        expect.objectContaining({
+          actorId: owner.viewer._id,
+          type: 'reaction.set',
+          shareBatchId: published.shareBatchId,
+          assetId: null,
+          status: 'unread',
+        }),
+      ]),
+    );
+    expect(memberInbox.page.map((event) => event.type)).not.toContain('comment.created');
+
+    const ownerInbox = await owner.user.query(activityApi.listInboxForViewer, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(ownerInbox.page).toEqual([
+      expect.objectContaining({
+        actorId: member.viewer._id,
+        type: 'comment.created',
+        shareBatchId: published.shareBatchId,
+        assetId: published.assetId,
+        status: 'unread',
+      }),
+    ]);
+  });
+
+  test('activity inbox read mutations are idempotent and scoped to the viewer', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const invite = await owner.user.mutation(api.invites.create, {
+      circleId: owner.circleId,
+      invitedEmail: 'member@example.com',
+      role: 'member',
+    });
+    const member = await upsertViewer(t, 'member@example.com', 'Member');
+    const outsider = await createCircleFor(t, 'outsider@example.com');
+    await member.user.mutation(api.invites.accept, { token: invite.token });
+    const published = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'read-state.jpg',
+    });
+    await owner.user.mutation(reactionsApi.set, {
+      shareBatchId: published.shareBatchId,
+      emoji: '❤️',
+    });
+    const memberInbox = await member.user.query(activityApi.listInboxForViewer, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(memberInbox.page).toHaveLength(2);
+
+    const [firstItem, ...allItems] = memberInbox.page;
+
+    await expect(
+      outsider.user.mutation(activityApi.markRead, {
+        inboxItemId: firstItem!._id,
+      }),
+    ).rejects.toThrow(/activity/i);
+    await expect(
+      member.user.mutation(activityApi.markRead, {
+        inboxItemId: firstItem!._id,
+      }),
+    ).resolves.toEqual({
+      inboxItemId: firstItem!._id,
+      status: 'read',
+    });
+    await expect(
+      member.user.mutation(activityApi.markRead, {
+        inboxItemId: firstItem!._id,
+      }),
+    ).resolves.toEqual({
+      inboxItemId: firstItem!._id,
+      status: 'read',
+    });
+    await expect(member.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+      unreadCount: 1,
+      hasUnread: true,
+    });
+    await expect(
+      member.user.mutation(activityApi.markManyRead, {
+        inboxItemIds: [firstItem!, ...allItems].map((item) => item._id),
+      }),
+    ).resolves.toEqual({
+      readCount: 2,
+    });
+    await expect(member.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+      unreadCount: 0,
+      hasUnread: false,
+    });
+  });
+
+  test('activity inbox unread summary caps at ninety-nine', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+
+    await t.run(async (ctx) => {
+      const db = ctx.db as unknown as {
+        insert: (tableName: string, value: Record<string, unknown>) => Promise<string>;
+      };
+      const shareBatchId = await db.insert('shareBatches', {
+        circleId: owner.circleId,
+        authorId: owner.viewer._id,
+        assetCount: 1,
+        status: 'published',
+        createdAt: 0,
+        updatedAt: 0,
+        publishedAt: 0,
+      });
+
+      for (let index = 0; index < 105; index++) {
+        const activityEventId = await db.insert('activityEvents', {
+          circleId: owner.circleId,
+          actorId: owner.viewer._id,
+          type: 'share.published',
+          entityId: shareBatchId,
+          shareBatchId,
+          createdAt: index,
+        });
+
+        await db.insert('activityInboxItems', {
+          activityEventId,
+          userId: owner.viewer._id,
+          circleId: owner.circleId,
+          actorId: owner.viewer._id,
+          type: 'share.published',
+          shareBatchId,
+          status: 'unread',
+          createdAt: index,
+        });
+      }
+    });
+
+    await expect(owner.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+      unreadCount: 99,
+      hasUnread: true,
+    });
+  });
+
+  test('activity listing paginates across viewer circles', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'activity-owner@example.com');
+    const secondCircle = await owner.user.mutation(api.circles.create, {
+      name: 'Second',
+      description: 'Second private circle',
+    });
+    const first = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'first-activity.jpg',
+    });
+    const second = await createPublishedShare({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: secondCircle.circleId as Id<'circles'>,
+      fileName: 'second-activity.jpg',
+    });
+
+    const firstPage = await owner.user.query(activityApi.listForViewer, {
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+
+    expect(firstPage.page).toHaveLength(1);
+    expect(firstPage.isDone).toBe(false);
+
+    const secondPage = await owner.user.query(activityApi.listForViewer, {
+      paginationOpts: { numItems: 1, cursor: firstPage.continueCursor },
+    });
+
+    expect([...firstPage.page, ...secondPage.page].map((event) => event.shareBatchId)).toEqual(
+      expect.arrayContaining([first.shareBatchId, second.shareBatchId]),
+    );
+  });
+
   test('publish rejects drafts with unresolved upload rows', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
@@ -2121,6 +3069,52 @@ describe('shares, uploads, and feed', () => {
       await expect(
         listActivityEventsForEntity(t, owner.circleId, uploaded.shareBatchId),
       ).resolves.toHaveLength(0);
+    });
+  });
+
+  test('share deletion batches same-share activity events before finalizing', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const published = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'activity-batch.jpg',
+      });
+
+      await t.run(async (ctx) => {
+        for (let index = 0; index < EXPECTED_SHARE_DELETE_BATCH_SIZE + 3; index++) {
+          await ctx.db.insert('activityEvents', {
+            circleId: owner.circleId,
+            actorId: owner.viewer._id,
+            type: 'comment.created',
+            entityId: published.shareBatchId,
+            shareBatchId: published.shareBatchId,
+            createdAt: Date.now() + index,
+          });
+        }
+      });
+
+      const firstDeleteContext = await owner.user.query(internal.shares.getDeleteContext, {
+        shareBatchId: published.shareBatchId,
+      }) as {
+        activityEventIds?: Id<'activityEvents'>[];
+        isFinalBatch: boolean;
+      };
+
+      expect(firstDeleteContext.activityEventIds).toHaveLength(EXPECTED_SHARE_DELETE_BATCH_SIZE);
+      expect(firstDeleteContext.isFinalBatch).toBe(false);
+
+      await owner.user.action(api.shares.deleteShare, {
+        shareBatchId: published.shareBatchId,
+      });
+
+      await expect(
+        listActivityEventsForEntity(t, owner.circleId, published.shareBatchId),
+      ).resolves.toHaveLength(0);
+      await expect(t.run(async (ctx) => await ctx.db.get(published.shareBatchId))).resolves.toBeNull();
     });
   });
 
