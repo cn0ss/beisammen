@@ -36,36 +36,69 @@ export function parseReleaseArgs(argv) {
 }
 
 export function buildReleaseCommands(args) {
-  const commands = [
-    ['pnpm', ['typecheck']],
-    ['pnpm', ['test']],
+  return buildReleaseSteps(args).map((step) => [step.command, step.args]);
+}
+
+export function buildReleaseSteps(args) {
+  const steps = [
+    {
+      name: 'typecheck',
+      command: 'pnpm',
+      args: ['typecheck'],
+    },
+    {
+      name: 'tests',
+      command: 'pnpm',
+      args: ['test'],
+    },
   ];
 
   if (args.cloudUrl) {
-    commands.push([
-      'pnpm',
-      [
+    steps.push({
+      name: 'cloud-smoke',
+      command: 'pnpm',
+      args: [
         'smoke:beta',
         '--',
         args.cloudUrl,
         '--expect-kind=cloud',
         `--app-version=${args.appVersion}`,
       ],
-    ]);
+    });
   }
 
   if (args.selfHostedUrl) {
-    commands.push([
-      'pnpm',
-      [
+    steps.push({
+      name: 'self-hosted-smoke',
+      command: 'pnpm',
+      args: [
         'smoke:beta',
         '--',
         args.selfHostedUrl,
         '--expect-kind=self-hosted',
         `--app-version=${args.appVersion}`,
       ],
-    ]);
+    });
   }
 
-  return commands;
+  return steps;
+}
+
+export function createReleaseSummary(args, checks, now = new Date()) {
+  return {
+    generatedAt: now.toISOString(),
+    appVersion: args.appVersion,
+    targets: {
+      cloudUrl: args.cloudUrl,
+      selfHostedUrl: args.selfHostedUrl,
+    },
+    checks: [
+      {
+        name: 'app-version',
+        status: 'passed',
+        appVersion: args.appVersion,
+      },
+      ...checks,
+    ],
+  };
 }

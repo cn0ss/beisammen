@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,11 @@ import { Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import {
+  inviteModeLabel,
+  inviteRoleLabel,
+  resolveInvitePreviewState,
+} from '@/features/invites/preview-state';
 import { useTheme } from '@/hooks/use-theme';
 
 function formatInviteExpiry(timestamp: number) {
@@ -17,10 +22,6 @@ function formatInviteExpiry(timestamp: number) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(timestamp));
-}
-
-function roleLabel(role: 'admin' | 'member') {
-  return role === 'admin' ? 'Admin' : 'Mitglied';
 }
 
 export default function InviteAcceptScreen() {
@@ -40,23 +41,7 @@ export default function InviteAcceptScreen() {
   const isViewerBootstrapping =
     Boolean(session && convexAuth.isAuthenticated) &&
     (viewerState === undefined || (viewerState.isAuthenticated && viewerState.viewer === null));
-
-  const statusText = useMemo(() => {
-    if (!preview) {
-      return null;
-    }
-
-    switch (preview.status) {
-      case 'accepted':
-        return 'Diese Einladung wurde bereits verwendet.';
-      case 'expired':
-        return 'Diese Einladung ist bereits abgelaufen.';
-      case 'revoked':
-        return 'Diese Einladung wurde zurückgezogen.';
-      default:
-        return null;
-    }
-  }, [preview]);
+  const previewState = resolveInvitePreviewState({ preview });
 
   const handleDismiss = useCallback(async () => {
     await clearPendingInviteToken();
@@ -118,13 +103,13 @@ export default function InviteAcceptScreen() {
           <Text style={[styles.title, { color: theme.text }]}>Circle-Einladung</Text>
         </View>
 
-        {isViewerBootstrapping || preview === undefined ? (
+        {isViewerBootstrapping || previewState.kind === 'loading' ? (
           <Card>
             <LoadingBox />
           </Card>
-        ) : !preview ? (
+        ) : previewState.kind === 'not-found' || !preview ? (
           <Card>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>Einladung nicht gefunden</Text>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>{previewState.title}</Text>
             <Text style={[styles.body, { color: theme.textSecondary }]}>
               Der Invite-Link ist ungültig oder gehört nicht mehr zu einem bestehenden Circle.
             </Text>
@@ -135,37 +120,41 @@ export default function InviteAcceptScreen() {
             <Card>
               <Text style={[styles.cardTitle, { color: theme.text }]}>{preview.circleName}</Text>
               <Text style={[styles.body, { color: theme.textSecondary }]}>
-                Diese Einladung ist für <Text style={styles.emphasis}>{preview.invitedEmail}</Text> und
-                vergibt die Rolle <Text style={styles.emphasis}>{roleLabel(preview.role)}</Text>.
+                {preview.mode === 'open'
+                  ? 'Dieser offene Link kann einmalig von einem neuen Mitglied angenommen werden.'
+                  : 'Diese Einladung ist persönlich an die angegebene E-Mail gebunden.'}
               </Text>
+              <InfoRow
+                icon={preview.mode === 'open' ? 'link-outline' : 'mail-outline'}
+                label="Typ"
+                value={inviteModeLabel(preview.mode)}
+              />
+              {preview.invitedEmail ? (
+                <InfoRow icon="mail-outline" label="Eingeladen" value={preview.invitedEmail} />
+              ) : null}
               <InfoRow
                 icon="mail-outline"
                 label="Aktives Konto"
                 value={viewer?.email ?? 'Keine E-Mail im Profil'}
               />
+              <InfoRow icon="person-outline" label="Rolle" value={inviteRoleLabel(preview.role)} />
               <InfoRow
                 icon="time-outline"
                 label="Gültig bis"
                 value={formatInviteExpiry(preview.expiresAt)}
               />
+              {preview.acceptedBy ? (
+                <InfoRow
+                  icon="checkmark-circle-outline"
+                  label="Angenommen"
+                  value={preview.acceptedBy.displayName}
+                />
+              ) : null}
             </Card>
 
-            {statusText ? (
+            {previewState.kind === 'can-accept' ? (
               <Card>
-                <Text style={[styles.body, { color: theme.textSecondary }]}>{statusText}</Text>
-                <Button label="Schließen" icon="close-outline" onPress={() => void handleDismiss()} />
-              </Card>
-            ) : !preview.emailMatchesViewer ? (
-              <Card>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>E-Mail passt nicht</Text>
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Melde dich mit <Text style={styles.emphasis}>{preview.invitedEmail}</Text> an, um
-                  diesen Invite anzunehmen.
-                </Text>
-                <Button label="Zurück zur App" icon="arrow-back-outline" onPress={() => void handleDismiss()} />
-              </Card>
-            ) : (
-              <Card>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{previewState.title}</Text>
                 <Text style={[styles.body, { color: theme.textSecondary }]}>
                   Wenn du fortfährst, wirst du sofort zu diesem Circle hinzugefügt.
                 </Text>
@@ -186,6 +175,20 @@ export default function InviteAcceptScreen() {
                     void handleDismiss();
                   }}
                 />
+              </Card>
+            ) : (
+              <Card>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{previewState.title}</Text>
+                <Text style={[styles.body, { color: theme.textSecondary }]}>
+                  {previewState.kind === 'email-mismatch' && preview.invitedEmail
+                    ? `Melde dich mit ${preview.invitedEmail} an, um diesen Invite anzunehmen.`
+                    : previewState.kind === 'already-member'
+                      ? 'Du bist bereits Mitglied in diesem Circle.'
+                      : previewState.kind === 'consumed'
+                        ? 'Dieser Einmal-Link kann nicht erneut verwendet werden.'
+                        : 'Dieser Invite kann nicht mehr angenommen werden.'}
+                </Text>
+                <Button label="Zurück zur App" icon="arrow-back-outline" onPress={() => void handleDismiss()} />
               </Card>
             )}
           </>
@@ -256,9 +259,6 @@ const styles = StyleSheet.create({
   body: {
     fontSize: FontSize.base,
     lineHeight: 22,
-  },
-  emphasis: {
-    fontWeight: '700',
   },
   infoRow: {
     flexDirection: 'row',

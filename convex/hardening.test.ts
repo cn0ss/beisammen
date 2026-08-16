@@ -4,6 +4,47 @@ import { convexTest, type TestConvex } from 'convex-test';
 import { makeFunctionReference, type UserIdentity } from 'convex/server';
 import { describe, expect, test, vi } from 'vitest';
 
+const autumnMocks = vi.hoisted(() => ({
+  check: vi.fn(),
+  checkout: vi.fn(),
+  track: vi.fn(),
+  customersGet: vi.fn(),
+  billingPortal: vi.fn(),
+}));
+
+vi.mock('@useautumn/convex', () => ({
+  Autumn: vi.fn(function AutumnConvexMock(_component: unknown, options: { identify: (ctx: unknown) => Promise<{ customerId: string }> }) {
+    return {
+      check: autumnMocks.check,
+      track: autumnMocks.track,
+      checkout: autumnMocks.checkout,
+      customers: {
+        get: async (ctx: unknown, args?: { expand?: unknown[] }) => {
+          const identifier = await options.identify(ctx);
+          return await autumnMocks.customersGet(
+            identifier.customerId,
+            args?.expand === undefined ? undefined : { expand: args.expand },
+          );
+        },
+        billingPortal: autumnMocks.billingPortal,
+      },
+    };
+  }),
+}));
+
+vi.mock('autumn-js', () => ({
+  Autumn: vi.fn(function AutumnMock() {
+    return {
+      check: autumnMocks.check,
+      track: autumnMocks.track,
+      customers: {
+        get: autumnMocks.customersGet,
+        billingPortal: autumnMocks.billingPortal,
+      },
+    };
+  }),
+}));
+
 import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { activityFunctionSurface } from './activity';
@@ -14,6 +55,7 @@ import { commentFunctionSurface } from './comments';
 import { httpSurface } from './http';
 import { billingBackendKind } from './lib/billing/autumn';
 import {
+  buildBillingReturnAppUrl,
   appendParamsToUrl,
   buildCallbackUrlFromEnv,
   buildPublicInstanceConfigFromEnv,
@@ -24,6 +66,7 @@ import {
   DEFAULT_CLOUD_BILLING_PLANS,
   getDeploymentPolicyFromEnv,
 } from './lib/instance';
+import { notificationsFunctionSurface } from './notifications';
 import { verifyS3ObjectExists } from './lib/storage/s3';
 import { BETA_MAX_MEDIA_SELECTION_COUNT } from './lib/uploadLimits';
 import { reactionFunctionSurface } from './reactions';
@@ -102,6 +145,128 @@ const reactionsApi = {
   >('reactions:remove'),
 };
 
+const notificationsApi = {
+  registerDevice: makeFunctionReference<
+    'mutation',
+    {
+      instanceUrl: string;
+      token: string;
+      platform: 'ios' | 'android' | 'web' | 'unknown';
+      appVersion?: string;
+    },
+    {
+      deviceId: string;
+      instanceUrl: string;
+      platform: 'ios' | 'android' | 'web' | 'unknown';
+      provider: 'expo';
+      registeredAt: number;
+    }
+  >('notifications:registerDevice'),
+  getPreferences: makeFunctionReference<
+    'query',
+    Record<string, never>,
+    Array<{
+      kind: 'share.published' | 'comment.created' | 'reaction.set';
+      enabled: boolean;
+      updatedAt: number | null;
+    }>
+  >('notifications:getPreferences'),
+  updatePreferences: makeFunctionReference<
+    'mutation',
+    {
+      kind: 'share.published' | 'comment.created' | 'reaction.set';
+      enabled: boolean;
+    },
+    {
+      kind: 'share.published' | 'comment.created' | 'reaction.set';
+      enabled: boolean;
+      updatedAt: number | null;
+    }
+  >('notifications:updatePreferences'),
+};
+
+const notificationWorkersApi = {
+  dispatchQueued: makeFunctionReference<
+    'action',
+    { now?: number },
+    {
+      scanned: number;
+      sent: number;
+      failed: number;
+      retried: number;
+      skipped: number;
+    }
+  >('notifications:dispatchQueued'),
+  checkReceipts: makeFunctionReference<
+    'action',
+    { now?: number },
+    {
+      scanned: number;
+      delivered: number;
+      failed: number;
+      missing: number;
+      retried: number;
+      skipped: number;
+    }
+  >('notifications:checkReceipts'),
+};
+
+const invitesApi = {
+  create: makeFunctionReference<
+    'mutation',
+    {
+      circleId: Id<'circles'>;
+      mode?: 'email' | 'open';
+      invitedEmail?: string;
+      role: 'admin' | 'member';
+    },
+    { inviteId: Id<'invites'>; token: string; inviteLink: string }
+  >('invites:create'),
+  listForCircle: makeFunctionReference<
+    'query',
+    { circleId: Id<'circles'> },
+    Array<{
+      _id: Id<'invites'>;
+      circleId: Id<'circles'>;
+      mode: 'email' | 'open';
+      invitedEmail: string | null;
+      role: 'admin' | 'member';
+      status: 'pending' | 'accepted' | 'expired' | 'revoked';
+      expiresAt: number;
+      acceptedAt: number | null;
+      acceptedBy: { userId: Id<'users'>; displayName: string } | null;
+      canRevoke: boolean;
+    }>
+  >('invites:listForCircle'),
+  preview: makeFunctionReference<
+    'query',
+    { token: string },
+    {
+      inviteId: Id<'invites'>;
+      circleId: Id<'circles'>;
+      circleName: string;
+      mode: 'email' | 'open';
+      invitedEmail: string | null;
+      role: 'admin' | 'member';
+      status: 'pending' | 'accepted' | 'expired' | 'revoked';
+      expiresAt: number;
+      acceptedAt: number | null;
+      acceptedBy: { userId: Id<'users'>; displayName: string } | null;
+      canAccept: boolean;
+      emailMatchesViewer: boolean;
+      isAlreadyMember: boolean;
+    } | null
+  >('invites:preview'),
+  accept: makeFunctionReference<
+    'mutation',
+    { token: string },
+    { inviteId: Id<'invites'>; circleId: Id<'circles'> }
+  >('invites:accept'),
+  revoke: makeFunctionReference<'mutation', { inviteId: Id<'invites'> }, { inviteId: Id<'invites'> }>(
+    'invites:revoke',
+  ),
+};
+
 const activityApi = {
   listForViewer: makeFunctionReference<
     'query',
@@ -167,6 +332,88 @@ const activityApi = {
   >('activity:markManyRead'),
 };
 
+const memoriesApi = {
+  listForViewer: makeFunctionReference<
+    'query',
+    {
+      circleId?: Id<'circles'>;
+      filter?: { kind: 'month' | 'place'; key: string };
+      paginationOpts: { numItems: number; cursor: string | null };
+    },
+    {
+      page: Array<{
+        _id: Id<'memoryItems'>;
+        circleId: Id<'circles'>;
+        circleName: string;
+        shareBatchId: Id<'shareBatches'>;
+        assetId: Id<'assets'>;
+        authorId: Id<'users'>;
+        authorName: string;
+        kind: 'image' | 'video';
+        caption: string;
+        timelineAt: number;
+        capturedAt: number | null;
+        publishedAt: number;
+        monthKey: string | null;
+        placeKey: string | null;
+        placeLabel: string | null;
+        asset: {
+          _id: Id<'assets'>;
+          kind: 'image' | 'video';
+          fileName?: string;
+          location?: {
+            latitude: number;
+            longitude: number;
+            source: 'embedded' | 'device-fallback';
+          };
+        };
+      }>;
+      isDone: boolean;
+      continueCursor: string;
+    }
+  >('memories:listForViewer'),
+  discoveryForViewer: makeFunctionReference<
+    'query',
+    { circleId?: Id<'circles'> },
+    {
+      months: Array<{
+        key: string;
+        itemCount: number;
+        latestTimelineAt: number;
+        coverAssetId: Id<'assets'>;
+      }>;
+      places: Array<{
+        key: string;
+        label: string;
+        latitude: number;
+        longitude: number;
+        itemCount: number;
+        latestTimelineAt: number;
+        coverAssetId: Id<'assets'>;
+      }>;
+    }
+  >('memories:discoveryForViewer'),
+};
+
+const internalMemoriesApi = {
+  backfillBatch: makeFunctionReference<
+    'mutation',
+    { cursor?: string | null; batchSize?: number },
+    { scanned: number; inserted: number; hasMore: boolean; continueCursor: string }
+  >('memories:backfillBatch'),
+  backfillDiscoveryBatch: makeFunctionReference<
+    'mutation',
+    { cursor?: string | null; batchSize?: number; dryRun?: boolean },
+    {
+      scanned: number;
+      patched: number;
+      summaryWrites: number;
+      hasMore: boolean;
+      continueCursor: string;
+    }
+  >('memories:backfillDiscoveryBatch'),
+};
+
 type TestDb = TestConvex<typeof schema>;
 type TestUser = ReturnType<TestDb['withIdentity']>;
 
@@ -212,6 +459,51 @@ async function withS3SigningEnv<T>(run: () => Promise<T>): Promise<T> {
       delete process.env.S3_SECRET_ACCESS_KEY;
     } else {
       process.env.S3_SECRET_ACCESS_KEY = originalSecretAccessKey;
+    }
+  }
+}
+
+async function withAutumnSecret<T>(run: () => Promise<T>): Promise<T> {
+  const originalSecret = process.env.AUTUMN_SECRET_KEY;
+  process.env.AUTUMN_SECRET_KEY = 'am_sk_test';
+
+  try {
+    return await run();
+  } finally {
+    if (originalSecret === undefined) {
+      delete process.env.AUTUMN_SECRET_KEY;
+    } else {
+      process.env.AUTUMN_SECRET_KEY = originalSecret;
+    }
+  }
+}
+
+async function withoutExpoPushAccessToken<T>(run: () => Promise<T>): Promise<T> {
+  const originalToken = process.env.EXPO_PUSH_ACCESS_TOKEN;
+  delete process.env.EXPO_PUSH_ACCESS_TOKEN;
+
+  try {
+    return await run();
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env.EXPO_PUSH_ACCESS_TOKEN;
+    } else {
+      process.env.EXPO_PUSH_ACCESS_TOKEN = originalToken;
+    }
+  }
+}
+
+async function withExpoPushAccessToken<T>(run: () => Promise<T>): Promise<T> {
+  const originalToken = process.env.EXPO_PUSH_ACCESS_TOKEN;
+  process.env.EXPO_PUSH_ACCESS_TOKEN = 'expo-push-test-token';
+
+  try {
+    return await run();
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env.EXPO_PUSH_ACCESS_TOKEN;
+    } else {
+      process.env.EXPO_PUSH_ACCESS_TOKEN = originalToken;
     }
   }
 }
@@ -377,6 +669,17 @@ async function createUploadedDraftAsset(input: {
   fileName?: string;
   mimeType?: string;
   sizeBytes?: number;
+  capturedAt?: number;
+  location?: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    label?: string;
+    city?: string;
+    region?: string;
+    country?: string;
+    source: 'embedded' | 'device-fallback';
+  };
 }) {
   const kind = input.kind ?? 'image';
   const fileName = input.fileName ?? (kind === 'image' ? 'photo.jpg' : 'clip.mp4');
@@ -405,6 +708,8 @@ async function createUploadedDraftAsset(input: {
     storageId,
     fileName,
     sizeBytes: input.sizeBytes ?? 2048,
+    ...(input.capturedAt !== undefined ? { capturedAt: input.capturedAt } : {}),
+    ...(input.location !== undefined ? { location: input.location } : {}),
   });
 
   return {
@@ -421,6 +726,17 @@ async function createPublishedShare(input: {
   circleId: Id<'circles'>;
   fileName?: string;
   caption?: string;
+  capturedAt?: number;
+  location?: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    label?: string;
+    city?: string;
+    region?: string;
+    country?: string;
+    source: 'embedded' | 'device-fallback';
+  };
 }) {
   const uploaded = await createUploadedDraftAsset({
     t: input.t,
@@ -428,6 +744,8 @@ async function createPublishedShare(input: {
     viewerId: input.viewerId,
     circleId: input.circleId,
     fileName: input.fileName,
+    capturedAt: input.capturedAt,
+    location: input.location,
   });
 
   await input.user.mutation(api.shares.publish, {
@@ -498,9 +816,133 @@ async function countActivityInboxRows(input: {
   });
 }
 
+async function listNotificationDeliveryAttempts(input: {
+  t: TestDb;
+  shareBatchId: Id<'shareBatches'>;
+}) {
+  return await input.t.run(async (ctx) => {
+    const db = ctx.db as unknown as {
+      query: (tableName: string) => {
+        withIndex: (
+          indexName: string,
+          range: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        ) => { collect: () => Promise<Array<Record<string, unknown>>> };
+      };
+    };
+
+    return await db
+      .query('notificationDeliveryAttempts')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', input.shareBatchId))
+      .collect();
+  });
+}
+
+async function listMemoryRowsForShare(input: {
+  t: TestDb;
+  shareBatchId: Id<'shareBatches'>;
+}) {
+  return await input.t.run(async (ctx) => {
+    const db = ctx.db as unknown as {
+      query: (tableName: string) => {
+        withIndex: (
+          indexName: string,
+          range: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        ) => { collect: () => Promise<Array<Record<string, unknown>>> };
+      };
+    };
+
+    return await db
+      .query('memoryItems')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', input.shareBatchId))
+      .collect();
+  });
+}
+
+async function countNotificationDevices(input: {
+  t: TestDb;
+  userId: Id<'users'>;
+}) {
+  return await input.t.run(async (ctx) => {
+    const db = ctx.db as unknown as {
+      query: (tableName: string) => {
+        withIndex: (
+          indexName: string,
+          range: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        ) => { collect: () => Promise<Array<Record<string, unknown>>> };
+      };
+    };
+    const devices = await db
+      .query('notificationDevices')
+      .withIndex('by_user', (q) => q.eq('userId', input.userId))
+      .collect();
+
+    return devices.length;
+  });
+}
+
+async function createQueuedPushAttempt(input?: {
+  disabledKind?: 'share.published' | 'comment.created' | 'reaction.set';
+}) {
+  const t = createTestDb();
+  const owner = await createCircleFor(t, 'owner@example.com', 'Family Circle');
+  const invite = await owner.user.mutation(api.invites.create, {
+    circleId: owner.circleId,
+    invitedEmail: 'member@example.com',
+    role: 'member',
+  });
+  const member = await upsertViewer(t, 'member@example.com', 'Member');
+  await member.user.mutation(api.invites.accept, { token: invite.token });
+  await member.user.mutation(notificationsApi.registerDevice, {
+    instanceUrl: 'https://cloud.example.com',
+    token: 'ExponentPushToken[member-device]',
+    platform: 'ios',
+    appVersion: '0.1.0',
+  });
+
+  if (input?.disabledKind) {
+    await member.user.mutation(notificationsApi.updatePreferences, {
+      kind: input.disabledKind,
+      enabled: false,
+    });
+  }
+
+  const published = await createPublishedShare({
+    t,
+    user: owner.user,
+    viewerId: owner.viewer._id,
+    circleId: owner.circleId,
+    fileName: 'push-delivery.jpg',
+  });
+  const [attempt] = await listNotificationDeliveryAttempts({
+    t,
+    shareBatchId: published.shareBatchId,
+  });
+
+  if (!attempt) {
+    throw new Error('Expected notification attempt to be created.');
+  }
+
+  return {
+    t,
+    owner,
+    member,
+    published,
+    attempt: attempt as unknown as Doc<'notificationDeliveryAttempts'>,
+  };
+}
+
 describe('http surface', () => {
   test('exposes public instance discovery for custom backend links', () => {
     expect(httpSurface).toContain('instance.discovery');
+  });
+
+  test('exposes billing return and builds the mobile deep link from env', () => {
+    expect(httpSurface).toContain('billing.return');
+    expect(
+      buildBillingReturnAppUrl({
+        PUBLIC_APP_SCHEME: 'beisammen-beta',
+      }, 'portal'),
+    ).toBe('beisammen-beta://settings?billing=return&source=portal');
   });
 
   test('builds cloud and self-hosted public instance manifests from env', () => {
@@ -633,6 +1075,7 @@ describe('deployment billing policy', () => {
     expect(billingFunctionSurface).toEqual([
       'billing.status',
       'billing.statusForCircle',
+      'billing.uploadReadinessForCircle',
       'billing.createCheckout',
       'billing.createPortalSession',
     ]);
@@ -663,6 +1106,12 @@ describe('deployment billing policy', () => {
       'reactions.listForShare',
       'reactions.set',
       'reactions.remove',
+    ]);
+    expect(notificationsFunctionSurface).toEqual([
+      'notifications.registerDevice',
+      'notifications.unregisterDevice',
+      'notifications.getPreferences',
+      'notifications.updatePreferences',
     ]);
   });
 
@@ -804,6 +1253,126 @@ describe('invites', () => {
     );
   });
 
+  test('open invites can be accepted once by any non-member viewer', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const firstInvitee = await upsertViewer(t, 'first@example.com', 'First Invitee');
+    const secondInvitee = await upsertViewer(t, 'second@example.com', 'Second Invitee');
+    const invite = await owner.user.mutation(invitesApi.create, {
+      circleId: owner.circleId,
+      mode: 'open',
+      role: 'member',
+    });
+
+    await expect(
+      firstInvitee.user.query(invitesApi.preview, { token: invite.token }),
+    ).resolves.toMatchObject({
+      mode: 'open',
+      invitedEmail: null,
+      canAccept: true,
+      emailMatchesViewer: true,
+      isAlreadyMember: false,
+    });
+
+    await expect(
+      firstInvitee.user.mutation(invitesApi.accept, { token: invite.token }),
+    ).resolves.toMatchObject({
+      inviteId: invite.inviteId,
+      circleId: owner.circleId,
+    });
+    await expect(getCircleStats(t, owner.circleId)).resolves.toMatchObject({
+      memberCount: 2,
+    });
+
+    await expect(
+      secondInvitee.user.query(invitesApi.preview, { token: invite.token }),
+    ).resolves.toMatchObject({
+      status: 'accepted',
+      canAccept: false,
+      acceptedBy: {
+        userId: firstInvitee.viewer._id,
+        displayName: 'First Invitee',
+      },
+    });
+    await expect(
+      secondInvitee.user.mutation(invitesApi.accept, { token: invite.token }),
+    ).rejects.toThrow(/pending/i);
+  });
+
+  test('open invite previews do not let existing members consume the link', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const invite = await owner.user.mutation(invitesApi.create, {
+      circleId: owner.circleId,
+      mode: 'open',
+      role: 'admin',
+    });
+
+    await expect(owner.user.query(invitesApi.preview, { token: invite.token })).resolves.toMatchObject({
+      mode: 'open',
+      role: 'admin',
+      canAccept: false,
+      isAlreadyMember: true,
+    });
+    await expect(owner.user.mutation(invitesApi.accept, { token: invite.token })).rejects.toThrow(
+      /already/i,
+    );
+
+    const stored = await t.run(async (ctx) => await ctx.db.get(invite.inviteId));
+    expect(stored).toMatchObject({
+      status: 'pending',
+    });
+    expect(stored?.acceptedAt).toBeUndefined();
+    expect(stored?.acceptedBy).toBeUndefined();
+  });
+
+  test('invite list and revoke expose open invite metadata', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const openInvite = await owner.user.mutation(invitesApi.create, {
+      circleId: owner.circleId,
+      mode: 'open',
+      role: 'admin',
+    });
+    await owner.user.mutation(invitesApi.create, {
+      circleId: owner.circleId,
+      mode: 'email',
+      invitedEmail: 'email@example.com',
+      role: 'member',
+    });
+
+    await expect(owner.user.query(invitesApi.listForCircle, { circleId: owner.circleId })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          _id: openInvite.inviteId,
+          mode: 'open',
+          invitedEmail: null,
+          role: 'admin',
+          acceptedBy: null,
+          canRevoke: true,
+        }),
+        expect.objectContaining({
+          mode: 'email',
+          invitedEmail: 'email@example.com',
+          role: 'member',
+        }),
+      ]),
+    );
+
+    await owner.user.mutation(invitesApi.revoke, { inviteId: openInvite.inviteId });
+
+    await expect(owner.user.query(invitesApi.listForCircle, { circleId: owner.circleId })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          _id: openInvite.inviteId,
+          mode: 'open',
+          status: 'revoked',
+          canRevoke: false,
+        }),
+      ]),
+    );
+  });
+
   test('circle invite list is bounded to the newest expiring invites', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
@@ -934,6 +1503,284 @@ describe('circle authorization and stats', () => {
         billing: {
           customerId: owner.viewer._id,
         },
+      });
+    });
+  });
+
+  test('cloud billing status exposes an active Autumn product for the viewer', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.customersGet.mockReset();
+        autumnMocks.customersGet.mockResolvedValueOnce({
+          data: {
+            id: 'customer_123',
+            products: [
+              {
+                id: 'cloud_family',
+                status: 'active',
+                current_period_end: 1_750_000_000_000,
+              },
+            ],
+            features: {},
+          },
+          error: null,
+          statusCode: 200,
+        });
+
+        const t = createTestDb();
+        const { user, viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await expect(user.action(api.billing.status, {})).resolves.toMatchObject({
+          deployment: 'cloud',
+          billing: {
+            customerId: viewer._id,
+          },
+          activePlanIds: ['cloud_family'],
+          subscriptions: [
+            {
+              planId: 'cloud_family',
+              status: 'active',
+              currentPeriodEnd: 1_750_000_000_000,
+            },
+          ],
+        });
+        expect(autumnMocks.customersGet).toHaveBeenLastCalledWith(viewer._id, undefined);
+      });
+    });
+  });
+
+  test('circle billing status exposes an active Autumn product for the owner', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.customersGet.mockReset();
+        autumnMocks.customersGet.mockResolvedValueOnce({
+          data: {
+            id: 'customer_123',
+            products: [
+              {
+                id: 'cloud_family',
+                status: 'active',
+              },
+            ],
+            features: {},
+          },
+          error: null,
+          statusCode: 200,
+        });
+
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+
+        await expect(
+          owner.user.action(api.billing.statusForCircle, {
+            circleId: owner.circleId,
+          }),
+        ).resolves.toMatchObject({
+          deployment: 'cloud',
+          billing: {
+            customerId: owner.viewer._id,
+          },
+          activePlanIds: ['cloud_family'],
+        });
+
+        expect(autumnMocks.customersGet).toHaveBeenLastCalledWith(owner.viewer._id);
+      });
+    });
+  });
+
+  test('cloud billing status treats a missing Autumn customer as no active plan', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.customersGet.mockReset();
+        autumnMocks.customersGet.mockResolvedValueOnce({
+          data: null,
+          error: {
+            message: 'Customer not found',
+            code: 'not_found',
+          },
+          statusCode: 404,
+        });
+
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await expect(user.action(api.billing.status, {})).resolves.toMatchObject({
+          deployment: 'cloud',
+          activePlanIds: [],
+          subscriptions: [],
+        });
+      });
+    });
+  });
+
+  test('cloud billing status surfaces non-not-found Autumn errors', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.customersGet.mockReset();
+        autumnMocks.customersGet.mockResolvedValueOnce({
+          data: null,
+          error: {
+            message: 'Autumn API unavailable',
+            code: 'service_unavailable',
+          },
+          statusCode: 503,
+        });
+
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await expect(user.action(api.billing.status, {})).rejects.toThrow(
+          /Autumn API unavailable/i,
+        );
+      });
+    });
+  });
+
+  test('cloud upload readiness allows owner uploads when Autumn allows media access', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.check.mockResolvedValueOnce({
+          data: {
+            allowed: true,
+          },
+        });
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+
+        await expect(
+          owner.user.action(api.billing.uploadReadinessForCircle, {
+            circleId: owner.circleId,
+          }),
+        ).resolves.toMatchObject({
+          deployment: 'cloud',
+          canUpload: true,
+          viewerIsBillingOwner: true,
+          billingRequired: true,
+          reason: 'ready',
+        });
+        expect(autumnMocks.check).toHaveBeenCalledWith(
+          expect.objectContaining({
+            customer_id: owner.viewer._id,
+            entity_id: owner.circleId,
+            feature_id: 'media_uploads',
+            entity_data: {
+              feature_id: 'media_uploads',
+            },
+          }),
+        );
+      });
+    });
+  });
+
+  test('cloud upload readiness blocks owner uploads without active billing access', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.check.mockResolvedValueOnce({
+          data: {
+            allowed: false,
+          },
+          error: {
+            message: 'plan required',
+          },
+        });
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+
+        await expect(
+          owner.user.action(api.billing.uploadReadinessForCircle, {
+            circleId: owner.circleId,
+          }),
+        ).resolves.toMatchObject({
+          deployment: 'cloud',
+          canUpload: false,
+          viewerIsBillingOwner: true,
+          billingRequired: true,
+          reason: 'plan_required',
+        });
+      });
+    });
+  });
+
+  test('cloud upload readiness distinguishes provider failures from missing plans', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        autumnMocks.check.mockResolvedValueOnce({
+          error: {
+            message: 'service unavailable',
+          },
+        });
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+
+        await expect(
+          owner.user.action(api.billing.uploadReadinessForCircle, {
+            circleId: owner.circleId,
+          }),
+        ).resolves.toMatchObject({
+          deployment: 'cloud',
+          canUpload: false,
+          viewerIsBillingOwner: true,
+          billingRequired: true,
+          reason: 'billing_check_failed',
+        });
+      });
+    });
+  });
+
+  test('cloud upload readiness gives invited members only safe owner-required status', async () => {
+    await withDeploymentKind('cloud', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const member = await upsertViewer(t, 'member@example.com', 'Member');
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert('circleMembers', {
+          circleId: owner.circleId,
+          userId: member.viewer._id,
+          role: 'member',
+          joinedAt: Date.now(),
+        });
+      });
+
+      await expect(
+        member.user.action(api.billing.uploadReadinessForCircle, {
+          circleId: owner.circleId,
+        }),
+      ).resolves.toMatchObject({
+        deployment: 'cloud',
+        canUpload: false,
+        viewerIsBillingOwner: false,
+        billingRequired: true,
+        reason: 'billing_not_configured',
+      });
+    });
+  });
+
+  test('self-hosted upload readiness always allows circle members', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const member = await upsertViewer(t, 'member@example.com', 'Member');
+
+      await t.run(async (ctx) => {
+        await ctx.db.insert('circleMembers', {
+          circleId: owner.circleId,
+          userId: member.viewer._id,
+          role: 'member',
+          joinedAt: Date.now(),
+        });
+      });
+
+      await expect(
+        member.user.action(api.billing.uploadReadinessForCircle, {
+          circleId: owner.circleId,
+        }),
+      ).resolves.toMatchObject({
+        deployment: 'self-hosted',
+        canUpload: true,
+        viewerIsBillingOwner: false,
+        billingRequired: false,
+        reason: 'self_hosted',
       });
     });
   });
@@ -1186,6 +2033,47 @@ describe('shares, uploads, and feed', () => {
     expect(context.billingOwner._id).toBe(owner.viewer._id);
     expect(context.circleId).toBe(owner.circleId);
     expect(context.shareBatchId).toBe(draft.shareBatchId);
+  });
+
+  test('cloud share deletion credits Autumn storage with entity metadata', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withAutumnSecret(async () => {
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+        const published = await createPublishedShare({
+          t,
+          user: owner.user,
+          viewerId: owner.viewer._id,
+          circleId: owner.circleId,
+          fileName: 'cloud-delete.jpg',
+        });
+
+        autumnMocks.track.mockResolvedValueOnce({
+          data: {
+            id: 'evt_storage_credit',
+            code: 'ok',
+            customer_id: owner.viewer._id,
+            feature_id: 'storage_bytes',
+          },
+        });
+
+        await owner.user.action(api.shares.deleteShare, {
+          shareBatchId: published.shareBatchId,
+        });
+
+        expect(autumnMocks.track).toHaveBeenCalledWith(
+          expect.objectContaining({
+            customer_id: owner.viewer._id,
+            entity_id: owner.circleId,
+            feature_id: 'storage_bytes',
+            value: -2048,
+            entity_data: {
+              feature_id: 'storage_bytes',
+            },
+          }),
+        );
+      });
+    });
   });
 
   test('asset read urls can explicitly return preview or original storage', async () => {
@@ -2287,6 +3175,9 @@ describe('shares, uploads, and feed', () => {
       await expect(
         countActivityInboxRows({ t, shareBatchId: published.shareBatchId }),
       ).resolves.toBeGreaterThan(0);
+      await expect(
+        listNotificationDeliveryAttempts({ t, shareBatchId: published.shareBatchId }),
+      ).resolves.not.toHaveLength(0);
 
       await owner.user.action(api.shares.deleteShare, {
         shareBatchId: published.shareBatchId,
@@ -2302,6 +3193,9 @@ describe('shares, uploads, and feed', () => {
       await expect(
         countActivityInboxRows({ t, shareBatchId: published.shareBatchId }),
       ).resolves.toBe(0);
+      await expect(
+        listNotificationDeliveryAttempts({ t, shareBatchId: published.shareBatchId }),
+      ).resolves.toHaveLength(0);
     });
   });
 
@@ -2449,6 +3343,437 @@ describe('shares, uploads, and feed', () => {
         status: 'unread',
       }),
     ]);
+  });
+
+  test('notification device registration is scoped by instance URL', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const first = await owner.user.mutation(notificationsApi.registerDevice, {
+      instanceUrl: 'https://cloud.example.com',
+      token: 'ExponentPushToken[same-device]',
+      platform: 'ios',
+      appVersion: '0.1.0',
+    });
+    const duplicate = await owner.user.mutation(notificationsApi.registerDevice, {
+      instanceUrl: 'https://cloud.example.com',
+      token: 'ExponentPushToken[same-device]',
+      platform: 'ios',
+      appVersion: '0.1.0',
+    });
+    const secondInstance = await owner.user.mutation(notificationsApi.registerDevice, {
+      instanceUrl: 'https://self.example.com',
+      token: 'ExponentPushToken[same-device]',
+      platform: 'ios',
+      appVersion: '0.1.0',
+    });
+
+    expect(duplicate.deviceId).toBe(first.deviceId);
+    expect(secondInstance.deviceId).not.toBe(first.deviceId);
+    await expect(countNotificationDevices({ t, userId: owner.viewer._id })).resolves.toBe(2);
+    await expect(
+      t.run(async (ctx) => await ctx.db.get(first.deviceId as Id<'notificationDevices'>)),
+    ).resolves.toMatchObject({ disabledAt: expect.any(Number) });
+  });
+
+  test('registering a push token disables the previous account registration', async () => {
+    const t = createTestDb();
+    const firstViewer = await upsertViewer(t, 'first@example.com', 'First');
+    const secondViewer = await upsertViewer(t, 'second@example.com', 'Second');
+    const token = 'ExponentPushToken[shared-device]';
+    const first = await firstViewer.user.mutation(notificationsApi.registerDevice, {
+      instanceUrl: 'https://cloud.example.com',
+      token,
+      platform: 'ios',
+    });
+
+    await secondViewer.user.mutation(notificationsApi.registerDevice, {
+      instanceUrl: 'https://cloud.example.com',
+      token,
+      platform: 'ios',
+    });
+
+    await expect(
+      t.run(async (ctx) => await ctx.db.get(first.deviceId as Id<'notificationDevices'>)),
+    ).resolves.toMatchObject({ disabledAt: expect.any(Number) });
+  });
+
+  test('notification preferences default on and can be updated per kind', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+
+    await expect(owner.user.query(notificationsApi.getPreferences, {})).resolves.toEqual([
+      { kind: 'share.published', enabled: true, updatedAt: null },
+      { kind: 'comment.created', enabled: true, updatedAt: null },
+      { kind: 'reaction.set', enabled: true, updatedAt: null },
+    ]);
+
+    await owner.user.mutation(notificationsApi.updatePreferences, {
+      kind: 'reaction.set',
+      enabled: false,
+    });
+
+    await expect(owner.user.query(notificationsApi.getPreferences, {})).resolves.toEqual([
+      { kind: 'share.published', enabled: true, updatedAt: null },
+      { kind: 'comment.created', enabled: true, updatedAt: null },
+      expect.objectContaining({ kind: 'reaction.set', enabled: false }),
+    ]);
+  });
+
+  test('notification attempts are inspectable and skipped without provider secrets', async () => {
+    await withoutExpoPushAccessToken(async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const invite = await owner.user.mutation(api.invites.create, {
+        circleId: owner.circleId,
+        invitedEmail: 'member@example.com',
+        role: 'member',
+      });
+      const member = await upsertViewer(t, 'member@example.com', 'Member');
+      await member.user.mutation(api.invites.accept, { token: invite.token });
+      await member.user.mutation(notificationsApi.registerDevice, {
+        instanceUrl: 'https://cloud.example.com',
+        token: 'ExponentPushToken[member-device]',
+        platform: 'android',
+        appVersion: '0.1.0',
+      });
+      const published = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'push.jpg',
+      });
+
+      await expect(
+        listNotificationDeliveryAttempts({ t, shareBatchId: published.shareBatchId }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          userId: member.viewer._id,
+          kind: 'share.published',
+          shareBatchId: published.shareBatchId,
+          status: 'skipped',
+          skipReason: 'provider_not_configured',
+        }),
+      ]);
+    });
+  });
+
+  test('queued notification attempts are sent to Expo with bearer auth and deep-link payload', async () => {
+    await withExpoPushAccessToken(async () => {
+      const now = 1_725_000_000_000;
+      const { attempt, owner, published, t } = await createQueuedPushAttempt();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [{ status: 'ok', id: 'expo-receipt-1' }],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+
+      try {
+        await expect(
+          owner.user.action(notificationWorkersApi.dispatchQueued, { now }),
+        ).resolves.toEqual({
+          scanned: 1,
+          sent: 1,
+          failed: 0,
+          retried: 0,
+          skipped: 0,
+        });
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const [, init] = fetchSpy.mock.calls[0]!;
+        const request = init as { headers?: Record<string, string>; body?: string };
+        const messages = JSON.parse(request.body ?? '[]') as Array<{
+          to: string;
+          title: string;
+          body: string;
+          data: Record<string, unknown>;
+        }>;
+
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://exp.host/--/api/v2/push/send');
+        expect(request.headers).toMatchObject({
+          Authorization: 'Bearer expo-push-test-token',
+          'Content-Type': 'application/json',
+        });
+        expect(messages).toEqual([
+          expect.objectContaining({
+            to: 'ExponentPushToken[member-device]',
+            title: 'owner@example.com hat etwas geteilt',
+            body: 'Neuer Beitrag in Family Circle',
+            data: expect.objectContaining({
+              activityEventId: attempt.activityEventId,
+              inboxItemId: attempt.inboxItemId,
+              kind: 'share.published',
+              shareBatchId: published.shareBatchId,
+            }),
+          }),
+        ]);
+        await expect(t.run(async (ctx) => await ctx.db.get(attempt._id))).resolves.toMatchObject({
+          status: 'queued',
+          providerMessageId: 'expo-receipt-1',
+          updatedAt: now,
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  });
+
+  test('Expo push ticket errors fail the notification attempt', async () => {
+    await withExpoPushAccessToken(async () => {
+      const now = 1_725_000_000_000;
+      const { attempt, owner, t } = await createQueuedPushAttempt();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                status: 'error',
+                message: 'The notification payload is invalid.',
+                details: { error: 'MessageTooBig' },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+
+      try {
+        await expect(
+          owner.user.action(notificationWorkersApi.dispatchQueued, { now }),
+        ).resolves.toEqual({
+          scanned: 1,
+          sent: 0,
+          failed: 1,
+          retried: 0,
+          skipped: 0,
+        });
+        await expect(t.run(async (ctx) => await ctx.db.get(attempt._id))).resolves.toMatchObject({
+          status: 'failed',
+          errorMessage: 'The notification payload is invalid.',
+          updatedAt: now,
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  });
+
+  test('transient Expo send failures leave notification attempts queued for retry', async () => {
+    await withExpoPushAccessToken(async () => {
+      const { attempt, owner, t } = await createQueuedPushAttempt();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('rate limited', {
+          status: 429,
+        }),
+      );
+
+      try {
+        await expect(
+          owner.user.action(notificationWorkersApi.dispatchQueued, {
+            now: 1_725_000_000_000,
+          }),
+        ).resolves.toEqual({
+          scanned: 1,
+          sent: 0,
+          failed: 0,
+          retried: 1,
+          skipped: 0,
+        });
+        const storedAttempt = await t.run(async (ctx) => await ctx.db.get(attempt._id));
+        expect(storedAttempt).toMatchObject({
+          status: 'queued',
+        });
+        expect(storedAttempt).not.toHaveProperty('providerMessageId');
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  });
+
+  test('Expo send network errors leave notification attempts queued for retry', async () => {
+    await withExpoPushAccessToken(async () => {
+      const { attempt, owner, t } = await createQueuedPushAttempt();
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('socket hang up'));
+
+      try {
+        await expect(
+          owner.user.action(notificationWorkersApi.dispatchQueued, {
+            now: 1_725_000_000_000,
+          }),
+        ).resolves.toEqual({
+          scanned: 1,
+          sent: 0,
+          failed: 0,
+          retried: 1,
+          skipped: 0,
+        });
+        const storedAttempt = await t.run(async (ctx) => await ctx.db.get(attempt._id));
+        expect(storedAttempt).toMatchObject({
+          status: 'queued',
+        });
+        expect(storedAttempt).not.toHaveProperty('providerMessageId');
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  });
+
+  test('Expo push receipts mark delivered attempts', async () => {
+    await withExpoPushAccessToken(async () => {
+      const now = 1_725_000_000_000;
+      const { attempt, owner, t } = await createQueuedPushAttempt();
+      await t.run(async (ctx) => {
+        await ctx.db.patch(attempt._id, {
+          providerMessageId: 'expo-receipt-ok',
+          updatedAt: now - 16 * 60 * 1000,
+        });
+      });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              'expo-receipt-ok': { status: 'ok' },
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+
+      try {
+        await expect(
+          owner.user.action(notificationWorkersApi.checkReceipts, { now }),
+        ).resolves.toEqual({
+          scanned: 1,
+          delivered: 1,
+          failed: 0,
+          missing: 0,
+          retried: 0,
+          skipped: 0,
+        });
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        const [, init] = fetchSpy.mock.calls[0]!;
+        const request = init as { body?: string };
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://exp.host/--/api/v2/push/getReceipts');
+        expect(JSON.parse(request.body ?? '{}')).toEqual({
+          ids: ['expo-receipt-ok'],
+        });
+        await expect(t.run(async (ctx) => await ctx.db.get(attempt._id))).resolves.toMatchObject({
+          status: 'delivered',
+          updatedAt: now,
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  });
+
+  test('DeviceNotRegistered push receipts fail the attempt and disable the device', async () => {
+    await withExpoPushAccessToken(async () => {
+      const now = 1_725_000_000_000;
+      const { attempt, owner, t } = await createQueuedPushAttempt();
+      await t.run(async (ctx) => {
+        await ctx.db.patch(attempt._id, {
+          providerMessageId: 'expo-receipt-unregistered',
+          updatedAt: now - 16 * 60 * 1000,
+        });
+      });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              'expo-receipt-unregistered': {
+                status: 'error',
+                message: 'Device is not registered.',
+                details: { error: 'DeviceNotRegistered' },
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+
+      try {
+        await expect(
+          owner.user.action(notificationWorkersApi.checkReceipts, { now }),
+        ).resolves.toEqual({
+          scanned: 1,
+          delivered: 0,
+          failed: 1,
+          missing: 0,
+          retried: 0,
+          skipped: 0,
+        });
+        await expect(t.run(async (ctx) => await ctx.db.get(attempt._id))).resolves.toMatchObject({
+          status: 'failed',
+          errorMessage: 'Device is not registered.',
+          updatedAt: now,
+        });
+        await expect(
+          t.run(async (ctx) =>
+            attempt.deviceId ? await ctx.db.get(attempt.deviceId) : null,
+          ),
+        ).resolves.toMatchObject({
+          disabledAt: now,
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  });
+
+  test('disabled notification preferences create skipped attempts that are never sent', async () => {
+    await withExpoPushAccessToken(async () => {
+      const { attempt, owner } = await createQueuedPushAttempt({
+        disabledKind: 'share.published',
+      });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [{ status: 'ok', id: 'unexpected' }],
+          }),
+          { status: 200 },
+        ),
+      );
+
+      try {
+        expect(attempt).toMatchObject({
+          status: 'skipped',
+          skipReason: 'preference_disabled',
+        });
+        await expect(
+          owner.user.action(notificationWorkersApi.dispatchQueued, {
+            now: 1_725_000_000_000,
+          }),
+        ).resolves.toEqual({
+          scanned: 0,
+          sent: 0,
+          failed: 0,
+          retried: 0,
+          skipped: 0,
+        });
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
   });
 
   test('activity inbox read mutations are idempotent and scoped to the viewer', async () => {
@@ -2602,6 +3927,485 @@ describe('shares, uploads, and feed', () => {
     expect([...firstPage.page, ...secondPage.page].map((event) => event.shareBatchId)).toEqual(
       expect.arrayContaining([first.shareBatchId, second.shareBatchId]),
     );
+  });
+
+  test('upload finalization persists captured dates for memory timelines', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const capturedAt = Date.parse('2026-04-18T09:30:00.000Z');
+    const uploaded = await createUploadedDraftAsset({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      capturedAt,
+    });
+
+    await expect(t.run(async (ctx) => await ctx.db.get(uploaded.assetId))).resolves.toMatchObject({
+      capturedAt,
+    });
+  });
+
+  test('publishing creates memory items using captured date or publish date fallback', async () => {
+    vi.useFakeTimers();
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const capturedAt = Date.parse('2026-04-18T09:30:00.000Z');
+    const publishedAt = Date.parse('2026-05-01T12:00:00.000Z');
+
+    try {
+      vi.setSystemTime(new Date(publishedAt));
+      const captured = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'captured.jpg',
+        caption: 'Captured memory',
+        capturedAt,
+      });
+      const fallback = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'fallback.jpg',
+      });
+
+      await expect(listMemoryRowsForShare({ t, shareBatchId: captured.shareBatchId })).resolves.toEqual([
+        expect.objectContaining({
+          shareBatchId: captured.shareBatchId,
+          assetId: captured.assetId,
+          capturedAt,
+          timelineAt: capturedAt,
+          publishedAt,
+        }),
+      ]);
+      await expect(listMemoryRowsForShare({ t, shareBatchId: fallback.shareBatchId })).resolves.toEqual([
+        expect.objectContaining({
+          shareBatchId: fallback.shareBatchId,
+          assetId: fallback.assetId,
+          timelineAt: publishedAt,
+          publishedAt,
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('memory timeline is membership scoped and filterable by circle', async () => {
+    vi.useFakeTimers();
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const secondCircle = await owner.user.mutation(api.circles.create, {
+      name: 'Second',
+      description: 'Second private circle',
+    });
+    const outsider = await createCircleFor(t, 'outsider@example.com');
+
+    try {
+      vi.setSystemTime(new Date('2026-05-01T12:00:00.000Z'));
+      const first = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'april.jpg',
+        capturedAt: Date.parse('2026-04-18T09:30:00.000Z'),
+      });
+      vi.setSystemTime(new Date('2026-05-02T12:00:00.000Z'));
+      const second = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: secondCircle.circleId as Id<'circles'>,
+        fileName: 'may.jpg',
+        capturedAt: Date.parse('2026-05-02T08:00:00.000Z'),
+      });
+      await createPublishedShare({
+        t,
+        user: outsider.user,
+        viewerId: outsider.viewer._id,
+        circleId: outsider.circleId,
+        fileName: 'outsider.jpg',
+        capturedAt: Date.parse('2026-06-01T08:00:00.000Z'),
+      });
+
+      const all = await owner.user.query(memoriesApi.listForViewer, {
+        paginationOpts: { numItems: 10, cursor: null },
+      });
+      const filtered = await owner.user.query(memoriesApi.listForViewer, {
+        circleId: owner.circleId,
+        paginationOpts: { numItems: 10, cursor: null },
+      });
+
+      expect(all.page.map((item) => item.assetId)).toEqual([second.assetId, first.assetId]);
+      expect(all.page.every((item) => item.authorName.length > 0 && item.circleName.length > 0)).toBe(true);
+      expect(filtered.page.map((item) => item.assetId)).toEqual([first.assetId]);
+      await expect(
+        outsider.user.query(memoriesApi.listForViewer, {
+          circleId: owner.circleId,
+          paginationOpts: { numItems: 10, cursor: null },
+        }),
+      ).rejects.toThrow(/membership|circle/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('publishing creates month and place discovery facets with filterable memories', async () => {
+    vi.useFakeTimers();
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const berlinLocation = {
+      latitude: 52.520008,
+      longitude: 13.404954,
+      label: 'Berlin, Deutschland',
+      city: 'Berlin',
+      country: 'Deutschland',
+      source: 'embedded' as const,
+    };
+    const capturedAt = Date.parse('2026-04-18T09:30:00.000Z');
+
+    try {
+      vi.setSystemTime(new Date('2026-05-01T12:00:00.000Z'));
+      const located = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'berlin.jpg',
+        caption: 'Spring in Berlin',
+        capturedAt,
+        location: berlinLocation,
+      });
+      const unlocated = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'home.jpg',
+        caption: 'No GPS data',
+        capturedAt: Date.parse('2026-04-20T09:30:00.000Z'),
+      });
+
+      const discovery = await owner.user.query(memoriesApi.discoveryForViewer, {
+        circleId: owner.circleId,
+      });
+
+      expect(discovery.months).toEqual([
+        expect.objectContaining({
+          key: '2026-04',
+          itemCount: 2,
+          coverAssetId: unlocated.assetId,
+        }),
+      ]);
+      expect(discovery.places).toEqual([
+        expect.objectContaining({
+          key: '52.520:13.405',
+          label: 'Berlin, Deutschland',
+          latitude: berlinLocation.latitude,
+          longitude: berlinLocation.longitude,
+          itemCount: 1,
+          coverAssetId: located.assetId,
+        }),
+      ]);
+
+      await expect(
+        owner.user.query(memoriesApi.listForViewer, {
+          circleId: owner.circleId,
+          filter: { kind: 'month', key: '2026-04' },
+          paginationOpts: { numItems: 10, cursor: null },
+        }),
+      ).resolves.toMatchObject({
+        page: [
+          expect.objectContaining({ assetId: unlocated.assetId, monthKey: '2026-04' }),
+          expect.objectContaining({ assetId: located.assetId, monthKey: '2026-04' }),
+        ],
+      });
+      await expect(
+        owner.user.query(memoriesApi.listForViewer, {
+          circleId: owner.circleId,
+          filter: { kind: 'place', key: '52.520:13.405' },
+          paginationOpts: { numItems: 10, cursor: null },
+        }),
+      ).resolves.toMatchObject({
+        page: [
+          expect.objectContaining({
+            assetId: located.assetId,
+            placeKey: '52.520:13.405',
+            placeLabel: 'Berlin, Deutschland',
+          }),
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('memory discovery facets are removed when a share is deleted', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const published = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'delete-place.jpg',
+        capturedAt: Date.parse('2026-04-18T09:30:00.000Z'),
+        location: {
+          latitude: 52.520008,
+          longitude: 13.404954,
+          label: 'Berlin, Deutschland',
+          source: 'embedded',
+        },
+      });
+
+      await expect(
+        owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+      ).resolves.toMatchObject({
+        months: [expect.objectContaining({ key: '2026-04', itemCount: 1 })],
+        places: [expect.objectContaining({ key: '52.520:13.405', itemCount: 1 })],
+      });
+
+      await owner.user.action(api.shares.deleteShare, {
+        shareBatchId: published.shareBatchId,
+      });
+
+      await expect(
+        owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+      ).resolves.toEqual({
+        months: [],
+        places: [],
+      });
+    });
+  });
+
+  test('memory discovery backfill supports dry-run and idempotent real runs', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const shareBatchId = await t.run(async (ctx) => {
+      return await ctx.db.insert('shareBatches', {
+        circleId: owner.circleId,
+        authorId: owner.viewer._id,
+        caption: 'Legacy place',
+        assetCount: 1,
+        status: 'published',
+        createdAt: 1,
+        updatedAt: 2,
+        publishedAt: Date.parse('2026-04-30T12:00:00.000Z'),
+      });
+    });
+    const assetId = await t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(['legacy'], { type: 'image/jpeg' }));
+
+      return await ctx.db.insert('assets', {
+        shareBatchId,
+        circleId: owner.circleId,
+        kind: 'image',
+        fileName: 'legacy-place.jpg',
+        mimeType: 'image/jpeg',
+        storage: {
+          provider: 'convex-files',
+          storageId,
+        },
+        createdAt: 2,
+        capturedAt: Date.parse('2026-04-18T09:30:00.000Z'),
+        location: {
+          latitude: 52.520008,
+          longitude: 13.404954,
+          label: 'Berlin, Deutschland',
+          source: 'embedded',
+        },
+      });
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert('memoryItems', {
+        circleId: owner.circleId,
+        shareBatchId,
+        assetId,
+        authorId: owner.viewer._id,
+        kind: 'image',
+        capturedAt: Date.parse('2026-04-18T09:30:00.000Z'),
+        timelineAt: Date.parse('2026-04-18T09:30:00.000Z'),
+        publishedAt: Date.parse('2026-04-30T12:00:00.000Z'),
+        createdAt: 3,
+      });
+    });
+
+    await expect(
+      owner.user.mutation(internalMemoriesApi.backfillDiscoveryBatch, {
+        batchSize: 10,
+        dryRun: true,
+      }),
+    ).resolves.toMatchObject({
+      scanned: 1,
+      patched: 1,
+      summaryWrites: 2,
+      hasMore: false,
+    });
+    await expect(
+      owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+    ).resolves.toEqual({ months: [], places: [] });
+
+    await expect(
+      owner.user.mutation(internalMemoriesApi.backfillDiscoveryBatch, {
+        batchSize: 10,
+      }),
+    ).resolves.toMatchObject({
+      scanned: 1,
+      patched: 1,
+      summaryWrites: 2,
+      hasMore: false,
+    });
+    await expect(
+      owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+    ).resolves.toMatchObject({
+      months: [expect.objectContaining({ key: '2026-04', itemCount: 1 })],
+      places: [expect.objectContaining({ key: '52.520:13.405', itemCount: 1 })],
+    });
+    await expect(
+      owner.user.mutation(internalMemoriesApi.backfillDiscoveryBatch, {
+        batchSize: 10,
+      }),
+    ).resolves.toMatchObject({
+      patched: 0,
+      summaryWrites: 0,
+    });
+  });
+
+  test('share deletion and legacy backfill maintain memory items', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const published = await createPublishedShare({
+        t,
+        user: owner.user,
+        viewerId: owner.viewer._id,
+        circleId: owner.circleId,
+        fileName: 'delete-memory.jpg',
+      });
+
+      await expect(listMemoryRowsForShare({ t, shareBatchId: published.shareBatchId })).resolves.toHaveLength(1);
+      await owner.user.action(api.shares.deleteShare, {
+        shareBatchId: published.shareBatchId,
+      });
+      await expect(listMemoryRowsForShare({ t, shareBatchId: published.shareBatchId })).resolves.toHaveLength(0);
+
+      const legacy = await t.run(async (ctx) => {
+        const shareBatchId = await ctx.db.insert('shareBatches', {
+          circleId: owner.circleId,
+          authorId: owner.viewer._id,
+          caption: 'Legacy',
+          assetCount: 1,
+          status: 'published',
+          createdAt: 1,
+          updatedAt: 2,
+          publishedAt: 3,
+        });
+        const storageId = await ctx.storage.store(new Blob(['legacy'], { type: 'image/jpeg' }));
+        const assetId = await ctx.db.insert('assets', {
+          shareBatchId,
+          circleId: owner.circleId,
+          kind: 'image',
+          fileName: 'legacy.jpg',
+          mimeType: 'image/jpeg',
+          storage: {
+            provider: 'convex-files',
+            storageId,
+          },
+          createdAt: 2,
+        });
+
+        return { shareBatchId, assetId };
+      });
+
+      await expect(
+        owner.user.mutation(internalMemoriesApi.backfillBatch, { batchSize: 10 }),
+      ).resolves.toMatchObject({
+        scanned: expect.any(Number),
+        inserted: 1,
+        hasMore: false,
+      });
+      await expect(
+        owner.user.mutation(internalMemoriesApi.backfillBatch, { batchSize: 10 }),
+      ).resolves.toMatchObject({
+        inserted: 0,
+      });
+      await expect(listMemoryRowsForShare({ t, shareBatchId: legacy.shareBatchId })).resolves.toEqual([
+        expect.objectContaining({
+          assetId: legacy.assetId,
+          timelineAt: 3,
+          publishedAt: 3,
+        }),
+      ]);
+    });
+  });
+
+  test('memory backfill cursors do not skip shares with identical publish times', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const owner = await createCircleFor(t, 'owner@example.com');
+      const publishedAt = Date.parse('2026-05-01T12:00:00.000Z');
+      const shareBatchIds = await t.run(async (ctx) => {
+        const ids: Id<'shareBatches'>[] = [];
+
+        for (const suffix of ['one', 'two']) {
+          const shareBatchId = await ctx.db.insert('shareBatches', {
+            circleId: owner.circleId,
+            authorId: owner.viewer._id,
+            caption: `Legacy ${suffix}`,
+            assetCount: 1,
+            status: 'published',
+            createdAt: publishedAt - 1,
+            updatedAt: publishedAt,
+            publishedAt,
+          });
+          const storageId = await ctx.storage.store(
+            new Blob([suffix], { type: 'image/jpeg' }),
+          );
+          await ctx.db.insert('assets', {
+            shareBatchId,
+            circleId: owner.circleId,
+            kind: 'image',
+            fileName: `${suffix}.jpg`,
+            mimeType: 'image/jpeg',
+            storage: {
+              provider: 'convex-files',
+              storageId,
+            },
+            createdAt: publishedAt,
+          });
+          ids.push(shareBatchId);
+        }
+
+        return ids;
+      });
+      let cursor: string | null = null;
+      let hasMore = true;
+      let inserted = 0;
+
+      while (hasMore) {
+        const result: {
+          inserted: number;
+          hasMore: boolean;
+          continueCursor: string;
+        } = await owner.user.mutation(internalMemoriesApi.backfillBatch, {
+          cursor,
+          batchSize: 1,
+        });
+        inserted += result.inserted;
+        cursor = result.continueCursor;
+        hasMore = result.hasMore;
+      }
+
+      expect(inserted).toBe(2);
+      for (const shareBatchId of shareBatchIds) {
+        await expect(listMemoryRowsForShare({ t, shareBatchId })).resolves.toHaveLength(1);
+      }
+    });
   });
 
   test('publish rejects drafts with unresolved upload rows', async () => {

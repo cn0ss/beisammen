@@ -1,6 +1,7 @@
 import {
   buildWorkOSInstanceConfig,
   type AuthMode,
+  type BillingReturnSource,
 } from '@beisammen/contracts';
 
 import {
@@ -66,6 +67,16 @@ export function readPublicAuthMode(env: EnvSource = process.env): AuthMode {
   return 'native-client';
 }
 
+export function readPublicAppScheme(env: EnvSource = process.env): string {
+  const configured = readOptionalEnv('PUBLIC_APP_SCHEME', env) ?? 'beisammen';
+
+  if (!/^[a-z][a-z0-9+.-]*$/i.test(configured)) {
+    throw new Error('PUBLIC_APP_SCHEME must be a valid URL scheme.');
+  }
+
+  return configured;
+}
+
 export function buildDefaultInstanceId(baseUrl: string): string {
   try {
     return new URL(baseUrl).hostname;
@@ -100,6 +111,16 @@ export function buildPublicInstanceConfigFromEnv(env: EnvSource = process.env) {
 
 export function buildCallbackUrlFromEnv(env: EnvSource = process.env): string {
   return `${readBaseUrl(env)}/auth/callback`;
+}
+
+export function buildBillingReturnAppUrl(
+  env: EnvSource = process.env,
+  source: BillingReturnSource = 'checkout',
+): string {
+  const target = new URL(`${readPublicAppScheme(env)}://settings`);
+  target.searchParams.set('billing', 'return');
+  target.searchParams.set('source', source);
+  return target.toString();
 }
 
 export function appendParamsToUrl(baseUrl: string, params: Record<string, string>): string {

@@ -1,0 +1,782 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Logo from '../components/Logo.astro';
+
+const publicShareEndpoint = (() => {
+  const baseUrl = import.meta.env.PUBLIC_INSTANCE_BASE_URL?.trim();
+
+  if (!baseUrl) {
+    return '';
+  }
+
+  try {
+    return new URL('/public/share/preview', baseUrl).toString();
+  } catch {
+    return '';
+  }
+})();
+---
+
+<Layout
+  locale="de"
+  title="Beisammen ansehen"
+  description="Eine private Beisammen-Ansicht für geteilte Familienmomente."
+  referrerPolicy="no-referrer"
+>
+  <main class="public-share" data-public-share data-endpoint={publicShareEndpoint}>
+    <header class="public-share-header" aria-label="Beisammen">
+      <a href="/" class="public-brand" aria-label="beisammen">
+        <Logo size={28} showWordmark={true} />
+      </a>
+      <button class="refresh-button" type="button" data-refresh hidden>Aktualisieren</button>
+    </header>
+
+    <section class="public-status" data-status>
+      <p class="status-kicker">beisammen</p>
+      <h1 data-status-title>Wird geladen</h1>
+      <p data-status-message>Die geteilten Momente werden vorbereitet.</p>
+    </section>
+
+    <section class="public-view" data-view hidden>
+      <aside class="circle-panel" aria-label="Circle">
+        <p class="panel-kicker">Familienseite</p>
+        <h1 data-circle-name></h1>
+        <p data-circle-description></p>
+        <dl class="circle-meta">
+          <div>
+            <dt>Beiträge</dt>
+            <dd data-share-count>0</dd>
+          </div>
+          <div>
+            <dt>Link gültig</dt>
+            <dd data-link-expiry></dd>
+          </div>
+        </dl>
+      </aside>
+
+      <div class="feed-column">
+        <div class="feed" data-feed></div>
+        <section class="empty-feed" data-empty hidden>
+          <p class="status-kicker">Noch ruhig</p>
+          <h2>Noch keine geteilten Momente</h2>
+          <p>Sobald in diesem Circle etwas veröffentlicht wird, erscheint es hier.</p>
+        </section>
+        <div class="feed-actions">
+          <button class="load-more-button" type="button" data-load-more hidden>Mehr laden</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="lightbox" data-lightbox hidden>
+      <button type="button" class="lightbox-close" data-lightbox-close>Schließen</button>
+      <img data-lightbox-image alt="" />
+    </div>
+  </main>
+
+  <style>
+    .public-share {
+      min-height: 100svh;
+      color: var(--ink);
+      padding: 1rem;
+    }
+
+    .public-share-header {
+      width: min(100%, 1440px);
+      margin: 0 auto 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .public-brand {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .refresh-button,
+    .load-more-button,
+    .lightbox-close {
+      min-height: 44px;
+      border: 1px solid rgba(15, 14, 12, 0.16);
+      border-radius: 8px;
+      background: var(--cream);
+      padding: 0 1rem;
+      color: var(--ink);
+      font-weight: 700;
+      box-shadow: var(--shadow-xs);
+    }
+
+    .public-status,
+    .empty-feed {
+      width: min(100%, 680px);
+      margin: 16svh auto 0;
+      border: 1px solid rgba(15, 14, 12, 0.12);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--cream) 88%, transparent);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .public-status h1,
+    .empty-feed h2 {
+      margin: 0.25rem 0 0;
+      font-size: 2rem;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .public-status p,
+    .empty-feed p {
+      margin: 0.75rem 0 0;
+      color: var(--ink-soft);
+      font-size: 1rem;
+    }
+
+    .status-kicker,
+    .panel-kicker {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ember-deep);
+    }
+
+    .public-view {
+      width: min(100%, 1440px);
+      margin: 0 auto;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .circle-panel {
+      border: 1px solid rgba(15, 14, 12, 0.12);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--cream) 88%, transparent);
+      padding: 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .circle-panel h1 {
+      margin: 0.5rem 0 0;
+      font-size: 2.4rem;
+      line-height: 1;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .circle-panel p[data-circle-description] {
+      min-height: 1.5rem;
+      margin: 0.9rem 0 0;
+      color: var(--ink-soft);
+      font-size: 1.02rem;
+    }
+
+    .circle-meta {
+      margin: 1.25rem 0 0;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+
+    .circle-meta div {
+      border: 1px solid rgba(15, 14, 12, 0.10);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 0.8rem;
+    }
+
+    .circle-meta dt {
+      color: var(--ink-faint);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .circle-meta dd {
+      margin: 0.3rem 0 0;
+      color: var(--ink);
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .feed-column {
+      min-width: 0;
+    }
+
+    .feed {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .share-post {
+      border: 1px solid rgba(15, 14, 12, 0.12);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--cream) 92%, transparent);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .post-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem;
+      border-bottom: 1px solid rgba(15, 14, 12, 0.10);
+    }
+
+    .post-author {
+      margin: 0;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .post-date {
+      margin: 0.2rem 0 0;
+      color: var(--ink-faint);
+      font-size: 0.9rem;
+    }
+
+    .asset-count {
+      flex: 0 0 auto;
+      border: 1px solid rgba(15, 14, 12, 0.12);
+      border-radius: 999px;
+      padding: 0.25rem 0.65rem;
+      color: var(--ink-soft);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+    }
+
+    .post-caption {
+      margin: 0;
+      padding: 1rem 1rem 0;
+      color: var(--ink);
+      font-size: 1.1rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .media-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+      padding: 1rem;
+    }
+
+    .media-grid[data-count='2'],
+    .media-grid[data-count='3'],
+    .media-grid[data-count='4'] {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .media-item {
+      min-width: 0;
+      aspect-ratio: 4 / 3;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #11100d;
+    }
+
+    .media-item:first-child:nth-last-child(1) {
+      aspect-ratio: 16 / 10;
+    }
+
+    .media-item img,
+    .media-item video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #11100d;
+    }
+
+    .media-item video {
+      object-fit: contain;
+    }
+
+    .media-button {
+      display: block;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    .feed-actions {
+      display: flex;
+      justify-content: center;
+      padding: 1.25rem 0 2rem;
+    }
+
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: grid;
+      place-items: center;
+      padding: 4.5rem 1rem 1rem;
+      background: rgba(7, 7, 6, 0.88);
+    }
+
+    .lightbox img {
+      max-width: min(100%, 1200px);
+      max-height: 82svh;
+      border-radius: 8px;
+      object-fit: contain;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+
+    .lightbox-close {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: var(--cream);
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    @media (min-width: 760px) {
+      .public-share {
+        padding: 1.5rem;
+      }
+
+      .public-view {
+        grid-template-columns: 320px minmax(0, 1fr);
+        align-items: start;
+      }
+
+      .circle-panel {
+        position: sticky;
+        top: 1.5rem;
+      }
+
+      .media-grid[data-count='3'] .media-item:first-child {
+        grid-row: span 2;
+        aspect-ratio: auto;
+      }
+    }
+
+    @media (min-width: 1180px) {
+      .public-share {
+        padding: 2rem;
+      }
+
+      .public-view {
+        grid-template-columns: 380px minmax(0, 1fr);
+        gap: 1.25rem;
+      }
+
+      .circle-panel {
+        padding: 1.5rem;
+      }
+
+      .circle-panel h1 {
+        font-size: 3rem;
+      }
+
+      .feed {
+        gap: 1.25rem;
+      }
+
+      .post-head,
+      .media-grid {
+        padding: 1.25rem;
+      }
+
+      .post-caption {
+        padding: 1.25rem 1.25rem 0;
+      }
+    }
+  </style>
+
+  <script>
+    interface PublicAsset {
+      _id: string;
+      kind: 'image' | 'video';
+      fileName?: string;
+      mimeType: string;
+      sizeBytes?: number;
+      width?: number;
+      height?: number;
+      durationSeconds?: number;
+      capturedAt?: number;
+      url: string | null;
+      previewUrl: string | null;
+      expiresAt: number | null;
+    }
+
+    interface PublicShare {
+      _id: string;
+      caption: string;
+      assetCount: number;
+      authorName: string;
+      publishedAt: number;
+      createdAtLabel: string;
+      assets: PublicAsset[];
+    }
+
+    interface PublicCircle {
+      _id: string;
+      name: string;
+      description: string;
+    }
+
+    interface PublicLink {
+      expiresAt: number;
+    }
+
+    interface PublicShareResponse {
+      ok?: boolean;
+      circle?: PublicCircle;
+      link?: PublicLink;
+      shares?: PublicShare[];
+      isDone?: boolean;
+      continueCursor?: string;
+    }
+
+    const root = document.querySelector<HTMLElement>('[data-public-share]');
+    const endpoint = root?.getAttribute('data-endpoint') ?? '';
+    const statusEl = root?.querySelector<HTMLElement>('[data-status]');
+    const statusTitle = root?.querySelector<HTMLElement>('[data-status-title]');
+    const statusMessage = root?.querySelector<HTMLElement>('[data-status-message]');
+    const view = root?.querySelector<HTMLElement>('[data-view]');
+    const refreshButton = root?.querySelector<HTMLButtonElement>('[data-refresh]');
+    const feed = root?.querySelector<HTMLElement>('[data-feed]');
+    const empty = root?.querySelector<HTMLElement>('[data-empty]');
+    const loadMore = root?.querySelector<HTMLButtonElement>('[data-load-more]');
+    const circleName = root?.querySelector<HTMLElement>('[data-circle-name]');
+    const circleDescription = root?.querySelector<HTMLElement>('[data-circle-description]');
+    const shareCount = root?.querySelector<HTMLElement>('[data-share-count]');
+    const linkExpiry = root?.querySelector<HTMLElement>('[data-link-expiry]');
+    const lightbox = root?.querySelector<HTMLElement>('[data-lightbox]');
+    const lightboxImage = root?.querySelector<HTMLImageElement>('[data-lightbox-image]');
+    const lightboxClose = root?.querySelector<HTMLButtonElement>('[data-lightbox-close]');
+    const dateFormatter = new Intl.DateTimeFormat('de-DE', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const dayFormatter = new Intl.DateTimeFormat('de-DE', {
+      dateStyle: 'medium',
+    });
+    const state: {
+      token: string;
+      cursor: string | null;
+      isDone: boolean;
+      shares: PublicShare[];
+      circle: PublicCircle | null;
+      link: PublicLink | null;
+      loading: boolean;
+    } = {
+      token: readToken(),
+      cursor: null,
+      isDone: true,
+      shares: [],
+      circle: null,
+      link: null,
+      loading: false,
+    };
+
+    function readToken() {
+      const hashToken = window.location.hash.replace(/^#/, '').trim();
+
+      if (hashToken) {
+        return decodeURIComponent(hashToken);
+      }
+
+      return new URLSearchParams(window.location.search).get('token')?.trim() ?? '';
+    }
+
+    function setStatus(title: string, message: string) {
+      if (statusTitle) {
+        statusTitle.textContent = title;
+      }
+
+      if (statusMessage) {
+        statusMessage.textContent = message;
+      }
+
+      if (statusEl) {
+        statusEl.hidden = false;
+      }
+
+      if (view) {
+        view.hidden = true;
+      }
+    }
+
+    function showView() {
+      if (statusEl) {
+        statusEl.hidden = true;
+      }
+
+      if (view) {
+        view.hidden = false;
+      }
+
+      if (refreshButton) {
+        refreshButton.hidden = false;
+      }
+    }
+
+    function formatDate(value: number | null | undefined) {
+      if (!value || !Number.isFinite(value)) {
+        return '';
+      }
+
+      return dateFormatter.format(new Date(value));
+    }
+
+    function formatDay(value: number | null | undefined) {
+      if (!value || !Number.isFinite(value)) {
+        return '';
+      }
+
+      return dayFormatter.format(new Date(value));
+    }
+
+    function createTextElement(
+      tagName: keyof HTMLElementTagNameMap,
+      className: string,
+      text: string,
+    ) {
+      const element = document.createElement(tagName);
+      element.className = className;
+      element.textContent = text;
+      return element;
+    }
+
+    function openLightbox(url: string, alt: string) {
+      if (!lightbox || !lightboxImage) {
+        return;
+      }
+
+      lightboxImage.src = url;
+      lightboxImage.alt = alt;
+      lightbox.hidden = false;
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeLightbox() {
+      if (!lightbox || !lightboxImage) {
+        return;
+      }
+
+      lightbox.hidden = true;
+      lightboxImage.removeAttribute('src');
+      document.body.style.overflow = '';
+    }
+
+    function renderAsset(asset: PublicAsset, share: PublicShare) {
+      const item = document.createElement('figure');
+      item.className = 'media-item';
+
+      if (asset.kind === 'video') {
+        const video = document.createElement('video');
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+
+        if (asset.url) {
+          video.src = asset.url;
+        }
+
+        if (asset.previewUrl) {
+          video.poster = asset.previewUrl;
+        }
+
+        item.append(video);
+        return item;
+      }
+
+      const imageUrl = asset.previewUrl || asset.url;
+      const fullUrl = asset.url || imageUrl;
+      const alt = asset.fileName || share.caption || 'Beisammen Foto';
+      const button = document.createElement('button');
+      const image = document.createElement('img');
+
+      button.type = 'button';
+      button.className = 'media-button';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      image.alt = alt;
+
+      if (imageUrl) {
+        image.src = imageUrl;
+      }
+
+      button.append(image);
+      button.addEventListener('click', () => {
+        if (fullUrl) {
+          openLightbox(fullUrl, alt);
+        }
+      });
+      item.append(button);
+      return item;
+    }
+
+    function renderPost(share: PublicShare) {
+      const article = document.createElement('article');
+      const head = document.createElement('header');
+      const authorWrap = document.createElement('div');
+      const mediaGrid = document.createElement('div');
+      const assetTotal = share.assets.length;
+
+      article.className = 'share-post';
+      head.className = 'post-head';
+      mediaGrid.className = 'media-grid';
+      mediaGrid.dataset.count = String(Math.min(assetTotal, 4));
+
+      authorWrap.append(
+        createTextElement('p', 'post-author', share.authorName || 'Beisammen'),
+        createTextElement('p', 'post-date', formatDate(share.publishedAt) || share.createdAtLabel || ''),
+      );
+      head.append(
+        authorWrap,
+        createTextElement('span', 'asset-count', `${assetTotal} ${assetTotal === 1 ? 'Medium' : 'Medien'}`),
+      );
+      article.append(head);
+
+      if (share.caption?.trim()) {
+        article.append(createTextElement('p', 'post-caption', share.caption.trim()));
+      }
+
+      for (const asset of share.assets) {
+        mediaGrid.append(renderAsset(asset, share));
+      }
+
+      article.append(mediaGrid);
+      return article;
+    }
+
+    function render() {
+      if (!state.circle || !state.link || !feed) {
+        return;
+      }
+
+      if (circleName) {
+        circleName.textContent = state.circle.name || 'Beisammen';
+      }
+
+      if (circleDescription) {
+        circleDescription.textContent = state.circle.description || '';
+      }
+
+      if (shareCount) {
+        shareCount.textContent = String(state.shares.length);
+      }
+
+      if (linkExpiry) {
+        linkExpiry.textContent = formatDay(state.link.expiresAt);
+      }
+
+      feed.replaceChildren(...state.shares.map(renderPost));
+
+      if (empty) {
+        empty.hidden = state.shares.length > 0;
+      }
+
+      if (loadMore) {
+        loadMore.hidden = state.isDone;
+        loadMore.textContent = state.loading ? 'Wird geladen...' : 'Mehr laden';
+      }
+
+      showView();
+    }
+
+    async function loadPage({ reset = false }: { reset?: boolean } = {}) {
+      if (state.loading) {
+        return;
+      }
+
+      if (!endpoint) {
+        setStatus('Nicht konfiguriert', 'Die öffentliche Ansicht ist noch nicht mit einer Beisammen-Instanz verbunden.');
+        return;
+      }
+
+      if (!state.token) {
+        setStatus('Link fehlt', 'Dieser öffentliche Link ist unvollständig.');
+        return;
+      }
+
+      state.loading = true;
+
+      if (loadMore) {
+        loadMore.textContent = 'Wird geladen...';
+      }
+
+      if (reset) {
+        state.cursor = null;
+        state.isDone = true;
+        state.shares = [];
+        setStatus('Wird geladen', 'Die geteilten Momente werden vorbereitet.');
+      }
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            token: state.token,
+            cursor: state.cursor,
+          }),
+        });
+        const body = await response.json().catch(() => null) as PublicShareResponse | null;
+
+        if (
+          !response.ok ||
+          !body?.ok ||
+          !body.circle ||
+          !body.link ||
+          !Array.isArray(body.shares)
+        ) {
+          setStatus('Link nicht verfügbar', 'Dieser Link ist abgelaufen oder wurde zurückgezogen.');
+          return;
+        }
+
+        state.circle = body.circle;
+        state.link = body.link;
+        state.cursor = typeof body.continueCursor === 'string' ? body.continueCursor : null;
+        state.isDone = Boolean(body.isDone);
+        state.shares = reset ? body.shares : [...state.shares, ...body.shares];
+        render();
+      } catch {
+        setStatus('Verbindung fehlgeschlagen', 'Die geteilten Momente konnten gerade nicht geladen werden.');
+      } finally {
+        state.loading = false;
+        if (loadMore) {
+          loadMore.textContent = 'Mehr laden';
+        }
+      }
+    }
+
+    loadMore?.addEventListener('click', () => {
+      void loadPage();
+    });
+    refreshButton?.addEventListener('click', () => {
+      void loadPage({ reset: true });
+    });
+    lightboxClose?.addEventListener('click', closeLightbox);
+    lightbox?.addEventListener('click', (event) => {
+      if (event.target === lightbox) {
+        closeLightbox();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeLightbox();
+      }
+    });
+
+    void loadPage({ reset: true });
+  </script>
+</Layout>

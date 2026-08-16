@@ -132,6 +132,7 @@ export const listForShareBatch = query({
       height: asset.height,
       durationSeconds: asset.durationSeconds,
       location: asset.location,
+      capturedAt: asset.capturedAt,
     }));
   },
 });

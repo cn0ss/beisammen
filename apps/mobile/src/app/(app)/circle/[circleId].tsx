@@ -6,7 +6,6 @@ import {
   Alert,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -17,10 +16,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAction, useConvexAuth, useMutation, useQuery } from 'convex/react';
 
 import { Avatar, Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
+import { InviteComposer, type InviteComposerSubmitArgs } from '@/components/invites/InviteComposer';
+import { PublicCircleLinkPanel } from '@/components/share/PublicCircleLinkPanel';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { CircleInviteRecord, CircleMemberRecord } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import { inviteModeLabel } from '@/features/invites/preview-state';
 import { optimizePickerAsset, uploadPreparedFile } from '@/features/media/client';
 import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
 import { useTheme } from '@/hooks/use-theme';
@@ -80,10 +82,6 @@ function inviteStatusLabel(status: CircleInviteRecord['status']) {
   }
 }
 
-function buildInviteMessage(circleName: string, inviteLink: string) {
-  return `Komm in meinen Circle "${circleName}": ${inviteLink}`;
-}
-
 export default function CircleManagementScreen() {
   const router = useRouter();
   const theme = useTheme();
@@ -96,6 +94,10 @@ export default function CircleManagementScreen() {
   const circle = useQuery(api.circles.getById, circleId && hasViewer ? { circleId } : 'skip');
   const members = useQuery(api.circles.listMembers, circleId && hasViewer ? { circleId } : 'skip');
   const invites = useQuery(api.invites.listForCircle, circleId && hasViewer ? { circleId } : 'skip');
+  const publicLinks = useQuery(
+    api.publicLinks.listForCircle,
+    circleId && hasViewer && circle?.canInvite ? { circleId } : 'skip',
+  );
   const updateCircle = useMutation(api.circles.update);
   const updateMemberRole = useMutation(api.circles.updateMemberRole);
   const removeMember = useMutation(api.circles.removeMember);
@@ -103,19 +105,19 @@ export default function CircleManagementScreen() {
   const leaveCircle = useMutation(api.circles.leave);
   const createInvite = useMutation(api.invites.create);
   const revokeInvite = useMutation(api.invites.revoke);
+  const createPublicLink = useMutation(api.publicLinks.createForCircle);
+  const revokePublicLink = useMutation(api.publicLinks.revoke);
   const createCircleImageTarget = useAction(api.circles.createImageTarget);
   const completeCircleImageUpload = useAction(api.circles.completeImageUpload);
   const removeCircleImage = useAction(api.circles.removeImage);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
-  const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
+  const [busyPublicLinkId, setBusyPublicLinkId] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [isImageBusy, setIsImageBusy] = useState(false);
   const imageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
@@ -127,7 +129,6 @@ export default function CircleManagementScreen() {
 
     setName(circle.name);
     setDescription(circle.description);
-    setLastInviteLink(null);
   }, [circle?._id, circle?.name, circle?.description]);
 
   const detailsDirty =
@@ -233,46 +234,50 @@ export default function CircleManagementScreen() {
     ]);
   }, [circle, isImageBusy, removeCircleImage]);
 
-  const handleCreateInvite = useCallback(async () => {
-    if (!circleId || !circle || !inviteEmail.trim()) {
-      return;
+  const handleCreateInvite = useCallback(
+    async (args: InviteComposerSubmitArgs) => {
+      if (!circleId) {
+        throw new Error('Circle ist noch nicht geladen.');
+      }
+
+      setIsSubmittingInvite(true);
+
+      try {
+        return await createInvite({
+          circleId,
+          mode: args.mode,
+          invitedEmail: args.invitedEmail,
+          role: args.role,
+        });
+      } finally {
+        setIsSubmittingInvite(false);
+      }
+    },
+    [circleId, createInvite],
+  );
+
+  const handleCreatePublicLink = useCallback(async () => {
+    if (!circleId) {
+      throw new Error('Circle ist noch nicht geladen.');
     }
 
-    setIsSubmittingInvite(true);
-    setFeedback(null);
+    return await createPublicLink({
+      circleId,
+    });
+  }, [circleId, createPublicLink]);
 
-    try {
-      const created = await createInvite({
-        circleId,
-        invitedEmail: inviteEmail.trim(),
-        role: inviteRole,
-      });
-      setInviteEmail('');
-      setLastInviteLink(created.inviteLink);
-      setFeedback('Einladung erstellt.');
-      await Share.share({
-        message: buildInviteMessage(circle.name, created.inviteLink),
-      });
-    } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Einladung konnte nicht erstellt werden.');
-    } finally {
-      setIsSubmittingInvite(false);
-    }
-  }, [circle, circleId, createInvite, inviteEmail, inviteRole]);
+  const handleRevokePublicLink = useCallback(
+    async (publicLinkId: string) => {
+      setBusyPublicLinkId(publicLinkId);
 
-  const handleShareLastInvite = useCallback(async () => {
-    if (!circle || !lastInviteLink) {
-      return;
-    }
-
-    try {
-      await Share.share({
-        message: buildInviteMessage(circle.name, lastInviteLink),
-      });
-    } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Invite-Link konnte nicht geteilt werden.');
-    }
-  }, [circle, lastInviteLink]);
+      try {
+        await revokePublicLink({ publicLinkId });
+      } finally {
+        setBusyPublicLinkId(null);
+      }
+    },
+    [revokePublicLink],
+  );
 
   const handleToggleRole = useCallback(
     (member: CircleMemberRecord) => {
@@ -481,7 +486,11 @@ export default function CircleManagementScreen() {
           <Text style={[styles.title, { color: theme.text }]}>{circle?.name ?? 'Circle'}</Text>
         </View>
 
-        {!hasViewer || circle === undefined || members === undefined || invites === undefined ? (
+        {!hasViewer ||
+        circle === undefined ||
+        members === undefined ||
+        invites === undefined ||
+        (circle?.canInvite && publicLinks === undefined) ? (
           <Card>
             <LoadingBox />
           </Card>
@@ -583,6 +592,30 @@ export default function CircleManagementScreen() {
 
             <Card>
               <View style={styles.sectionHeader}>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>Web-Link</Text>
+                <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
+                  {circle.canInvite ? 'privat' : 'read only'}
+                </Text>
+              </View>
+
+              {circle.canInvite ? (
+                <PublicCircleLinkPanel
+                  circleName={circle.name}
+                  links={publicLinks ?? []}
+                  disabled={busyPublicLinkId !== null}
+                  onCreatePublicLink={handleCreatePublicLink}
+                  onRevokePublicLink={handleRevokePublicLink}
+                  onFeedback={setFeedback}
+                />
+              ) : (
+                <Text style={[styles.body, { color: theme.textSecondary }]}>
+                  Nur Owner und Admins dürfen öffentliche Web-Links verwalten.
+                </Text>
+              )}
+            </Card>
+
+            <Card>
+              <View style={styles.sectionHeader}>
                 <Text style={[styles.cardTitle, { color: theme.text }]}>Mitglieder</Text>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
                   {members.length.toString().padStart(2, '0')}
@@ -610,62 +643,12 @@ export default function CircleManagementScreen() {
               </View>
 
               {circle.canInvite ? (
-                <>
-                  <TextInput
-                    value={inviteEmail}
-                    onChangeText={setInviteEmail}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    placeholder="name@example.com"
-                    placeholderTextColor={theme.textTertiary}
-                    style={[
-                      styles.input,
-                      {
-                        backgroundColor: theme.background,
-                        borderColor: theme.border,
-                        color: theme.text,
-                      },
-                    ]}
-                  />
-                  <View style={styles.roleSwitch}>
-                    <InviteRoleButton
-                      label="Mitglied"
-                      active={inviteRole === 'member'}
-                      onPress={() => setInviteRole('member')}
-                    />
-                    <InviteRoleButton
-                      label="Admin"
-                      active={inviteRole === 'admin'}
-                      onPress={() => setInviteRole('admin')}
-                    />
-                  </View>
-                  <Button
-                    label="Invite-Link erstellen"
-                    icon="person-add-outline"
-                    loading={isSubmittingInvite}
-                    disabled={!inviteEmail.trim()}
-                    onPress={() => {
-                      void handleCreateInvite();
-                    }}
-                  />
-                  {lastInviteLink ? (
-                    <View style={styles.invitePreview}>
-                      <Text style={[styles.kicker, { color: theme.textTertiary }]}>letzter link</Text>
-                      <Text selectable style={[styles.linkText, { color: theme.primary }]}>
-                        {lastInviteLink}
-                      </Text>
-                      <Button
-                        label="Erneut teilen"
-                        icon="share-social-outline"
-                        variant="outline"
-                        onPress={() => {
-                          void handleShareLastInvite();
-                        }}
-                      />
-                    </View>
-                  ) : null}
-                </>
+                <InviteComposer
+                  circleName={circle.name}
+                  disabled={isSubmittingInvite}
+                  onCreateInvite={handleCreateInvite}
+                  onFeedback={setFeedback}
+                />
               ) : (
                 <Text style={[styles.body, { color: theme.textSecondary }]}>
                   Nur Owner und Admins dürfen neue Personen einladen.
@@ -675,7 +658,7 @@ export default function CircleManagementScreen() {
 
             <Card>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Ausstehende Einladungen</Text>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>Einladungen</Text>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
                   {invites.length.toString().padStart(2, '0')}
                 </Text>
@@ -829,14 +812,19 @@ function InviteRow({
       ]}
     >
       <View style={styles.inviteMarker}>
-        <Ionicons name="mail-open-outline" size={16} color={theme.primary} />
+        <Ionicons
+          name={invite.mode === 'open' ? 'link-outline' : 'mail-open-outline'}
+          size={16}
+          color={theme.primary}
+        />
       </View>
       <View style={styles.rowCopy}>
         <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>
-          {invite.invitedEmail}
+          {invite.invitedEmail ?? inviteModeLabel(invite.mode)}
         </Text>
         <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>
           {roleLabel(invite.role)} · {inviteStatusLabel(invite.status)}
+          {invite.acceptedBy ? ` · ${invite.acceptedBy.displayName}` : ''}
         </Text>
         <Text style={[styles.rowMeta, { color: theme.textTertiary }]} numberOfLines={1}>
           Von {invite.invitedBy.displayName} · bis {formatDateTime(invite.expiresAt)}
@@ -851,41 +839,6 @@ function InviteRow({
         />
       ) : null}
     </View>
-  );
-}
-
-function InviteRoleButton({
-  active,
-  label,
-  onPress,
-}: {
-  active: boolean;
-  label: string;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.roleButton,
-        {
-          backgroundColor: active ? theme.primaryMuted : theme.background,
-          borderColor: active ? theme.primary : theme.border,
-          opacity: pressed ? 0.85 : 1,
-        },
-      ]}
-    >
-      <Text
-        style={[
-          styles.roleButtonLabel,
-          { color: active ? theme.primary : theme.textSecondary },
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -1010,34 +963,6 @@ const styles = StyleSheet.create({
   },
   buttonCol: {
     flex: 1,
-  },
-  roleSwitch: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  roleButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: Radius.md,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  roleButtonLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-  },
-  invitePreview: {
-    gap: Spacing.sm,
-  },
-  kicker: {
-    fontFamily: Fonts.mono,
-    fontSize: FontSize.xs,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  linkText: {
-    fontSize: FontSize.sm,
-    lineHeight: 20,
   },
   row: {
     flexDirection: 'row',

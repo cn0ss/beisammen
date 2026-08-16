@@ -126,7 +126,9 @@ export default function SignInScreen() {
           </View>
           <Text style={[styles.brand, { color: theme.text }]}>beisammen</Text>
           <Text style={[styles.tagline, { color: theme.textSecondary }]}>
-            Familien- und Partner-Medien{'\n'}privat und selbstbestimmt teilen.
+            {pendingInviteToken
+              ? 'Melde dich an, um deine Circle-Einladung zu öffnen.'
+              : 'Familien- und Partner-Medien\nprivat und selbstbestimmt teilen.'}
           </Text>
         </Animated.View>
 
@@ -276,12 +278,16 @@ export default function SignInScreen() {
                   ? 'Instanz wird geprüft...'
                   : isBusy
                     ? 'Anmeldung läuft...'
-                    : 'Anmelden'}
+                    : pendingInviteToken
+                      ? 'Anmelden und Einladung öffnen'
+                      : 'Anmelden'}
             </Text>
           </Pressable>
 
           <Text style={[styles.hint, { color: theme.textTertiary }]}>
-            Verbunden mit {instance.instance.name}
+            {pendingInviteToken
+              ? `Einladung liegt bereit · ${instance.instance.name}`
+              : `Verbunden mit ${instance.instance.name}`}
           </Text>
         </Animated.View>
 

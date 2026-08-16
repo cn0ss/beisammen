@@ -25,7 +25,9 @@ interface AutumnResult<T = unknown> {
   error?: {
     message?: string;
     code?: string;
+    statusCode?: number;
   } | null;
+  statusCode?: number;
 }
 
 interface AutumnBalanceRecord {
@@ -85,6 +87,30 @@ function booleanOrFalse(value: unknown): boolean {
 
 function autumnErrorMessage(result: AutumnResult, fallback: string): string {
   return result.error?.message ?? fallback;
+}
+
+function isAutumnNotFound(result: AutumnResult): boolean {
+  const code = result.error?.code?.toLowerCase();
+
+  return (
+    result.statusCode === 404 ||
+    result.error?.statusCode === 404 ||
+    code === 'not_found' ||
+    code === 'customer_not_found' ||
+    code === 'customer_not_found_error'
+  );
+}
+
+function autumnCustomerOrNull(result: AutumnResult, fallback: string): unknown | null {
+  if (!result.error) {
+    return result.data ?? null;
+  }
+
+  if (isAutumnNotFound(result)) {
+    return null;
+  }
+
+  throw new Error(autumnErrorMessage(result, fallback));
 }
 
 function normalizeBalance(
@@ -193,12 +219,13 @@ export async function getCloudBillingStatus(
     });
   }
 
-  const result = await autumn.customers.get(ctx, { expand: [] }) as AutumnResult;
+  const result = await autumn.customers.get(ctx) as AutumnResult;
+  const customer = autumnCustomerOrNull(result, 'Autumn billing status failed.');
 
   return cloudBillingStatusFromCustomer({
     viewer,
     configured: true,
-    customer: result.error ? null : result.data,
+    customer,
   });
 }
 

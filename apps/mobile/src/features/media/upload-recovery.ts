@@ -108,6 +108,7 @@ function parseItem(value: unknown): UploadQueueItem | null {
   const width = optionalNumber(value.width);
   const height = optionalNumber(value.height);
   const durationSeconds = optionalNumber(value.durationSeconds);
+  const capturedAt = optionalNumber(value.capturedAt);
   const location = optionalLocation(value.location);
   const status =
     value.status === 'draft' ||
@@ -147,6 +148,7 @@ function parseItem(value: unknown): UploadQueueItem | null {
     ...(width !== undefined ? { width } : {}),
     ...(height !== undefined ? { height } : {}),
     ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+    ...(capturedAt !== undefined ? { capturedAt } : {}),
     ...(location ? { location } : {}),
     ...(optionalString(value.locationLabel) ? { locationLabel: optionalString(value.locationLabel) } : {}),
     ...(optionalString(value.errorMessage) ? { errorMessage: optionalString(value.errorMessage) } : {}),

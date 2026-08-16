@@ -33,11 +33,11 @@ export const CreateCircleCard = memo(function CreateCircleCard({
   return (
     <Card>
       <View style={styles.copy}>
-        <Text style={[styles.kicker, { color: theme.textTertiary }]}>new circle</Text>
-        <Text style={[styles.title, { color: theme.text }]}>Name the people first.</Text>
+        <Text style={[styles.kicker, { color: theme.textTertiary }]}>neuer circle</Text>
+        <Text style={[styles.title, { color: theme.text }]}>Benenne zuerst die Menschen.</Text>
         <Text style={[styles.body, { color: theme.textSecondary }]}>
-          Create a shared room for one specific group. No discovery, no audience, just the
-          people you invite.
+          Erstelle einen privaten Raum für genau eine Gruppe. Keine Suche, kein Publikum, nur
+          eingeladene Personen.
         </Text>
       </View>
       <TextInput

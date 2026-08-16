@@ -15,6 +15,9 @@ export const inviteFunctionSurface = [
 ] as const;
 
 export const CIRCLE_INVITE_LIST_LIMIT = 100;
+type InviteMode = 'email' | 'open';
+
+const inviteModeValidator = v.union(v.literal('email'), v.literal('open'));
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
@@ -51,6 +54,45 @@ function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function inviteMode(invite: Doc<'invites'>): InviteMode {
+  return invite.mode ?? 'email';
+}
+
+function normalizedInviteEmail(invite: Doc<'invites'>): string | null {
+  return invite.invitedEmail?.trim().toLowerCase() || null;
+}
+
+async function findCircleMembership(
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    circleId: Doc<'invites'>['circleId'];
+    userId: Doc<'users'>['_id'];
+  },
+) {
+  return await ctx.db
+    .query('circleMembers')
+    .withIndex('by_circle_and_user', (q) =>
+      q.eq('circleId', input.circleId).eq('userId', input.userId),
+    )
+    .unique();
+}
+
+async function mapAcceptedBy(
+  ctx: QueryCtx | MutationCtx,
+  acceptedBy?: Doc<'users'>['_id'],
+) {
+  if (!acceptedBy) {
+    return null;
+  }
+
+  const user = await ctx.db.get(acceptedBy);
+
+  return {
+    userId: acceptedBy,
+    displayName: buildInvitedByLabel(user),
+  };
 }
 
 async function hashInviteToken(token: string): Promise<string> {
@@ -91,7 +133,8 @@ async function findInviteByToken(
 export const create = mutation({
   args: {
     circleId: v.id('circles'),
-    invitedEmail: v.string(),
+    mode: v.optional(inviteModeValidator),
+    invitedEmail: v.optional(v.string()),
     role: v.union(v.literal('admin'), v.literal('member')),
   },
   handler: async (ctx, args) => {
@@ -103,11 +146,19 @@ export const create = mutation({
     }
 
     const now = Date.now();
+    const mode = args.mode ?? 'email';
+    const invitedEmail = args.invitedEmail?.trim().toLowerCase() ?? '';
+
+    if (mode === 'email' && !invitedEmail) {
+      throw new Error('Invited email is required for email-bound invites.');
+    }
+
     const token = crypto.randomUUID();
     const tokenHash = await hashInviteToken(token);
     const inviteId = await ctx.db.insert('invites', {
       circleId: args.circleId,
-      invitedEmail: args.invitedEmail.trim().toLowerCase(),
+      mode,
+      ...(mode === 'email' ? { invitedEmail } : {}),
       role: args.role,
       tokenHash,
       status: 'pending',
@@ -138,18 +189,24 @@ export const listForCircle = query({
 
     const rows = await Promise.all(
       invites.map(async (invite) => {
-        const inviter = await ctx.db.get(invite.invitedBy);
+        const [inviter, acceptedBy] = await Promise.all([
+          ctx.db.get(invite.invitedBy),
+          mapAcceptedBy(ctx, invite.acceptedBy),
+        ]);
         const isExpired = invite.status === 'pending' && invite.expiresAt < Date.now();
         const resolvedStatus = isExpired ? 'expired' : invite.status;
+        const mode = inviteMode(invite);
 
         return {
           _id: invite._id,
           circleId: invite.circleId,
-          invitedEmail: invite.invitedEmail,
+          mode,
+          invitedEmail: mode === 'email' ? normalizedInviteEmail(invite) : null,
           role: invite.role,
           status: resolvedStatus,
           expiresAt: invite.expiresAt,
           acceptedAt: invite.acceptedAt ?? null,
+          acceptedBy,
           invitedBy: {
             userId: invite.invitedBy,
             displayName: buildInvitedByLabel(inviter),
@@ -183,20 +240,30 @@ export const preview = query({
 
     const status =
       invite.status === 'pending' && invite.expiresAt < Date.now() ? 'expired' : invite.status;
+    const mode = inviteMode(invite);
     const viewerEmail = viewer.email?.trim().toLowerCase();
-    const invitedEmail = invite.invitedEmail.trim().toLowerCase();
+    const invitedEmail = normalizedInviteEmail(invite);
+    const emailMatchesViewer =
+      mode === 'open' ? true : Boolean(viewerEmail && invitedEmail && viewerEmail === invitedEmail);
+    const existingMembership = await findCircleMembership(ctx, {
+      circleId: invite.circleId,
+      userId: viewer._id,
+    });
 
     return {
       inviteId: invite._id,
       circleId: invite.circleId,
       circleName: circle.name,
-      invitedEmail: invite.invitedEmail,
+      mode,
+      invitedEmail: mode === 'email' ? invitedEmail : null,
       role: invite.role,
       status,
       expiresAt: invite.expiresAt,
       acceptedAt: invite.acceptedAt ?? null,
-      canAccept: status === 'pending' && Boolean(viewerEmail) && viewerEmail === invitedEmail,
-      emailMatchesViewer: Boolean(viewerEmail) && viewerEmail === invitedEmail,
+      acceptedBy: await mapAcceptedBy(ctx, invite.acceptedBy),
+      canAccept: status === 'pending' && !existingMembership && emailMatchesViewer,
+      emailMatchesViewer,
+      isAlreadyMember: Boolean(existingMembership),
     };
   },
 });
@@ -224,32 +291,38 @@ export const accept = mutation({
       throw new Error('Invite has expired.');
     }
 
-    if (!viewer.email || viewer.email.toLowerCase() !== invite.invitedEmail) {
+    const existingMembership = await findCircleMembership(ctx, {
+      circleId: invite.circleId,
+      userId: viewer._id,
+    });
+
+    if (existingMembership) {
+      throw new Error('You are already a member of this circle.');
+    }
+
+    const mode = inviteMode(invite);
+    const invitedEmail = normalizedInviteEmail(invite);
+    const viewerEmail = viewer.email?.trim().toLowerCase();
+
+    if (mode === 'email' && (!viewerEmail || viewerEmail !== invitedEmail)) {
       throw new Error('Invite email does not match the current account.');
     }
 
-    const existingMembership = await ctx.db
-      .query('circleMembers')
-      .withIndex('by_circle_and_user', (q) =>
-        q.eq('circleId', invite.circleId).eq('userId', viewer._id),
-      )
-      .unique();
+    const now = Date.now();
 
-    if (!existingMembership) {
-      await ctx.db.insert('circleMembers', {
-        circleId: invite.circleId,
-        userId: viewer._id,
-        role: invite.role,
-        joinedAt: Date.now(),
-      });
-      await adjustCircleStats(ctx, invite.circleId, {
-        memberCount: 1,
-      });
-    }
-
+    await ctx.db.insert('circleMembers', {
+      circleId: invite.circleId,
+      userId: viewer._id,
+      role: invite.role,
+      joinedAt: now,
+    });
+    await adjustCircleStats(ctx, invite.circleId, {
+      memberCount: 1,
+    });
     await ctx.db.patch(invite._id, {
       status: 'accepted',
-      acceptedAt: Date.now(),
+      acceptedAt: now,
+      acceptedBy: viewer._id,
     });
 
     return {

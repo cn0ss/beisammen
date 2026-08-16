@@ -20,6 +20,11 @@ const DOWNLOAD_DIRECTORY = `${FileSystem.cacheDirectory ?? ''}share-downloads/`;
 type RawLocation = Pick<MediaLocation, 'latitude' | 'longitude' | 'accuracyMeters' | 'source'>;
 type GeocodedLocationFields = Pick<MediaLocation, 'label' | 'city' | 'region' | 'country'>;
 
+export interface PickerAssetMetadata {
+  location?: MediaLocation;
+  capturedAt?: number;
+}
+
 export interface PreparedUploadAsset {
   uri: string;
   previewUri: string;
@@ -31,6 +36,7 @@ export interface PreparedUploadAsset {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  capturedAt?: number;
 }
 
 export interface PreparedPreviewAsset {
@@ -80,6 +86,66 @@ function toNumber(value: unknown): number | undefined {
 
     if (numerator !== undefined && denominator && Number.isFinite(denominator)) {
       return numerator / denominator;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeCapturedTimestamp(value: number): number | undefined {
+  if (!Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+
+  return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
+function parseExifDateString(value: string): number | undefined {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const exifMatch = trimmed.match(
+    /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(.*)$/,
+  );
+  const normalized = exifMatch
+    ? `${exifMatch[1]}-${exifMatch[2]}-${exifMatch[3]}T${exifMatch[4]}:${exifMatch[5]}:${exifMatch[6]}${exifMatch[7] ?? ''}`
+    : trimmed;
+  const parsed = Date.parse(normalized);
+
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function readCapturedAtFromExif(exif: unknown): number | undefined {
+  if (!isRecord(exif)) {
+    return undefined;
+  }
+
+  const candidates = [
+    exif.DateTimeOriginal,
+    exif.DateTimeDigitized,
+    exif.CreateDate,
+    exif.DateTime,
+    exif.ModifyDate,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number') {
+      const timestamp = normalizeCapturedTimestamp(candidate);
+
+      if (timestamp !== undefined) {
+        return timestamp;
+      }
+    }
+
+    if (typeof candidate === 'string') {
+      const timestamp = parseExifDateString(candidate);
+
+      if (timestamp !== undefined) {
+        return timestamp;
+      }
     }
   }
 
@@ -220,25 +286,37 @@ async function reverseGeocodeLocation(
   };
 }
 
-async function readMediaLibraryLocation(assetId: string): Promise<RawLocation | undefined> {
+async function readMediaLibraryMetadata(assetId: string): Promise<{
+  location?: RawLocation;
+  capturedAt?: number;
+}> {
   try {
     const info = await MediaLibrary.getAssetInfoAsync(assetId, {
       shouldDownloadFromNetwork: false,
     });
     const latitude = toNumber(info.location?.latitude);
     const longitude = toNumber(info.location?.longitude);
+    const capturedAt = normalizeCapturedTimestamp(info.creationTime);
+    const metadata: {
+      location?: RawLocation;
+      capturedAt?: number;
+    } = {};
 
-    if (latitude === undefined || longitude === undefined) {
-      return undefined;
+    if (latitude !== undefined && longitude !== undefined) {
+      metadata.location = {
+        latitude,
+        longitude,
+        source: 'embedded',
+      };
     }
 
-    return {
-      latitude,
-      longitude,
-      source: 'embedded',
-    };
+    if (capturedAt !== undefined) {
+      metadata.capturedAt = capturedAt;
+    }
+
+    return metadata;
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -275,7 +353,7 @@ async function readEmbeddedLocation(
   asset: ImagePicker.ImagePickerAsset,
 ): Promise<RawLocation | undefined> {
   if (asset.assetId) {
-    const mediaLibraryLocation = await readMediaLibraryLocation(asset.assetId);
+    const mediaLibraryLocation = (await readMediaLibraryMetadata(asset.assetId)).location;
 
     if (mediaLibraryLocation) {
       return mediaLibraryLocation;
@@ -287,6 +365,38 @@ async function readEmbeddedLocation(
   }
 
   return undefined;
+}
+
+async function readEmbeddedMetadata(
+  asset: ImagePicker.ImagePickerAsset,
+): Promise<{
+  location?: RawLocation;
+  capturedAt?: number;
+}> {
+  const mediaLibraryMetadata = asset.assetId
+    ? await readMediaLibraryMetadata(asset.assetId)
+    : {};
+  const exifLocation =
+    !mediaLibraryMetadata.location && asset.type === 'image'
+      ? readImagePickerExifLocation(asset.exif)
+      : undefined;
+  const exifCapturedAt =
+    mediaLibraryMetadata.capturedAt === undefined && asset.type === 'image'
+      ? readCapturedAtFromExif(asset.exif)
+      : undefined;
+
+  return {
+    ...(mediaLibraryMetadata.location
+      ? { location: mediaLibraryMetadata.location }
+      : exifLocation
+        ? { location: exifLocation }
+        : {}),
+    ...(mediaLibraryMetadata.capturedAt !== undefined
+      ? { capturedAt: mediaLibraryMetadata.capturedAt }
+      : exifCapturedAt !== undefined
+        ? { capturedAt: exifCapturedAt }
+        : {}),
+  };
 }
 
 async function readDeviceFallbackLocation(
@@ -332,26 +442,42 @@ async function readDeviceFallbackLocation(
 export async function resolvePickerAssetLocations(
   assets: ImagePicker.ImagePickerAsset[],
 ): Promise<Array<MediaLocation | undefined>> {
+  const metadata = await resolvePickerAssetMetadata(assets);
+
+  return metadata.map((item) => item.location);
+}
+
+export async function resolvePickerAssetMetadata(
+  assets: ImagePicker.ImagePickerAsset[],
+): Promise<PickerAssetMetadata[]> {
   const geocodeCache = new Map<string, GeocodedLocationFields | null>();
-  const embeddedLocations = await Promise.all(assets.map((asset) => readEmbeddedLocation(asset)));
+  const embeddedMetadata = await Promise.all(assets.map((asset) => readEmbeddedMetadata(asset)));
   const resolvedLocations = await Promise.all(
-    embeddedLocations.map(async (location) =>
-      location ? await reverseGeocodeLocation(location, geocodeCache) : undefined,
+    embeddedMetadata.map(async (metadata) =>
+      metadata.location ? await reverseGeocodeLocation(metadata.location, geocodeCache) : undefined,
     ),
   );
+  const buildMetadata = (location: MediaLocation | undefined, index: number): PickerAssetMetadata => ({
+    ...(location ? { location } : {}),
+    ...(embeddedMetadata[index]?.capturedAt !== undefined
+      ? { capturedAt: embeddedMetadata[index]!.capturedAt }
+      : {}),
+  });
   const needsFallback = resolvedLocations.some((location) => !location);
 
   if (!needsFallback) {
-    return resolvedLocations;
+    return resolvedLocations.map(buildMetadata);
   }
 
   const fallbackLocation = await readDeviceFallbackLocation(geocodeCache);
 
   if (!fallbackLocation) {
-    return resolvedLocations;
+    return resolvedLocations.map(buildMetadata);
   }
 
-  return resolvedLocations.map((location) => location ?? fallbackLocation);
+  return resolvedLocations.map((location, index) =>
+    buildMetadata(location ?? fallbackLocation, index),
+  );
 }
 
 export function formatMediaLocation(location?: MediaLocation): string | null {
@@ -398,7 +524,7 @@ export function assetKind(asset: ImagePicker.ImagePickerAsset): AssetKind {
 }
 
 async function getFileSize(uri: string): Promise<number | undefined> {
-  const info = await FileSystem.getInfoAsync(uri);
+  const info = await FileSystem.getInfoAsync(normalizeFileUri(uri));
 
   if (!info.exists) {
     return undefined;
@@ -407,70 +533,120 @@ async function getFileSize(uri: string): Promise<number | undefined> {
   return info.size;
 }
 
+async function resolvePickerUploadUri(asset: ImagePicker.ImagePickerAsset): Promise<string> {
+  const normalizedUri = normalizeFileUri(asset.uri);
+
+  if (normalizedUri.startsWith('file://') || !asset.assetId) {
+    return normalizedUri;
+  }
+
+  try {
+    const info = await MediaLibrary.getAssetInfoAsync(asset.assetId, {
+      shouldDownloadFromNetwork: true,
+    });
+    const localUri = typeof info.localUri === 'string' ? info.localUri.trim() : '';
+
+    if (localUri) {
+      return normalizeFileUri(localUri);
+    }
+  } catch {
+    // The upload preflight will surface a clearer error when no local file can be resolved.
+  }
+
+  return normalizedUri;
+}
+
 async function processImageAsset(
   asset: ImagePicker.ImagePickerAsset,
   location?: MediaLocation,
+  capturedAt?: number,
 ): Promise<PreparedUploadAsset> {
+  const uri = await resolvePickerUploadUri(asset);
+
   return {
-    uri: asset.uri,
-    previewUri: asset.uri,
+    uri,
+    previewUri: uri,
     fileName: fileNameFromPickerAsset(asset),
     mimeType: mimeTypeForPickerAsset(asset),
     kind: 'image',
-    sizeBytes: asset.fileSize ?? (await getFileSize(asset.uri)),
+    sizeBytes: asset.fileSize ?? (await getFileSize(uri)),
     width: asset.width,
     height: asset.height,
     location,
+    capturedAt,
   };
 }
 
 async function processVideoAsset(
   asset: ImagePicker.ImagePickerAsset,
   location?: MediaLocation,
+  capturedAt?: number,
 ): Promise<PreparedUploadAsset> {
+  const uri = await resolvePickerUploadUri(asset);
   const originalDurationSeconds =
     asset.duration !== null && asset.duration !== undefined ? asset.duration / 1000 : undefined;
 
   return {
-    uri: asset.uri,
-    previewUri: asset.uri,
+    uri,
+    previewUri: uri,
     fileName: fileNameFromPickerAsset(asset),
     mimeType: mimeTypeForPickerAsset(asset),
     kind: 'video',
-    sizeBytes: asset.fileSize ?? (await getFileSize(asset.uri)),
+    sizeBytes: asset.fileSize ?? (await getFileSize(uri)),
     width: asset.width,
     height: asset.height,
     durationSeconds: originalDurationSeconds,
     location,
+    capturedAt,
   };
 }
 
 export async function optimizePickerAsset(
   asset: ImagePicker.ImagePickerAsset,
   location?: MediaLocation,
+  capturedAt?: number,
 ): Promise<PreparedUploadAsset> {
   if (assetKind(asset) === 'image') {
-    return await processImageAsset(asset, location);
+    return await processImageAsset(asset, location, capturedAt);
   }
 
-  return await processVideoAsset(asset, location);
+  return await processVideoAsset(asset, location, capturedAt);
 }
 
 export async function uploadPreparedFile(input: {
   target: UploadTarget;
   asset: PreparedUploadAsset;
+  onProgress?: (progress: {
+    bytesSent: number;
+    totalBytesExpectedToSend?: number;
+  }) => void;
 }): Promise<{ storageId?: string; objectKey?: string }> {
-  const response = await fetch(input.asset.uri);
-  const blob = await response.blob();
+  const uploadUri = normalizeFileUri(input.asset.uri);
 
-  const uploadResponse = await fetch(input.target.uploadUrl, {
-    method: 'PUT',
+  if (!uploadUri.startsWith('file://')) {
+    throw new Error('Upload-Datei ist keine lokale Datei.');
+  }
+
+  const info = await FileSystem.getInfoAsync(uploadUri);
+
+  if (!info.exists || info.isDirectory) {
+    throw new Error('Upload-Datei ist nicht mehr lokal verfügbar.');
+  }
+
+  const uploadTask = FileSystem.createUploadTask(input.target.uploadUrl, uploadUri, {
+    httpMethod: 'PUT',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     headers: { ...(input.target.headers ?? {}), 'content-type': input.asset.mimeType },
-    body: blob,
+  }, (progress) => {
+    input.onProgress?.({
+      bytesSent: progress.totalBytesSent,
+      totalBytesExpectedToSend: progress.totalBytesExpectedToSend,
+    });
   });
+  const uploadResponse = await uploadTask.uploadAsync();
 
-  if (!uploadResponse.ok) {
-    throw new Error(`S3 upload failed with status ${uploadResponse.status}.`);
+  if (!uploadResponse || uploadResponse.status < 200 || uploadResponse.status >= 300) {
+    throw new Error(`S3 upload failed with status ${uploadResponse?.status ?? 'unknown'}.`);
   }
 
   return { objectKey: input.target.objectKey };

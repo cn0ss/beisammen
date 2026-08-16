@@ -27,6 +27,7 @@ export interface PreparedUploadQueueAsset {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  capturedAt?: number;
 }
 
 export function assertUploadBatchWithinBetaLimits(input: {
@@ -98,7 +99,11 @@ export interface UploadQueueItem<SourceAsset = unknown> {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  capturedAt?: number;
   locationLabel?: string;
+  bytesSent?: number;
+  totalBytesExpectedToSend?: number;
+  progressRatio?: number;
   status: UploadStatus;
   attempts: number;
   errorMessage?: string;
@@ -146,8 +151,49 @@ export function markUploadStatus<SourceAsset>(
         ? {
             ...item,
             status,
-            errorMessage,
+            errorMessage: status === 'processing' || status === 'uploading' ? undefined : errorMessage,
             attempts: status === 'failed' ? item.attempts + 1 : item.attempts,
+            ...(status === 'failed' || status === 'processing'
+              ? {
+                  bytesSent: undefined,
+                  totalBytesExpectedToSend: undefined,
+                  progressRatio: undefined,
+                }
+              : {}),
+            updatedAt: Date.now(),
+          }
+        : item,
+    ),
+  };
+}
+
+export function patchUploadProgress<SourceAsset>(
+  state: UploadQueueState<SourceAsset>,
+  itemId: string,
+  progress: {
+    bytesSent: number;
+    totalBytesExpectedToSend?: number;
+  },
+): UploadQueueState<SourceAsset> {
+  const bytesSent = Math.max(0, Math.floor(progress.bytesSent));
+  const totalBytesExpectedToSend =
+    progress.totalBytesExpectedToSend !== undefined &&
+    Number.isFinite(progress.totalBytesExpectedToSend) &&
+    progress.totalBytesExpectedToSend > 0
+      ? Math.floor(progress.totalBytesExpectedToSend)
+      : undefined;
+  const progressRatio = totalBytesExpectedToSend
+    ? Math.min(1, Math.max(0, bytesSent / totalBytesExpectedToSend))
+    : undefined;
+
+  return {
+    items: state.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            bytesSent,
+            totalBytesExpectedToSend,
+            progressRatio,
             updatedAt: Date.now(),
           }
         : item,
@@ -191,6 +237,7 @@ export function uploadQueueItemToPreparedAsset(
     height: item.height,
     durationSeconds: item.durationSeconds,
     location: item.location,
+    capturedAt: item.capturedAt,
   };
 }
 

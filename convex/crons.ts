@@ -13,4 +13,18 @@ crons.interval(
   },
 );
 
+crons.interval(
+  'dispatch queued push notifications',
+  { minutes: 1 },
+  internal.notifications.dispatchQueued,
+  {},
+);
+
+crons.interval(
+  'check Expo push receipts',
+  { minutes: 15 },
+  internal.notifications.checkReceipts,
+  {},
+);
+
 export default crons;

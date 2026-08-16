@@ -67,6 +67,18 @@ function formatDuration(durationSeconds?: number): string | null {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+const ASSET_DATE_FORMAT = new Intl.DateTimeFormat('de-DE', {
+  dateStyle: 'medium',
+});
+
+function formatCapturedDate(capturedAt?: number): string | null {
+  if (!capturedAt || capturedAt <= 0) {
+    return null;
+  }
+
+  return ASSET_DATE_FORMAT.format(new Date(capturedAt));
+}
+
 function ShareAssetViewer({ asset }: { asset: ShareAssetRecord | null }) {
   const theme = useTheme();
   const isFocused = useIsFocused();
@@ -296,7 +308,11 @@ export default function ShareDetailScreen() {
     );
   }
 
-  const activeAssetMeta = [formatBytes(activeAsset?.sizeBytes), formatDuration(activeAsset?.durationSeconds)]
+  const activeAssetMeta = [
+    formatCapturedDate(activeAsset?.capturedAt),
+    formatBytes(activeAsset?.sizeBytes),
+    formatDuration(activeAsset?.durationSeconds),
+  ]
     .filter(Boolean)
     .join(' · ');
   const activeAssetLocation = formatMediaLocation(activeAsset?.location);

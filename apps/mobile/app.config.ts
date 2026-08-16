@@ -14,10 +14,20 @@ const publicEnv = {
     process.env.EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID ?? '',
   EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL:
     process.env.EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL ?? '',
+  EXPO_PUBLIC_EAS_PROJECT_ID: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? '',
   EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL ?? '',
 } as const;
 
 const scheme = publicEnv.EXPO_PUBLIC_APP_SCHEME;
+const easProjectId = publicEnv.EXPO_PUBLIC_EAS_PROJECT_ID.trim();
+const mapsPluginConfig = {
+  ...(process.env.GOOGLE_MAPS_ANDROID_API_KEY
+    ? { androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY }
+    : {}),
+  ...(process.env.GOOGLE_MAPS_IOS_API_KEY
+    ? { iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_IOS_API_KEY }
+    : {}),
+};
 
 const config: ExpoConfig = {
   name: 'beisammen',
@@ -49,7 +59,14 @@ const config: ExpoConfig = {
   },
   plugins: [
     'expo-dev-client',
+    'expo-image',
+    'expo-notifications',
     'expo-router',
+    'expo-secure-store',
+    'expo-sharing',
+    'expo-status-bar',
+    'expo-video',
+    'expo-web-browser',
     [
       'expo-location',
       {
@@ -57,6 +74,12 @@ const config: ExpoConfig = {
           'beisammen kann optional deinen aktuellen Standort nutzen, um Medien ohne eingebettete GPS-Daten mit einem Ort zu ergänzen.',
       },
     ],
+    Object.keys(mapsPluginConfig).length > 0
+      ? [
+          'react-native-maps',
+          mapsPluginConfig,
+        ]
+      : 'react-native-maps',
     'react-native-compressor',
     [
       'expo-image-picker',
@@ -86,6 +109,7 @@ const config: ExpoConfig = {
   },
   extra: {
     publicEnv,
+    ...(easProjectId ? { eas: { projectId: easProjectId } } : {}),
   },
 };
 

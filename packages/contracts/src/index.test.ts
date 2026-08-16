@@ -2,10 +2,12 @@ import { describe, expect, test } from 'vitest';
 
 import {
   COMMENT_MAX_BODY_LENGTH,
+  BILLING_RETURN_PATH,
   INSTANCE_DISCOVERY_PATH,
   REACTION_TOP_EMOJI_LIMIT,
   assertInstanceBaseUrlMatches,
   assertAppVersionSupported,
+  buildBillingReturnUrl,
   buildInstanceDiscoveryUrl,
   buildWorkOSInstanceConfig,
   compareAppVersions,
@@ -39,6 +41,15 @@ describe('instance discovery', () => {
   test('builds the well-known discovery URL from a base URL', () => {
     expect(buildInstanceDiscoveryUrl('https://family.example.com/')).toBe(
       `https://family.example.com${INSTANCE_DISCOVERY_PATH}`,
+    );
+  });
+
+  test('builds the billing return URL from an instance base URL', () => {
+    expect(buildBillingReturnUrl('https://family.example.com/', 'checkout')).toBe(
+      `https://family.example.com${BILLING_RETURN_PATH}?source=checkout`,
+    );
+    expect(buildBillingReturnUrl('https://family.example.com', 'portal')).toBe(
+      `https://family.example.com${BILLING_RETURN_PATH}?source=portal`,
     );
   });
 

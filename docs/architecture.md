@@ -54,9 +54,13 @@ Repository policy:
 - `circles`
 - `circleMembers`
 - `invites`
+- `publicCircleLinks`
 - `shareBatches`
 - `assets`
 - `uploads`
+- `memoryItems`
+- `memoryMonths`
+- `memoryPlaces`
 - `activityEvents`
 - `circleStats`
 
@@ -75,6 +79,22 @@ crash recovery or during QA; it defaults to rows older than 24 hours, deletes
 pending storage references first, and then removes stale `uploading` or `failed`
 rows that have no completed asset.
 
+`memoryItems` is the published-media timeline index used by the mobile Memories
+tab. New uploads can store `assets.capturedAt` from device media metadata; older
+published media should be backfilled with `internal.memories.backfillBatch`,
+which uses `shareBatches.publishedAt` as the timeline fallback.
+`memoryMonths` and `memoryPlaces` are lightweight discovery summaries for month
+filters and the Places map. New published media maintains them directly. Existing
+deployments with legacy memory rows should run
+`internal.memories.backfillDiscoveryBatch` after `internal.memories.backfillBatch`;
+use `dryRun=true` first to verify the bounded patch and summary counts.
+
+`publicCircleLinks` stores revocable, hashed tokens for no-install web access to
+a circle's published feed. The raw token is only returned when an owner or admin
+creates a new link; public viewers load `/share/#<token>`, and the web frontend
+exchanges that token through the Convex HTTP endpoint for a bounded, read-only
+page of signed media URLs.
+
 ## Billing model
 
 - `cloud`: `PUBLIC_DEPLOYMENT_KIND=cloud`; discovery advertises
@@ -90,7 +110,8 @@ rows that have no completed asset.
   enforced, while file type validation still applies.
 - Plan labels shown in the mobile app come from `PUBLIC_BILLING_PLANS`, falling
   back to the repository paid plan defaults. The billing product definition
-  lives in `docs/billing/autumn.config.ts`.
+  lives in the root `autumn.config.ts`; `docs/billing/autumn.config.ts`
+  documents the CLI workflow.
 - Convex setup requires `app.use(autumn)` in `convex/convex.config.ts`,
   `convex/autumn.ts` for user identification, and `AUTUMN_SECRET_KEY` set in the
   Convex environment.

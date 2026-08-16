@@ -5,12 +5,14 @@ import { Platform } from 'react-native';
 
 import { api } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
+import { usePushNotifications } from '@/features/notifications/use-push-notifications';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function AppLayout() {
   const { isReady, session } = useSession();
   const convexAuth = useConvexAuth();
   const theme = useTheme();
+  usePushNotifications();
   const activitySummary = useQuery(
     api.activity.summaryForViewer,
     session && convexAuth.isAuthenticated ? {} : 'skip',
@@ -68,6 +70,21 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
+        name="memories/index"
+        options={{
+          title: 'Erinnerungen',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="images-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="memories/viewer"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="activity"
         options={{
           title: 'Aktivität',
@@ -84,6 +101,12 @@ export default function AppLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="settings-outline" size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="onboarding"
+        options={{
+          href: null,
         }}
       />
       <Tabs.Screen

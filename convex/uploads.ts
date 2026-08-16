@@ -517,6 +517,7 @@ export const finalizeComplete = internalMutation({
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
+    capturedAt: v.optional(v.number()),
     location: v.optional(
       v.object({
         latitude: v.number(),
@@ -583,6 +584,7 @@ export const finalizeComplete = internalMutation({
       width: args.width,
       height: args.height,
       durationSeconds: args.durationSeconds,
+      capturedAt: args.capturedAt,
       location: args.location,
     };
 
@@ -629,6 +631,7 @@ export const finalizeComplete = internalMutation({
       width: nextAssetFields.width,
       height: nextAssetFields.height,
       durationSeconds: nextAssetFields.durationSeconds,
+      capturedAt: nextAssetFields.capturedAt,
       location: nextAssetFields.location,
     });
 
@@ -666,6 +669,7 @@ export const complete = action({
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
+    capturedAt: v.optional(v.number()),
     location: v.optional(
       v.object({
         latitude: v.number(),
@@ -803,6 +807,7 @@ export const complete = action({
         ...(args.width !== undefined ? { width: args.width } : {}),
         ...(args.height !== undefined ? { height: args.height } : {}),
         ...(args.durationSeconds !== undefined ? { durationSeconds: args.durationSeconds } : {}),
+        ...(args.capturedAt !== undefined ? { capturedAt: args.capturedAt } : {}),
         ...(args.location !== undefined ? { location: args.location } : {}),
       });
     } catch (error) {

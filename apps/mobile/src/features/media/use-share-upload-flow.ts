@@ -8,6 +8,7 @@ import {
   enqueue,
   initialUploadQueueState,
   markUploadStatus,
+  patchUploadProgress,
   patchUploadQueueItem,
   removeUploadQueueItems,
   uploadQueueItemToPreparedAsset,
@@ -18,6 +19,7 @@ import {
 import type { CircleListItem, ShareDraftRecord } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import { recordClientDiagnostic } from '@/features/diagnostics/buffer';
 import { createLogger } from '@/lib/logger';
 
 import {
@@ -27,7 +29,7 @@ import {
   formatMediaLocation,
   mimeTypeForPickerAsset,
   optimizePickerAsset,
-  resolvePickerAssetLocations,
+  resolvePickerAssetMetadata,
   uploadPreparedFile,
   type PreparedUploadAsset,
 } from './client';
@@ -235,6 +237,9 @@ export function useShareUploadFlow({
       const uploaded = await uploadPreparedFile({
         target: prepared.target,
         asset: input.preparedAsset,
+        onProgress: (progress) => {
+          setUploadQueue((state) => patchUploadProgress(state, input.queueId, progress));
+        },
       });
       let previewCacheUri = input.previewCacheUri;
       let previewUploaded: {
@@ -285,6 +290,7 @@ export function useShareUploadFlow({
         height: input.preparedAsset.height,
         durationSeconds: input.preparedAsset.durationSeconds,
         location: input.preparedAsset.location,
+        capturedAt: input.preparedAsset.capturedAt,
       });
 
       await uploadRecoveryStore.clearItemFiles({
@@ -335,12 +341,14 @@ export function useShareUploadFlow({
 
     try {
       const draft = await getOrCreateDraft({ circleId: selectedCircle._id });
-      const resolvedLocations = await resolvePickerAssetLocations(result.assets);
+      const resolvedMetadata = await resolvePickerAssetMetadata(result.assets);
 
       let successCount = 0;
 
       for (const [index, asset] of result.assets.entries()) {
-        const resolvedLocation = resolvedLocations[index];
+        const assetMetadata = resolvedMetadata[index] ?? {};
+        const resolvedLocation = assetMetadata.location;
+        const capturedAt = assetMetadata.capturedAt;
         const fileName = fileNameFromPickerAsset(asset);
         const mimeType = mimeTypeForPickerAsset(asset);
         const kind = assetKind(asset);
@@ -391,6 +399,7 @@ export function useShareUploadFlow({
             height: asset.height,
             durationSeconds,
             location: resolvedLocation,
+            capturedAt,
             locationLabel: formatMediaLocation(resolvedLocation) ?? undefined,
             status: 'processing',
             attempts: 0,
@@ -398,7 +407,7 @@ export function useShareUploadFlow({
         );
 
         try {
-          const preparedAsset = await optimizePickerAsset(uploadAsset, resolvedLocation);
+          const preparedAsset = await optimizePickerAsset(uploadAsset, resolvedLocation, capturedAt);
 
           assertPreparedAssetAllowedForDeployment({
             deploymentKind,
@@ -417,6 +426,7 @@ export function useShareUploadFlow({
               height: preparedAsset.height,
               durationSeconds: preparedAsset.durationSeconds,
               location: preparedAsset.location,
+              capturedAt: preparedAsset.capturedAt,
               locationLabel: formatMediaLocation(preparedAsset.location) ?? undefined,
               prepared: true,
             }),
@@ -439,6 +449,15 @@ export function useShareUploadFlow({
             circleId: selectedCircle._id,
             shareBatchId: draft.shareBatchId,
             fileName,
+            errorMessage: message,
+            error,
+          });
+          recordClientDiagnostic('upload', 'Upload item failed', {
+            queueId,
+            circleId: selectedCircle._id,
+            shareBatchId: draft.shareBatchId,
+            fileName,
+            errorMessage: message,
             error,
           });
           setUploadQueue((state) => markUploadStatus(state, queueId, 'failed', message));
@@ -456,6 +475,10 @@ export function useShareUploadFlow({
       }
     } catch (error) {
       logger.error('Media selection upload failed', {
+        circleId: selectedCircle._id,
+        error,
+      });
+      recordClientDiagnostic('upload', 'Media selection upload failed', {
         circleId: selectedCircle._id,
         error,
       });
@@ -493,7 +516,11 @@ export function useShareUploadFlow({
         if (queueItem.prepared || !queueItem.sourceAsset) {
           preparedAsset = uploadQueueItemToPreparedAsset(queueItem);
         } else {
-          preparedAsset = await optimizePickerAsset(queueItem.sourceAsset, queueItem.location);
+          preparedAsset = await optimizePickerAsset(
+            queueItem.sourceAsset,
+            queueItem.location,
+            queueItem.capturedAt,
+          );
           assertPreparedAssetAllowedForDeployment({
             deploymentKind,
             asset: preparedAsset,
@@ -511,6 +538,7 @@ export function useShareUploadFlow({
               height: preparedAsset.height,
               durationSeconds: preparedAsset.durationSeconds,
               location: preparedAsset.location,
+              capturedAt: preparedAsset.capturedAt,
               locationLabel: formatMediaLocation(preparedAsset.location) ?? undefined,
               prepared: true,
             }),
@@ -532,6 +560,13 @@ export function useShareUploadFlow({
       } catch (error) {
         const message = errorMessage(error, 'Upload fehlgeschlagen.');
         logger.warn('Upload retry failed', {
+          itemId,
+          circleId: queueItem.circleId,
+          shareBatchId: queueItem.shareBatchId,
+          fileName: queueItem.fileName,
+          error,
+        });
+        recordClientDiagnostic('upload', 'Upload retry failed', {
           itemId,
           circleId: queueItem.circleId,
           shareBatchId: queueItem.shareBatchId,

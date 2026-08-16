@@ -25,6 +25,7 @@ function recoverableItem(patch: Partial<UploadQueueItem> = {}): UploadQueueItem 
     recoverable: true,
     createdAt: 1,
     updatedAt: 2,
+    capturedAt: Date.parse('2026-04-18T09:30:00.000Z'),
     ...patch,
   };
 }

@@ -18,6 +18,8 @@ import type {
   ShareDraftRecord,
 } from '@/features/convex/api';
 import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { uploadReadinessNotice } from '@/features/media/upload-readiness';
+import type { CircleUploadReadiness } from '@beisammen/contracts';
 import type { UploadQueueState } from '@beisammen/upload-client';
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
@@ -41,7 +43,9 @@ interface DraftSheetProps {
   canPublish: boolean;
   uploadQueue: UploadQueueState;
   persistedUploads: DraftUploadRecord[];
+  uploadReadiness?: CircleUploadReadiness | null;
   onPickMedia: () => void;
+  onOpenBilling?: () => void;
   onPublish: () => void;
   onDeleteDraft: () => void;
   onDeleteAsset: (assetId: string) => void;
@@ -64,7 +68,9 @@ export const DraftSheet = memo(function DraftSheet({
   canPublish,
   uploadQueue,
   persistedUploads,
+  uploadReadiness,
   onPickMedia,
+  onOpenBilling,
   onPublish,
   onDeleteDraft,
   onDeleteAsset,
@@ -76,6 +82,7 @@ export const DraftSheet = memo(function DraftSheet({
   const theme = useTheme();
   const captionLength = caption.length;
   const circleImageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
+  const readinessNotice = uploadReadinessNotice(uploadReadiness);
 
   return (
     <Modal
@@ -153,6 +160,48 @@ export const DraftSheet = memo(function DraftSheet({
                     <Text style={[styles.circleMembers, { color: theme.textTertiary }]}>
                       {circle.memberCount} {circle.memberCount === 1 ? 'Person' : 'Personen'}
                     </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {readinessNotice ? (
+                <View
+                  style={[
+                    styles.readinessCard,
+                    {
+                      backgroundColor: theme.accentMuted,
+                      borderColor: theme.accent,
+                    },
+                  ]}
+                >
+                  <View style={styles.readinessIcon}>
+                    <Ionicons
+                      name={
+                        readinessNotice.action === 'choose_plan'
+                          ? 'card-outline'
+                          : 'information-circle-outline'
+                      }
+                      size={18}
+                      color={theme.accent}
+                    />
+                  </View>
+                  <View style={styles.readinessCopy}>
+                    <Text style={[styles.readinessTitle, { color: theme.text }]}>
+                      {readinessNotice.title}
+                    </Text>
+                    <Text style={[styles.readinessMessage, { color: theme.textSecondary }]}>
+                      {readinessNotice.message}
+                    </Text>
+                    {readinessNotice.action === 'choose_plan' && onOpenBilling ? (
+                      <View style={styles.readinessAction}>
+                        <Button
+                          label="Tarif wählen"
+                          icon="card-outline"
+                          variant="outline"
+                          onPress={onOpenBilling}
+                        />
+                      </View>
+                    ) : null}
                   </View>
                 </View>
               ) : null}
@@ -285,8 +334,19 @@ interface UploadQueueItemData {
   id: string;
   fileName: string;
   locationLabel?: string;
+  bytesSent?: number;
+  totalBytesExpectedToSend?: number;
+  progressRatio?: number;
   status: string;
   errorMessage?: string;
+}
+
+function formatProgressPercent(progressRatio?: number): string | null {
+  if (progressRatio === undefined) {
+    return null;
+  }
+
+  return `${Math.round(progressRatio * 100)}%`;
 }
 
 const UploadQueueItem = memo(function UploadQueueItem({
@@ -330,6 +390,10 @@ const UploadQueueItem = memo(function UploadQueueItem({
           : item.status === 'failed'
             ? 'Fehlgeschlagen'
             : 'Wartet';
+  const progressPercent = item.status === 'uploading'
+    ? formatProgressPercent(item.progressRatio)
+    : null;
+  const progressLabel = progressPercent ? `${statusLabel} · ${progressPercent}` : statusLabel;
 
   return (
     <View style={[styles.queueItem, { borderBottomColor: theme.borderLight }]}>
@@ -339,8 +403,21 @@ const UploadQueueItem = memo(function UploadQueueItem({
           {item.fileName}
         </Text>
         <Text style={[styles.queueStatus, { color: theme.textSecondary }]} numberOfLines={2}>
-          {item.status === 'failed' && item.errorMessage ? item.errorMessage : statusLabel}
+          {item.status === 'failed' && item.errorMessage ? item.errorMessage : progressLabel}
         </Text>
+        {item.status === 'uploading' && item.progressRatio !== undefined ? (
+          <View style={[styles.progressTrack, { backgroundColor: theme.surfacePressed }]}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  backgroundColor: theme.primary,
+                  width: `${Math.max(2, Math.round(item.progressRatio * 100))}%`,
+                },
+              ]}
+            />
+          </View>
+        ) : null}
         {item.locationLabel ? (
           <Text style={[styles.queueLocation, { color: theme.textSecondary }]} numberOfLines={1}>
             {item.locationLabel}
@@ -423,6 +500,32 @@ const styles = StyleSheet.create({
   circleMembers: {
     fontSize: FontSize.xs,
   },
+  readinessCard: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+  },
+  readinessIcon: {
+    paddingTop: 2,
+  },
+  readinessCopy: {
+    flex: 1,
+    gap: Spacing.xs,
+  },
+  readinessTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+  },
+  readinessMessage: {
+    fontSize: FontSize.sm,
+    lineHeight: 19,
+  },
+  readinessAction: {
+    alignSelf: 'flex-start',
+    paddingTop: Spacing.xs,
+  },
   captionCard: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.md + 2,
@@ -504,6 +607,16 @@ const styles = StyleSheet.create({
   },
   queueStatus: {
     fontSize: FontSize.xs,
+  },
+  progressTrack: {
+    height: 4,
+    overflow: 'hidden',
+    borderRadius: Radius.full,
+    marginTop: 2,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: Radius.full,
   },
   queueLocation: {
     fontSize: FontSize.xs,

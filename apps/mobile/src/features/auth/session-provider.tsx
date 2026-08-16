@@ -26,7 +26,9 @@ import {
   saveStoredAuthState,
 } from '@/features/auth/session-store';
 import { defaultInstanceConfig } from '@/features/instances/catalog';
+import { recordClientDiagnostic } from '@/features/diagnostics/buffer';
 import { clearUploadRecoveryForInstance } from '@/features/media/upload-recovery-runtime';
+import { unregisterCurrentPushDevice } from '@/features/notifications/registration-runtime';
 import { createLogger } from '@/lib/logger';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -136,11 +138,31 @@ export function SessionProvider({ children }: PropsWithChildren) {
     });
   });
 
+  const unregisterPushDevice = useEffectEvent(async (reason: string) => {
+    try {
+      await unregisterCurrentPushDevice();
+    } catch (error) {
+      logger.warn('Failed to unregister push device', {
+        reason,
+        instanceUrl: instance.instance.baseUrl,
+        error,
+      });
+      recordClientDiagnostic('notification_registration', 'Failed to unregister push device', {
+        reason,
+        instanceUrl: instance.instance.baseUrl,
+        error,
+      });
+    }
+  });
+
   const clearLocalSession = useEffectEvent(async (reason: string) => {
     logger.warn('Clearing local auth session', {
       reason,
       instanceUrl: instance.instance.baseUrl,
     });
+    if (reason !== 'sign_out') {
+      await unregisterPushDevice(reason);
+    }
     await clearStoredAuthState(instance.instance.baseUrl);
     setSession(null);
     setTokens(null);
@@ -194,8 +216,13 @@ export function SessionProvider({ children }: PropsWithChildren) {
       nextInstanceName: nextInstance.instance.name,
     });
 
+    await unregisterPushDevice('instance_switch');
     await clearUploadRecoveryForInstance(instance.instance.baseUrl).catch((error) => {
       logger.warn('Failed to clear upload recovery cache while switching instance', {
+        instanceUrl: instance.instance.baseUrl,
+        error,
+      });
+      recordClientDiagnostic('instance_switch', 'Failed to clear upload recovery cache while switching instance', {
         instanceUrl: instance.instance.baseUrl,
         error,
       });
@@ -260,6 +287,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
           return nextTokens.accessToken;
         } catch (error) {
           logger.error('Failed to refresh WorkOS session token', {
+            reason,
+            error,
+          });
+          recordClientDiagnostic('auth_refresh', 'Failed to refresh WorkOS session token', {
             reason,
             error,
           });
@@ -497,6 +528,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const signOut = useEffectEvent(async () => {
     logger.info('Signing out locally');
+    await unregisterPushDevice('sign_out');
     await adapter.signOut({
       instance,
       currentSession: session,

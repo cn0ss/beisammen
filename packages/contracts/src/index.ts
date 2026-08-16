@@ -8,10 +8,14 @@ export type AuthMode = 'hosted-browser' | 'native-client';
 export type AuthCapability = 'password' | 'email_otp' | 'social' | 'hosted_sso';
 export type DeploymentKind = 'cloud' | 'self-hosted';
 export type BillingProviderKind = 'autumn';
+export type BillingReturnSource = 'checkout' | 'portal';
+export type NotificationKind = 'share.published' | 'comment.created' | 'reaction.set';
+export type NotificationDeliveryStatus = 'queued' | 'skipped' | 'delivered' | 'failed';
 export type MediaLocationSource = 'embedded' | 'device-fallback';
 export type PublicConfigValue = string | number | boolean | null;
 
 export const INSTANCE_DISCOVERY_PATH = '/.well-known/beisammen-instance.json';
+export const BILLING_RETURN_PATH = '/billing/return';
 
 export const BETA_MAX_MEDIA_SELECTION_COUNT = 10;
 export const BETA_MAX_VIDEO_DURATION_SECONDS = 30;
@@ -214,6 +218,34 @@ export interface BillingCheckoutResult {
 export interface BillingPortalSessionResult {
   billingEnabled: boolean;
   portalUrl: string | null;
+}
+
+export interface CircleUploadReadiness {
+  deployment: DeploymentKind;
+  canUpload: boolean;
+  viewerIsBillingOwner: boolean;
+  billingRequired: boolean;
+  reason:
+    | 'self_hosted'
+    | 'ready'
+    | 'billing_not_configured'
+    | 'plan_required'
+    | 'billing_check_failed';
+  message: string;
+}
+
+export interface NotificationDeviceRegistration {
+  deviceId: string;
+  instanceUrl: string;
+  platform: 'ios' | 'android' | 'web' | 'unknown';
+  provider: 'expo';
+  registeredAt: number;
+}
+
+export interface NotificationPreference {
+  kind: NotificationKind;
+  enabled: boolean;
+  updatedAt: number | null;
 }
 
 export interface AppSession {
@@ -500,6 +532,7 @@ export interface CompleteUploadInput {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  capturedAt?: number;
 }
 
 export interface ReadObjectInput {
@@ -781,6 +814,19 @@ function parseStorageProviders(value: unknown): StorageProviderKind[] {
 
 export function buildInstanceDiscoveryUrl(baseUrl: string): string {
   return `${normalizePublicUrl(baseUrl, 'instance base URL')}${INSTANCE_DISCOVERY_PATH}`;
+}
+
+export function normalizeBillingReturnSource(value: unknown): BillingReturnSource {
+  return value === 'portal' ? 'portal' : 'checkout';
+}
+
+export function buildBillingReturnUrl(
+  baseUrl: string,
+  source: BillingReturnSource,
+): string {
+  const url = new URL(BILLING_RETURN_PATH, `${normalizePublicUrl(baseUrl, 'instance base URL')}/`);
+  url.searchParams.set('source', source);
+  return url.toString();
 }
 
 export function assertInstanceBaseUrlMatches(

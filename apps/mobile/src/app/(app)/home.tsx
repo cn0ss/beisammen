@@ -13,12 +13,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 
+import type { CircleUploadReadiness } from '@beisammen/contracts';
+
 import { BottomTabInset, Fonts, FontSize, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
 import { buildShareDetailHref } from '@/features/engagement/navigation';
+import { uploadReadinessNotice } from '@/features/media/upload-readiness';
 import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
 import { useShareUploadFlow } from '@/features/media/use-share-upload-flow';
+import { shouldRedirectToOnboarding } from '@/features/onboarding/routing';
 import { useTheme } from '@/hooks/use-theme';
 import { createLogger } from '@/lib/logger';
 
@@ -52,7 +56,7 @@ function useFadeIn(delay: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { activeCircleId, session, setActiveCircleId } = useSession();
+  const { activeCircleId, pendingInviteToken, session, setActiveCircleId } = useSession();
   const convexAuth = useConvexAuth();
   const theme = useTheme();
 
@@ -84,12 +88,15 @@ export default function HomeScreen() {
   const publishDraft = useMutation(api.shares.publish);
   const deleteDraftAsset = useAction(api.assets.deleteDraftAsset);
   const deleteShare = useAction(api.shares.delete);
+  const loadUploadReadiness = useAction(api.billing.uploadReadinessForCircle);
 
   const [draftCaption, setDraftCaption] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isCheckingUploadReadiness, setIsCheckingUploadReadiness] = useState(false);
   const [deletingShareId, setDeletingShareId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isDraftSheetOpen, setIsDraftSheetOpen] = useState(false);
+  const [uploadReadiness, setUploadReadiness] = useState<CircleUploadReadiness | null>(null);
   const customProfileImageUrl = useProfileImageUrl(Boolean(viewer?.hasProfileImage));
   const {
     selectedQueueItems,
@@ -125,6 +132,19 @@ export default function HomeScreen() {
     }
   }, [activeCircleId, circles, circlesPage.status, hasViewer, setActiveCircleId]);
 
+  useEffect(() => {
+    if (
+      shouldRedirectToOnboarding({
+        hasViewer,
+        circlesLoaded: circles !== undefined && circlesPage.status !== 'LoadingFirstPage',
+        circleCount: circles?.length ?? 0,
+        pendingInviteToken,
+      })
+    ) {
+      router.replace('/(app)/onboarding' as never);
+    }
+  }, [circles, circlesPage.status, hasViewer, pendingInviteToken, router]);
+
   // ---------------------------------------------------------------------------
   //  Draft caption sync
   // ---------------------------------------------------------------------------
@@ -132,6 +152,10 @@ export default function HomeScreen() {
   useEffect(() => {
     setDraftCaption(activeDraft?.caption ?? '');
   }, [activeDraft?._id, activeDraft?.caption]);
+
+  useEffect(() => {
+    setUploadReadiness(null);
+  }, [activeCircleId]);
 
   useEffect(() => {
     if (!activeDraft) return;
@@ -355,6 +379,49 @@ export default function HomeScreen() {
     router.push('/(app)/settings' as never);
   }, [router]);
 
+  const checkUploadReadiness = useCallback(async (): Promise<CircleUploadReadiness | null> => {
+    if (!selectedCircle) {
+      setFeedback('Bitte wähle zuerst einen Circle aus.');
+      return null;
+    }
+
+    setIsCheckingUploadReadiness(true);
+
+    try {
+      const readiness = await loadUploadReadiness({ circleId: selectedCircle._id });
+      setUploadReadiness(readiness);
+
+      const notice = uploadReadinessNotice(readiness);
+      if (notice) {
+        setFeedback(notice.message);
+        return null;
+      }
+
+      return readiness;
+    } catch (error) {
+      logger.warn('Upload readiness check failed', {
+        circleId: selectedCircle._id,
+        error,
+      });
+      setFeedback(
+        error instanceof Error ? error.message : 'Upload-Bereitschaft konnte nicht geprüft werden.',
+      );
+      return null;
+    } finally {
+      setIsCheckingUploadReadiness(false);
+    }
+  }, [loadUploadReadiness, selectedCircle]);
+
+  const handlePickMediaWithReadiness = useCallback(async () => {
+    const readiness = await checkUploadReadiness();
+
+    if (!readiness) {
+      return;
+    }
+
+    await handlePickMedia();
+  }, [checkUploadReadiness, handlePickMedia]);
+
   const handleOpenDraftSheet = useCallback(() => {
     if (!selectedCircle) {
       setFeedback('Bitte wähle zuerst einen Circle aus.');
@@ -363,9 +430,14 @@ export default function HomeScreen() {
     setIsDraftSheetOpen(true);
     // Also trigger media pick if no draft exists yet
     if (!activeDraft) {
-      void handlePickMedia();
+      void handlePickMediaWithReadiness();
     }
-  }, [selectedCircle, activeDraft, handlePickMedia]);
+  }, [selectedCircle, activeDraft, handlePickMediaWithReadiness]);
+
+  const handleOpenBilling = useCallback(() => {
+    setIsDraftSheetOpen(false);
+    handleOpenSettings();
+  }, [handleOpenSettings]);
 
   const handleDismissFeedback = useCallback(() => setFeedback(null), []);
 
@@ -518,13 +590,15 @@ export default function HomeScreen() {
           caption={draftCaption}
           onChangeCaption={setDraftCaption}
           isDraftLoading={isDraftLoading}
-          isUploading={isUploading}
+          isUploading={isUploading || isCheckingUploadReadiness}
           isPublishing={isPublishing}
           isDeletingDraft={Boolean(activeDraft && deletingShareId === activeDraft._id)}
           canPublish={canPublish}
           uploadQueue={{ items: selectedQueueItems }}
           persistedUploads={visiblePersistedUploads}
-          onPickMedia={() => void handlePickMedia()}
+          uploadReadiness={uploadReadiness}
+          onPickMedia={() => void handlePickMediaWithReadiness()}
+          onOpenBilling={handleOpenBilling}
           onPublish={() => void handlePublishDraft()}
           onDeleteDraft={handleDeleteDraft}
           onDeleteAsset={handleDeleteAsset}

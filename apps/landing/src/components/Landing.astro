@@ -313,29 +313,29 @@ const polaroidClasses = ['polaroid-1', 'polaroid-2', 'polaroid-3'];
     if (!endpoint) {
       setStatus(configErrorMessage, 'error');
       if (button instanceof HTMLButtonElement) button.disabled = true;
-      return;
+    } else {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        setPending(true);
+        setStatus('', 'idle');
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            body: new FormData(form),
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.ok) throw new Error('waitlist-submit-failed');
+          form.reset();
+          setStatus(
+            payload.alreadyJoined ? duplicateMessage : successMessage,
+            'success',
+          );
+        } catch {
+          setStatus(errorMessage, 'error');
+        } finally {
+          setPending(false);
+        }
+      });
     }
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      setPending(true);
-      setStatus('', 'idle');
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          body: new FormData(form),
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload?.ok) throw new Error('waitlist-submit-failed');
-        form.reset();
-        setStatus(
-          payload.alreadyJoined ? duplicateMessage : successMessage,
-          'success',
-        );
-      } catch {
-        setStatus(errorMessage, 'error');
-      } finally {
-        setPending(false);
-      }
-    });
   }
 </script>

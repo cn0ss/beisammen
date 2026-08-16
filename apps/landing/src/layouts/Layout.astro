@@ -5,11 +5,16 @@ import { dict } from '../i18n/ui';
 
 interface Props {
   locale: Locale;
+  title?: string;
+  description?: string;
+  referrerPolicy?: string;
 }
 
-const { locale } = Astro.props;
+const { locale, title, description, referrerPolicy } = Astro.props;
 const t = dict[locale];
 const alt = locale === 'en' ? 'de' : 'en';
+const pageTitle = title ?? t.meta.title;
+const pageDescription = description ?? t.meta.description;
 ---
 
 <!doctype html>
@@ -17,12 +22,13 @@ const alt = locale === 'en' ? 'de' : 'en';
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{t.meta.title}</title>
-    <meta name="description" content={t.meta.description} />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    {referrerPolicy ? <meta name="referrer" content={referrerPolicy} /> : null}
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#f7f4ee" />
-    <meta property="og:title" content={t.meta.title} />
-    <meta property="og:description" content={t.meta.description} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
     <meta property="og:type" content="website" />
     <link rel="alternate" hreflang="en" href="/en/" />
     <link rel="alternate" hreflang="de" href="/de/" />

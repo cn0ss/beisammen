@@ -1,19 +1,27 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Linking, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 
-import type { BillingStatus, ConnectionCheck } from '@beisammen/contracts';
+import {
+  buildBillingReturnUrl,
+  type BillingStatus,
+  type ConnectionCheck,
+  type NotificationKind,
+} from '@beisammen/contracts';
 
 import { Fonts, FontSize, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import type { CircleListItem } from '@/features/convex/api';
 import { api } from '@/features/convex/api';
+import { clearClientDiagnostics, formatClientDiagnostics } from '@/features/diagnostics/buffer';
+import { getBillingReturnRefreshDecision } from '@/features/billing/return-refresh';
 import { optimizePickerAsset, uploadPreparedFile } from '@/features/media/client';
 import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
+import { saveNotificationPreference } from '@/features/notifications/preferences';
 import { useTheme } from '@/hooks/use-theme';
 
 import { Button, FeedbackToast, SectionHeader } from '@/components/ui';
@@ -21,6 +29,7 @@ import { CreateCircleCard } from '@/components/home/CreateCircleCard';
 import { AccountCard } from '@/components/settings/AccountCard';
 import { BillingCard } from '@/components/settings/BillingCard';
 import { CirclesList } from '@/components/settings/CirclesList';
+import { NotificationPreferencesCard } from '@/components/settings/NotificationPreferencesCard';
 import { settingsCopy } from '@/components/settings/copy';
 import { StorageUsageCard } from '@/components/settings/StorageUsageCard';
 
@@ -63,6 +72,10 @@ async function pickSingleImageAsset() {
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    billing?: string | string[];
+    source?: string | string[];
+  }>();
   const { instance, refreshSession, session, setActiveCircleId, signOut } = useSession();
   const convexAuth = useConvexAuth();
   const theme = useTheme();
@@ -76,7 +89,12 @@ export default function SettingsScreen() {
   );
   const circles = hasViewer ? circlesPage.results : undefined;
   const storageStats = useQuery(api.storageStats.forViewer, hasViewer ? {} : 'skip');
+  const notificationPreferences = useQuery(
+    api.notifications.getPreferences,
+    hasViewer ? {} : 'skip',
+  );
   const createCircle = useMutation(api.circles.create);
+  const updateNotificationPreference = useMutation(api.notifications.updatePreferences);
   const checkStorageConnection = useAction(api.storageStats.checkConnection);
   const loadBillingStatus = useAction(api.billing.status);
   const createBillingCheckout = useAction(api.billing.createCheckout);
@@ -95,6 +113,8 @@ export default function SettingsScreen() {
   const [isCheckingStorage, setIsCheckingStorage] = useState(false);
   const [isProfileImageBusy, setIsProfileImageBusy] = useState(false);
   const [busyCircleId, setBusyCircleId] = useState<string | null>(null);
+  const [busyNotificationKind, setBusyNotificationKind] = useState<NotificationKind | null>(null);
+  const handledBillingReturnRef = useRef<string | null>(null);
 
   const customProfileImageUrl = useProfileImageUrl(Boolean(viewer?.hasProfileImage));
   const profileImageUrl = customProfileImageUrl ?? session?.avatarUrl ?? null;
@@ -103,8 +123,10 @@ export default function SettingsScreen() {
   const circlesAnim = useFadeIn(150);
   const createAnim = useFadeIn(250);
   const storageAnim = useFadeIn(350);
-  const billingAnim = useFadeIn(450);
-  const accountAnim = useFadeIn(550);
+  const diagnosticsAnim = useFadeIn(450);
+  const billingAnim = useFadeIn(550);
+  const notificationsAnim = useFadeIn(650);
+  const accountAnim = useFadeIn(750);
 
   const refreshBillingStatus = useCallback(async () => {
     if (!hasViewer) {
@@ -122,6 +144,27 @@ export default function SettingsScreen() {
   useEffect(() => {
     void refreshBillingStatus();
   }, [refreshBillingStatus]);
+
+  useEffect(() => {
+    const billingReturn = getBillingReturnRefreshDecision({
+      params,
+      handledReturnKey: handledBillingReturnRef.current,
+    });
+
+    if (!billingReturn.shouldRefresh) {
+      handledBillingReturnRef.current = billingReturn.nextHandledReturnKey;
+      return;
+    }
+
+    if (!hasViewer) {
+      return;
+    }
+
+    handledBillingReturnRef.current = billingReturn.nextHandledReturnKey;
+    setFeedback('Abrechnung wird aktualisiert.');
+    void refreshBillingStatus();
+    router.replace('/(app)/settings' as never);
+  }, [hasViewer, params.billing, params.source, refreshBillingStatus, router]);
 
   const handleCreateCircle = useCallback(
     async (name: string, description: string) => {
@@ -322,13 +365,30 @@ export default function SettingsScreen() {
     }
   }, [checkStorageConnection]);
 
+  const handleShowDiagnostics = useCallback(() => {
+    Alert.alert('Diagnose', formatClientDiagnostics(), [
+      {
+        text: 'Leeren',
+        style: 'destructive',
+        onPress: () => {
+          clearClientDiagnostics();
+          setFeedback('Diagnoseeinträge geleert.');
+        },
+      },
+      {
+        text: 'OK',
+        style: 'cancel',
+      },
+    ]);
+  }, []);
+
   const handleManageBilling = useCallback(async () => {
     setIsBillingBusy(true);
     setFeedback(null);
 
     try {
       const result = await createBillingPortalSession({
-        returnUrl: instance.instance.baseUrl,
+        returnUrl: buildBillingReturnUrl(instance.instance.baseUrl, 'portal'),
       });
 
       if (!result.billingEnabled) {
@@ -342,13 +402,12 @@ export default function SettingsScreen() {
       }
 
       await Linking.openURL(result.portalUrl);
-      await refreshBillingStatus();
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Abrechnung konnte nicht geöffnet werden.');
     } finally {
       setIsBillingBusy(false);
     }
-  }, [createBillingPortalSession, instance.instance.baseUrl, refreshBillingStatus]);
+  }, [createBillingPortalSession, instance.instance.baseUrl]);
 
   const handleChoosePlan = useCallback(
     async (planId: string) => {
@@ -358,7 +417,7 @@ export default function SettingsScreen() {
       try {
         const result = await createBillingCheckout({
           planId,
-          successUrl: instance.instance.baseUrl,
+          successUrl: buildBillingReturnUrl(instance.instance.baseUrl, 'checkout'),
         });
 
         if (!result.billingEnabled) {
@@ -368,6 +427,7 @@ export default function SettingsScreen() {
 
         if (result.checkoutUrl) {
           await Linking.openURL(result.checkoutUrl);
+          return;
         } else {
           setFeedback('Tarif aktualisiert.');
         }
@@ -380,6 +440,31 @@ export default function SettingsScreen() {
       }
     },
     [createBillingCheckout, instance.instance.baseUrl, refreshBillingStatus],
+  );
+
+  const handleToggleNotification = useCallback(
+    async (kind: NotificationKind, enabled: boolean) => {
+      setBusyNotificationKind(kind);
+      setFeedback(null);
+
+      try {
+        await saveNotificationPreference({
+          updatePreference: updateNotificationPreference,
+          kind,
+          enabled,
+        });
+        setFeedback(enabled ? 'Push-Mitteilung aktiviert.' : 'Push-Mitteilung deaktiviert.');
+      } catch (error) {
+        setFeedback(
+          error instanceof Error
+            ? error.message
+            : 'Push-Mitteilung konnte nicht geändert werden.',
+        );
+      } finally {
+        setBusyNotificationKind(null);
+      }
+    },
+    [updateNotificationPreference],
   );
 
   const handleSignOut = useCallback(() => {
@@ -439,6 +524,16 @@ export default function SettingsScreen() {
           />
         </Animated.View>
 
+        <Animated.View style={[diagnosticsAnim, styles.section]}>
+          <SectionHeader icon="bug-outline" label="Diagnose" />
+          <Button
+            label="Diagnose anzeigen"
+            icon="document-text-outline"
+            variant="outline"
+            onPress={handleShowDiagnostics}
+          />
+        </Animated.View>
+
         <Animated.View style={[billingAnim, styles.section]}>
           <SectionHeader icon="card-outline" label="Tarif" />
           <BillingCard
@@ -446,6 +541,15 @@ export default function SettingsScreen() {
             isBusy={isBillingBusy}
             onManageBilling={handleManageBilling}
             onChoosePlan={handleChoosePlan}
+          />
+        </Animated.View>
+
+        <Animated.View style={[notificationsAnim, styles.section]}>
+          <SectionHeader icon="notifications-outline" label="Benachrichtigungen" />
+          <NotificationPreferencesCard
+            preferences={notificationPreferences}
+            busyKind={busyNotificationKind}
+            onToggle={handleToggleNotification}
           />
         </Animated.View>
 

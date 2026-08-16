@@ -10,6 +10,10 @@ import { adjustCircleStats, assetStatsDelta } from './circleStats';
 import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
 import { createActivityEventWithInbox } from './lib/activity';
 import {
+  createMemoryItemsForPublishedShare,
+  removeMemoryItemFromDiscoverySummaries,
+} from './memories';
+import {
   type BillingOwner,
   resolveCircleBillingOwner,
   trackCloudOwnerUsage,
@@ -62,6 +66,7 @@ function mapAsset(asset: Doc<'assets'>, engagement?: EngagementSummary) {
     height: asset.height,
     durationSeconds: asset.durationSeconds,
     location: asset.location,
+    capturedAt: asset.capturedAt,
     engagement: fallbackEngagementSummary(engagement),
   };
 }
@@ -366,6 +371,11 @@ export const publish = mutation({
       shareBatchId: shareBatch._id,
       createdAt: now,
     });
+    await createMemoryItemsForPublishedShare(ctx, {
+      shareBatch,
+      publishedAt: now,
+      caption: args.caption?.trim() || shareBatch.caption,
+    });
 
     return {
       shareBatchId: shareBatch._id,
@@ -457,8 +467,16 @@ export const getDeleteContext = internalQuery({
       .query('reactions')
       .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
       .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const memoryItemsPage = await ctx.db
+      .query('memoryItems')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
     const activityInboxPage = await ctx.db
       .query('activityInboxItems')
+      .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
+      .take(SHARE_DELETE_BATCH_SIZE + 1);
+    const notificationDeliveryAttemptsPage = await ctx.db
+      .query('notificationDeliveryAttempts')
       .withIndex('by_share_batch', (q) => q.eq('shareBatchId', shareBatch._id))
       .take(SHARE_DELETE_BATCH_SIZE + 1);
     const activityEventsByShareBatchPage = await ctx.db
@@ -478,7 +496,12 @@ export const getDeleteContext = internalQuery({
     const uploads = uploadsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
     const comments = commentsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
     const reactions = reactionsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const memoryItems = memoryItemsPage.slice(0, SHARE_DELETE_BATCH_SIZE);
     const activityInboxItems = activityInboxPage.slice(0, SHARE_DELETE_BATCH_SIZE);
+    const notificationDeliveryAttempts = notificationDeliveryAttemptsPage.slice(
+      0,
+      SHARE_DELETE_BATCH_SIZE,
+    );
     const activityEvents = (
       activityEventsByShareBatchPage.length > 0
         ? activityEventsByShareBatchPage
@@ -495,7 +518,9 @@ export const getDeleteContext = internalQuery({
       uploadIds: uploads.map((upload) => upload._id),
       commentIds: comments.map((comment) => comment._id),
       reactionIds: reactions.map((reaction) => reaction._id),
+      memoryItemIds: memoryItems.map((item) => item._id),
       activityInboxItemIds: activityInboxItems.map((item) => item._id),
+      notificationDeliveryAttemptIds: notificationDeliveryAttempts.map((attempt) => attempt._id),
       activityEventIds: activityEvents.map((event) => event._id),
       storageBytesDelta,
       isFinalBatch:
@@ -503,7 +528,9 @@ export const getDeleteContext = internalQuery({
         uploadsPage.length <= SHARE_DELETE_BATCH_SIZE &&
         commentsPage.length <= SHARE_DELETE_BATCH_SIZE &&
         reactionsPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        memoryItemsPage.length <= SHARE_DELETE_BATCH_SIZE &&
         activityInboxPage.length <= SHARE_DELETE_BATCH_SIZE &&
+        notificationDeliveryAttemptsPage.length <= SHARE_DELETE_BATCH_SIZE &&
         activityEventsByShareBatchPage.length <= SHARE_DELETE_BATCH_SIZE &&
         legacyActivityEventsPage.length <= SHARE_DELETE_BATCH_SIZE,
       storageReferences: [
@@ -530,7 +557,9 @@ export const finalizeDelete = internalMutation({
     uploadIds: v.array(v.id('uploads')),
     commentIds: v.array(v.id('comments')),
     reactionIds: v.array(v.id('reactions')),
+    memoryItemIds: v.array(v.id('memoryItems')),
     activityInboxItemIds: v.array(v.id('activityInboxItems')),
+    notificationDeliveryAttemptIds: v.array(v.id('notificationDeliveryAttempts')),
     activityEventIds: v.array(v.id('activityEvents')),
     isFinalBatch: v.boolean(),
   },
@@ -572,8 +601,22 @@ export const finalizeDelete = internalMutation({
       await ctx.db.delete(reactionId);
     }
 
+    for (const memoryItemId of args.memoryItemIds) {
+      const memoryItem = await ctx.db.get(memoryItemId);
+
+      if (memoryItem) {
+        await removeMemoryItemFromDiscoverySummaries(ctx, memoryItem);
+      }
+
+      await ctx.db.delete(memoryItemId);
+    }
+
     for (const activityInboxItemId of args.activityInboxItemIds) {
       await ctx.db.delete(activityInboxItemId);
+    }
+
+    for (const notificationDeliveryAttemptId of args.notificationDeliveryAttemptIds) {
+      await ctx.db.delete(notificationDeliveryAttemptId);
     }
 
     for (const activityEventId of args.activityEventIds) {
@@ -606,9 +649,21 @@ export const finalizeDelete = internalMutation({
           .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
           .take(1)
       : [];
+    const [remainingMemoryItem] = args.isFinalBatch
+      ? await ctx.db
+          .query('memoryItems')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
     const [remainingActivityInboxItem] = args.isFinalBatch
       ? await ctx.db
           .query('activityInboxItems')
+          .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
+          .take(1)
+      : [];
+    const [remainingNotificationDeliveryAttempt] = args.isFinalBatch
+      ? await ctx.db
+          .query('notificationDeliveryAttempts')
           .withIndex('by_share_batch', (q) => q.eq('shareBatchId', args.shareBatchId))
           .take(1)
       : [];
@@ -632,7 +687,9 @@ export const finalizeDelete = internalMutation({
       !remainingUpload &&
       !remainingComment &&
       !remainingReaction &&
+      !remainingMemoryItem &&
       !remainingActivityInboxItem &&
+      !remainingNotificationDeliveryAttempt &&
       !remainingActivityEventByShareBatch &&
       !remainingLegacyActivityEvent;
 
@@ -669,7 +726,9 @@ export const deleteShare = action({
         uploadIds: Id<'uploads'>[];
         commentIds: Id<'comments'>[];
         reactionIds: Id<'reactions'>[];
+        memoryItemIds: Id<'memoryItems'>[];
         activityInboxItemIds: Id<'activityInboxItems'>[];
+        notificationDeliveryAttemptIds: Id<'notificationDeliveryAttempts'>[];
         activityEventIds: Id<'activityEvents'>[];
         storageBytesDelta: number;
         isFinalBatch: boolean;
@@ -684,7 +743,9 @@ export const deleteShare = action({
         uploadIds: Id<'uploads'>[];
         commentIds: Id<'comments'>[];
         reactionIds: Id<'reactions'>[];
+        memoryItemIds: Id<'memoryItems'>[];
         activityInboxItemIds: Id<'activityInboxItems'>[];
+        notificationDeliveryAttemptIds: Id<'notificationDeliveryAttempts'>[];
         activityEventIds: Id<'activityEvents'>[];
         storageBytesDelta: number;
         isFinalBatch: boolean;
@@ -697,7 +758,9 @@ export const deleteShare = action({
         deleteContext.uploadIds.length === 0 &&
         deleteContext.commentIds.length === 0 &&
         deleteContext.reactionIds.length === 0 &&
+        deleteContext.memoryItemIds.length === 0 &&
         deleteContext.activityInboxItemIds.length === 0 &&
+        deleteContext.notificationDeliveryAttemptIds.length === 0 &&
         deleteContext.activityEventIds.length === 0
       ) {
         throw new Error('Share deletion could not make progress.');
@@ -740,7 +803,9 @@ export const deleteShare = action({
           uploadIds: deleteContext.uploadIds,
           commentIds: deleteContext.commentIds,
           reactionIds: deleteContext.reactionIds,
+          memoryItemIds: deleteContext.memoryItemIds,
           activityInboxItemIds: deleteContext.activityInboxItemIds,
+          notificationDeliveryAttemptIds: deleteContext.notificationDeliveryAttemptIds,
           activityEventIds: deleteContext.activityEventIds,
           isFinalBatch: deleteContext.isFinalBatch,
         });

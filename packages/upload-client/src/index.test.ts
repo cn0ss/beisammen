@@ -4,8 +4,10 @@ import {
   assertPreparedUploadAssetWithinBetaLimits,
   assertUploadBatchWithinBetaLimits,
   enqueue,
+  clearCompleted,
   initialUploadQueueState,
   markUploadStatus,
+  patchUploadProgress,
   uploadQueueItemToPreparedAsset,
   type UploadQueueItem,
 } from './index.ts';
@@ -39,6 +41,7 @@ test('rejects retry conversion for queue items that were never prepared', () => 
 });
 
 test('converts prepared queue items while preserving upload metadata', () => {
+  const capturedAt = Date.parse('2026-04-18T09:30:00.000Z');
   const prepared = uploadQueueItemToPreparedAsset({
     ...baseQueueItem,
     prepared: true,
@@ -53,6 +56,7 @@ test('converts prepared queue items while preserving upload metadata', () => {
       label: 'Berlin, Germany',
       source: 'embedded',
     },
+    capturedAt,
   });
 
   expect(prepared).toEqual({
@@ -71,6 +75,7 @@ test('converts prepared queue items while preserving upload metadata', () => {
       label: 'Berlin, Germany',
       source: 'embedded',
     },
+    capturedAt,
   });
 });
 
@@ -106,6 +111,70 @@ test('status changes refresh recovery update time while preserving created time'
     attempts: 1,
     errorMessage: 'network',
   });
+});
+
+test('patches upload progress with a bounded ratio', () => {
+  const initial = enqueue(initialUploadQueueState, {
+    ...baseQueueItem,
+    status: 'uploading',
+    attempts: 0,
+  });
+
+  const next = patchUploadProgress(initial, 'item-1', {
+    bytesSent: 512,
+    totalBytesExpectedToSend: 1024,
+  });
+
+  expect(next.items[0]).toMatchObject({
+    bytesSent: 512,
+    totalBytesExpectedToSend: 1024,
+    progressRatio: 0.5,
+  });
+
+  const overComplete = patchUploadProgress(next, 'item-1', {
+    bytesSent: 2048,
+    totalBytesExpectedToSend: 1024,
+  });
+
+  expect(overComplete.items[0]?.progressRatio).toBe(1);
+});
+
+test('failed uploads clear stale progress before retry', () => {
+  const initial = enqueue(initialUploadQueueState, {
+    ...baseQueueItem,
+    status: 'uploading',
+    attempts: 0,
+    bytesSent: 512,
+    totalBytesExpectedToSend: 1024,
+    progressRatio: 0.5,
+  });
+
+  const failed = markUploadStatus(initial, 'item-1', 'failed', 'network');
+
+  expect(failed.items[0]).toMatchObject({
+    attempts: 1,
+    errorMessage: 'network',
+  });
+  expect(failed.items[0]?.bytesSent).toBeUndefined();
+  expect(failed.items[0]?.totalBytesExpectedToSend).toBeUndefined();
+  expect(failed.items[0]?.progressRatio).toBeUndefined();
+
+  const retrying = markUploadStatus(failed, 'item-1', 'processing');
+
+  expect(retrying.items[0]?.errorMessage).toBeUndefined();
+  expect(retrying.items[0]?.progressRatio).toBeUndefined();
+});
+
+test('clears completed uploads while preserving in-flight and failed items', () => {
+  const state = {
+    items: [
+      { ...baseQueueItem, id: 'item-1', status: 'uploaded' as const },
+      { ...baseQueueItem, id: 'item-2', status: 'uploading' as const },
+      { ...baseQueueItem, id: 'item-3', status: 'failed' as const },
+    ],
+  };
+
+  expect(clearCompleted(state).items.map((item) => item.id)).toEqual(['item-2', 'item-3']);
 });
 
 test('rejects media selections beyond the beta batch limit', () => {

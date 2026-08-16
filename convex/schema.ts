@@ -78,7 +78,9 @@ export default defineSchema({
 
   invites: defineTable({
     circleId: v.id('circles'),
-    invitedEmail: v.string(),
+    // Widened for migration: legacy rows without mode are email-bound invites.
+    mode: v.optional(v.union(v.literal('email'), v.literal('open'))),
+    invitedEmail: v.optional(v.string()),
     role: v.union(v.literal('admin'), v.literal('member')),
     tokenHash: v.string(),
     status: v.union(
@@ -90,10 +92,27 @@ export default defineSchema({
     invitedBy: v.id('users'),
     expiresAt: v.number(),
     acceptedAt: v.optional(v.number()),
+    acceptedBy: v.optional(v.id('users')),
   })
     .index('by_circle', ['circleId'])
     .index('by_circle_and_expires_at', ['circleId', 'expiresAt'])
     .index('by_invited_email', ['invitedEmail'])
+    .index('by_token_hash', ['tokenHash']),
+
+  publicCircleLinks: defineTable({
+    circleId: v.id('circles'),
+    tokenHash: v.string(),
+    status: v.union(v.literal('active'), v.literal('revoked')),
+    createdBy: v.id('users'),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+    revokedAt: v.optional(v.number()),
+    revokedBy: v.optional(v.id('users')),
+  })
+    .index('by_circle', ['circleId'])
+    .index('by_circle_and_status', ['circleId', 'status'])
+    .index('by_status_and_expires_at', ['status', 'expiresAt'])
     .index('by_token_hash', ['tokenHash']),
 
   shareBatches: defineTable({
@@ -109,7 +128,8 @@ export default defineSchema({
     .index('by_circle', ['circleId'])
     .index('by_author', ['authorId'])
     .index('by_circle_and_author_and_status', ['circleId', 'authorId', 'status'])
-    .index('by_circle_and_status', ['circleId', 'status']),
+    .index('by_circle_and_status', ['circleId', 'status'])
+    .index('by_status_and_published_at', ['status', 'publishedAt']),
 
   assets: defineTable({
     shareBatchId: v.id('shareBatches'),
@@ -126,9 +146,63 @@ export default defineSchema({
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
     location: v.optional(mediaLocation),
+    capturedAt: v.optional(v.number()),
   })
     .index('by_share_batch', ['shareBatchId'])
     .index('by_circle', ['circleId']),
+
+  memoryItems: defineTable({
+    circleId: v.id('circles'),
+    shareBatchId: v.id('shareBatches'),
+    assetId: v.id('assets'),
+    authorId: v.id('users'),
+    kind: v.union(v.literal('image'), v.literal('video')),
+    capturedAt: v.optional(v.number()),
+    timelineAt: v.number(),
+    publishedAt: v.number(),
+    monthKey: v.optional(v.string()),
+    placeKey: v.optional(v.string()),
+    placeLabel: v.optional(v.string()),
+    placeLatitude: v.optional(v.number()),
+    placeLongitude: v.optional(v.number()),
+    caption: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index('by_circle_and_timeline_at', ['circleId', 'timelineAt'])
+    .index('by_circle_and_month_key_and_timeline_at', ['circleId', 'monthKey', 'timelineAt'])
+    .index('by_circle_and_place_key_and_timeline_at', ['circleId', 'placeKey', 'timelineAt'])
+    .index('by_timeline_at', ['timelineAt'])
+    .index('by_share_batch', ['shareBatchId'])
+    .index('by_asset', ['assetId']),
+
+  memoryMonths: defineTable({
+    circleId: v.id('circles'),
+    monthKey: v.string(),
+    itemCount: v.number(),
+    latestTimelineAt: v.number(),
+    coverAssetId: v.id('assets'),
+    coverMemoryItemId: v.id('memoryItems'),
+    updatedAt: v.number(),
+  })
+    .index('by_circle', ['circleId'])
+    .index('by_circle_and_month_key', ['circleId', 'monthKey'])
+    .index('by_circle_and_latest_timeline_at', ['circleId', 'latestTimelineAt']),
+
+  memoryPlaces: defineTable({
+    circleId: v.id('circles'),
+    placeKey: v.string(),
+    label: v.string(),
+    latitude: v.number(),
+    longitude: v.number(),
+    itemCount: v.number(),
+    latestTimelineAt: v.number(),
+    coverAssetId: v.id('assets'),
+    coverMemoryItemId: v.id('memoryItems'),
+    updatedAt: v.number(),
+  })
+    .index('by_circle', ['circleId'])
+    .index('by_circle_and_place_key', ['circleId', 'placeKey'])
+    .index('by_circle_and_latest_timeline_at', ['circleId', 'latestTimelineAt']),
 
   uploads: defineTable({
     shareBatchId: v.id('shareBatches'),
@@ -227,6 +301,77 @@ export default defineSchema({
     .index('by_user_and_created_at', ['userId', 'createdAt'])
     .index('by_user_and_status_and_created_at', ['userId', 'status', 'createdAt'])
     .index('by_activity_event_id', ['activityEventId'])
+    .index('by_share_batch', ['shareBatchId']),
+
+  notificationDevices: defineTable({
+    userId: v.id('users'),
+    instanceUrl: v.string(),
+    deviceToken: v.string(),
+    provider: v.literal('expo'),
+    platform: v.union(
+      v.literal('ios'),
+      v.literal('android'),
+      v.literal('web'),
+      v.literal('unknown'),
+    ),
+    appVersion: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    lastRegisteredAt: v.number(),
+    disabledAt: v.optional(v.number()),
+  })
+    .index('by_user', ['userId'])
+    .index('by_user_and_instance_url', ['userId', 'instanceUrl'])
+    .index('by_user_and_instance_url_and_token', ['userId', 'instanceUrl', 'deviceToken'])
+    .index('by_device_token', ['deviceToken']),
+
+  notificationPreferences: defineTable({
+    userId: v.id('users'),
+    kind: v.union(
+      v.literal('share.published'),
+      v.literal('comment.created'),
+      v.literal('reaction.set'),
+    ),
+    enabled: v.boolean(),
+    updatedAt: v.number(),
+  }).index('by_user_and_kind', ['userId', 'kind']),
+
+  notificationDeliveryAttempts: defineTable({
+    activityEventId: v.id('activityEvents'),
+    inboxItemId: v.optional(v.id('activityInboxItems')),
+    userId: v.id('users'),
+    deviceId: v.optional(v.id('notificationDevices')),
+    circleId: v.id('circles'),
+    kind: v.union(
+      v.literal('share.published'),
+      v.literal('comment.created'),
+      v.literal('reaction.set'),
+    ),
+    shareBatchId: v.id('shareBatches'),
+    assetId: v.optional(v.id('assets')),
+    provider: v.literal('expo'),
+    status: v.union(
+      v.literal('queued'),
+      v.literal('skipped'),
+      v.literal('delivered'),
+      v.literal('failed'),
+    ),
+    skipReason: v.optional(
+      v.union(
+        v.literal('provider_not_configured'),
+        v.literal('no_device'),
+        v.literal('preference_disabled'),
+      ),
+    ),
+    errorMessage: v.optional(v.string()),
+    providerMessageId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_user_and_created_at', ['userId', 'createdAt'])
+    .index('by_activity_event_id', ['activityEventId'])
+    .index('by_status_and_created_at', ['status', 'createdAt'])
+    .index('by_status_and_updated_at', ['status', 'updatedAt'])
     .index('by_share_batch', ['shareBatchId']),
 
   comments: defineTable({

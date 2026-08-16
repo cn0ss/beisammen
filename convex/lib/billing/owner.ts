@@ -25,12 +25,24 @@ export interface CircleBillingContext {
   billingOwner: BillingOwner;
 }
 
+export class CloudOwnerFeatureAccessError extends Error {
+  constructor(
+    readonly reason: 'not_allowed' | 'provider_error',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CloudOwnerFeatureAccessError';
+  }
+}
+
 interface AutumnResult<T = unknown> {
   data?: T | null;
   error?: {
     message?: string;
     code?: string;
+    statusCode?: number;
   } | null;
+  statusCode?: number;
 }
 
 interface AutumnBalanceRecord {
@@ -145,6 +157,30 @@ function autumnErrorMessage(result: AutumnResult, fallback: string): string {
   return result.error?.message ?? fallback;
 }
 
+function isAutumnNotFound(result: AutumnResult): boolean {
+  const code = result.error?.code?.toLowerCase();
+
+  return (
+    result.statusCode === 404 ||
+    result.error?.statusCode === 404 ||
+    code === 'not_found' ||
+    code === 'customer_not_found' ||
+    code === 'customer_not_found_error'
+  );
+}
+
+function autumnCustomerOrNull(result: AutumnResult, fallback: string): unknown | null {
+  if (!result.error) {
+    return result.data ?? null;
+  }
+
+  if (isAutumnNotFound(result)) {
+    return null;
+  }
+
+  throw new Error(autumnErrorMessage(result, fallback));
+}
+
 function normalizeBalance(
   featureId: string,
   value: AutumnBalanceRecord,
@@ -251,14 +287,15 @@ export async function getCloudOwnerBillingStatus(
     });
   }
 
-  const result = (await getAutumnForOwner().customers.get(ownerCustomerId(owner._id), {
-    expand: [],
-  })) as AutumnResult;
+  const result = (await getAutumnForOwner().customers.get(
+    ownerCustomerId(owner._id),
+  )) as AutumnResult;
+  const customer = autumnCustomerOrNull(result, 'Autumn billing status failed.');
 
   return cloudBillingStatusFromCustomer({
     owner,
     configured: true,
-    customer: result.error ? null : result.data,
+    customer,
   });
 }
 
@@ -277,14 +314,25 @@ export async function requireCloudOwnerFeatureAccess(
     customer_data: ownerCustomerData(input.owner),
     entity_id: input.entityId,
     feature_id: input.featureId,
+    entity_data: {
+      feature_id: input.featureId,
+    },
     required_balance: input.requiredBalance ?? 1,
     ...(input.properties ? { properties: input.properties } : {}),
   })) as AutumnResult;
   const data = isRecord(result.data) ? result.data : {};
 
-  if (result.error || data.allowed !== true) {
-    throw new Error(
+  if (data.allowed === false) {
+    throw new CloudOwnerFeatureAccessError(
+      'not_allowed',
       autumnErrorMessage(result, 'This cloud plan does not allow the requested usage.'),
+    );
+  }
+
+  if (result.error || data.allowed !== true) {
+    throw new CloudOwnerFeatureAccessError(
+      'provider_error',
+      autumnErrorMessage(result, 'Cloud billing could not be checked.'),
     );
   }
 }
@@ -308,6 +356,9 @@ export async function trackCloudOwnerUsage(
     customer_data: ownerCustomerData(input.owner),
     entity_id: input.entityId,
     feature_id: input.featureId,
+    entity_data: {
+      feature_id: input.featureId,
+    },
     value: input.value,
     ...(input.properties ? { properties: input.properties } : {}),
   })) as AutumnResult;

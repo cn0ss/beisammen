@@ -1,5 +1,6 @@
 import type { Id } from '../_generated/dataModel';
 import type { MutationCtx } from '../_generated/server';
+import { enqueueNotificationDeliveryAttempts } from './notifications';
 
 const ACTIVITY_INBOX_RECIPIENT_LIMIT = 200;
 
@@ -32,12 +33,17 @@ export async function createActivityEventWithInbox(
     .withIndex('by_circle', (q) => q.eq('circleId', input.circleId))
     .take(ACTIVITY_INBOX_RECIPIENT_LIMIT);
 
+  const notificationRecipients: Array<{
+    inboxItemId: Id<'activityInboxItems'>;
+    userId: Id<'users'>;
+  }> = [];
+
   for (const membership of members) {
     if (membership.userId === input.actorId) {
       continue;
     }
 
-    await ctx.db.insert('activityInboxItems', {
+    const inboxItemId = await ctx.db.insert('activityInboxItems', {
       activityEventId,
       userId: membership.userId,
       circleId: input.circleId,
@@ -48,7 +54,21 @@ export async function createActivityEventWithInbox(
       status: 'unread',
       createdAt: input.createdAt,
     });
+    notificationRecipients.push({
+      inboxItemId,
+      userId: membership.userId,
+    });
   }
+
+  await enqueueNotificationDeliveryAttempts(ctx, {
+    activityEventId,
+    recipients: notificationRecipients,
+    circleId: input.circleId,
+    type: input.type,
+    shareBatchId: input.shareBatchId,
+    ...(input.assetId ? { assetId: input.assetId } : {}),
+    createdAt: input.createdAt,
+  });
 
   return { activityEventId };
 }

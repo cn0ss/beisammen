@@ -5,9 +5,13 @@ import type {
   BillingCheckoutResult,
   BillingPortalSessionResult,
   BillingStatus,
+  CircleUploadReadiness,
   ConnectionCheck,
   EngagementSummary,
   MediaLocation,
+  NotificationDeviceRegistration,
+  NotificationPreference,
+  NotificationKind,
   SignedReadUrl,
   StorageReference,
   StorageUsageStats,
@@ -70,11 +74,16 @@ export interface CircleMemberRecord {
 export interface CircleInviteRecord {
   _id: string;
   circleId: string;
-  invitedEmail: string;
+  mode: 'email' | 'open';
+  invitedEmail: string | null;
   role: 'admin' | 'member';
   status: 'pending' | 'accepted' | 'expired' | 'revoked';
   expiresAt: number;
   acceptedAt: number | null;
+  acceptedBy: {
+    userId: string;
+    displayName: string;
+  } | null;
   invitedBy: {
     userId: string;
     displayName: string;
@@ -82,17 +91,41 @@ export interface CircleInviteRecord {
   canRevoke: boolean;
 }
 
+export interface PublicCircleLinkRecord {
+  _id: string;
+  circleId: string;
+  status: 'active' | 'expired' | 'revoked';
+  createdAt: number;
+  expiresAt: number;
+  revokedAt: number | null;
+  createdByName: string;
+  canRevoke: boolean;
+}
+
+export interface CreatePublicCircleLinkResult {
+  publicLinkId: string;
+  token: string;
+  shareUrl: string;
+  expiresAt: number;
+}
+
 export interface InvitePreview {
   inviteId: string;
   circleId: string;
   circleName: string;
-  invitedEmail: string;
+  mode: 'email' | 'open';
+  invitedEmail: string | null;
   role: 'admin' | 'member';
   status: 'pending' | 'accepted' | 'expired' | 'revoked';
   expiresAt: number;
   acceptedAt: number | null;
+  acceptedBy: {
+    userId: string;
+    displayName: string;
+  } | null;
   canAccept: boolean;
   emailMatchesViewer: boolean;
+  isAlreadyMember: boolean;
 }
 
 export interface ShareAssetRecord {
@@ -108,6 +141,7 @@ export interface ShareAssetRecord {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  capturedAt?: number;
   engagement: EngagementSummary;
 }
 
@@ -213,6 +247,74 @@ export interface ActivityInboxItemRecord {
   createdAtLabel: string;
 }
 
+export interface MemoryItemRecord {
+  _id: string;
+  _creationTime: number;
+  circleId: string;
+  circleName: string;
+  shareBatchId: string;
+  assetId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl?: string;
+  authorHasProfileImage: boolean;
+  kind: 'image' | 'video';
+  caption: string;
+  timelineAt: number;
+  capturedAt: number | null;
+  publishedAt: number;
+  monthKey: string | null;
+  placeKey: string | null;
+  placeLabel: string | null;
+  location: MediaLocation | null;
+  asset: {
+    _id: string;
+    _creationTime: number;
+    kind: 'image' | 'video';
+    fileName?: string;
+    mimeType: string;
+    sizeBytes?: number;
+    previewStorage?: StorageReference;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+    location?: MediaLocation;
+    capturedAt?: number;
+  };
+}
+
+export type MemoryFilterArgs =
+  | {
+      kind: 'month';
+      key: string;
+    }
+  | {
+      kind: 'place';
+      key: string;
+    };
+
+export interface MemoryMonthFacet {
+  key: string;
+  itemCount: number;
+  latestTimelineAt: number;
+  coverAssetId: string;
+}
+
+export interface MemoryPlaceFacet {
+  key: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+  itemCount: number;
+  latestTimelineAt: number;
+  coverAssetId: string;
+}
+
+export interface MemoryDiscoveryRecord {
+  months: MemoryMonthFacet[];
+  places: MemoryPlaceFacet[];
+}
+
 export interface DraftUploadRecord {
   _id: string;
   _creationTime: number;
@@ -295,9 +397,17 @@ export type SetReactionArgs = ReactionTargetArgs & {
   emoji: string;
 };
 
+export type RegisterNotificationDeviceArgs = {
+  instanceUrl: string;
+  token: string;
+  platform: 'ios' | 'android' | 'web' | 'unknown';
+  appVersion?: string;
+};
+
 export type CreateInviteArgs = {
   circleId: string;
-  invitedEmail: string;
+  mode?: 'email' | 'open';
+  invitedEmail?: string;
   role: 'admin' | 'member';
 };
 
@@ -340,6 +450,7 @@ export type CompleteUploadArgs = {
   height?: number;
   durationSeconds?: number;
   location?: MediaLocation;
+  capturedAt?: number;
 };
 
 export const api = {
@@ -396,6 +507,23 @@ export const api = {
       { inviteId: string },
       { inviteId: string }
     >('invites:revoke'),
+  },
+  publicLinks: {
+    createForCircle: makeFunctionReference<
+      'mutation',
+      { circleId: string },
+      CreatePublicCircleLinkResult
+    >('publicLinks:createForCircle'),
+    listForCircle: makeFunctionReference<
+      'query',
+      { circleId: string },
+      PublicCircleLinkRecord[]
+    >('publicLinks:listForCircle'),
+    revoke: makeFunctionReference<
+      'mutation',
+      { publicLinkId: string },
+      { publicLinkId: string; status: 'revoked' }
+    >('publicLinks:revoke'),
   },
   circles: {
     create: makeFunctionReference<'mutation', CreateCircleArgs, { circleId: string }>(
@@ -569,6 +697,40 @@ export const api = {
       { readCount: number }
     >('activity:markManyRead'),
   },
+  memories: {
+    listForViewer: makeFunctionReference<
+      'query',
+      { circleId?: string; filter?: MemoryFilterArgs; paginationOpts: PaginationOpts },
+      PaginatedResult<MemoryItemRecord>
+    >('memories:listForViewer'),
+    discoveryForViewer: makeFunctionReference<
+      'query',
+      { circleId?: string },
+      MemoryDiscoveryRecord
+    >('memories:discoveryForViewer'),
+  },
+  notifications: {
+    registerDevice: makeFunctionReference<
+      'mutation',
+      RegisterNotificationDeviceArgs,
+      NotificationDeviceRegistration
+    >('notifications:registerDevice'),
+    unregisterDevice: makeFunctionReference<
+      'mutation',
+      { instanceUrl: string; token: string },
+      { removed: boolean }
+    >('notifications:unregisterDevice'),
+    getPreferences: makeFunctionReference<
+      'query',
+      Record<string, never>,
+      NotificationPreference[]
+    >('notifications:getPreferences'),
+    updatePreferences: makeFunctionReference<
+      'mutation',
+      { kind: NotificationKind; enabled: boolean },
+      NotificationPreference
+    >('notifications:updatePreferences'),
+  },
   storageStats: {
     forViewer: makeFunctionReference<'query', Record<string, never>, StorageUsageStats>(
       'storageStats:forViewer',
@@ -584,6 +746,11 @@ export const api = {
     statusForCircle: makeFunctionReference<'action', { circleId: string }, BillingStatus>(
       'billing:statusForCircle',
     ),
+    uploadReadinessForCircle: makeFunctionReference<
+      'action',
+      { circleId: string },
+      CircleUploadReadiness
+    >('billing:uploadReadinessForCircle'),
     createCheckout: makeFunctionReference<
       'action',
       { planId: string; successUrl?: string },
