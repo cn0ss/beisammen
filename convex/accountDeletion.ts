@@ -5,7 +5,7 @@ import type { Doc, Id, TableNames } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { action, internalMutation, internalQuery } from './_generated/server';
 import { adjustCircleStats } from './circleStats';
-import { deleteStorageReference, storageReferenceKey } from './lib/storage/shared';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { requireViewer } from './lib/viewer';
 
 export const accountDeletionFunctionSurface = ['accountDeletion.deleteMyAccountData'] as const;
@@ -142,6 +142,22 @@ export const purgeBatch = internalMutation({
         .withIndex('by_user', (q) => q.eq('userId', args.userId))
         .take(state.budget);
       await deleteDocs(ctx, state, reactions);
+    }
+
+    if (state.budget > 0) {
+      const keyGrants = await ctx.db
+        .query('circleKeyGrants')
+        .withIndex('by_user', (q) => q.eq('userId', args.userId))
+        .take(state.budget);
+      await deleteDocs(ctx, state, keyGrants);
+    }
+
+    if (state.budget > 0) {
+      const userKeyRows = await ctx.db
+        .query('userKeys')
+        .withIndex('by_user', (q) => q.eq('userId', args.userId))
+        .take(state.budget);
+      await deleteDocs(ctx, state, userKeyRows);
     }
 
     if (state.budget > 0) {

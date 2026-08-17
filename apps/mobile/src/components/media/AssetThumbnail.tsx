@@ -6,12 +6,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ShareAssetRecord } from '@/features/convex/api';
 import { formatBytes } from '@/features/media/client';
-import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
+import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 interface AssetThumbnailProps {
   asset: ShareAssetRecord;
+  /** Needed to resolve encrypted media; every render site knows its circle. */
+  circleId?: string | null;
   size?: number;
   onPress?: () => void;
   onRemove?: () => void;
@@ -19,15 +21,17 @@ interface AssetThumbnailProps {
 
 export const AssetThumbnail = memo(function AssetThumbnail({
   asset,
+  circleId,
   size = 104,
   onPress,
   onRemove,
 }: AssetThumbnailProps) {
   const theme = useTheme();
   const gt = useGT();
-  const signedUrl = useSignedAssetUrl(
-    asset.kind === 'image' || asset.previewStorage ? asset._id : null,
+  const signedUrl = useAssetMediaUri(
+    asset.kind === 'image' || asset.previewStorage ? asset : null,
     'preview',
+    circleId,
   );
   const metaLabel = asset.kind === 'video' ? gt('Video') : formatBytes(asset.sizeBytes);
   const Container = onPress ? Pressable : View;
@@ -46,7 +50,12 @@ export const AssetThumbnail = memo(function AssetThumbnail({
       ]}
     >
       {signedUrl ? (
-        <Image source={{ uri: signedUrl }} style={styles.image} contentFit="cover" />
+        <Image
+          source={{ uri: signedUrl }}
+          style={styles.image}
+          contentFit="cover"
+          recyclingKey={asset._id}
+        />
       ) : (
         <View
           style={[

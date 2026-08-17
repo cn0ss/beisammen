@@ -67,6 +67,12 @@ export const adjustUsage = internalMutation({
     ownerId: v.id('users'),
     mediaUploadsDelta: v.number(),
     storageBytesDelta: v.number(),
+    /**
+     * Optional hard cap for positive storage charges. Mutations are
+     * transactions, so checking the current total and writing the new one here
+     * closes the race where parallel completions each pass a pre-check.
+     */
+    maxStorageBytes: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -97,6 +103,14 @@ export const adjustUsage = internalMutation({
         .query('billingStorage')
         .withIndex('by_owner', (q) => q.eq('ownerId', args.ownerId))
         .unique();
+
+      if (
+        args.maxStorageBytes !== undefined &&
+        args.storageBytesDelta > 0 &&
+        (storageRow?.totalBytes ?? 0) + args.storageBytesDelta > args.maxStorageBytes
+      ) {
+        throw new Error('The cloud plan quota for this feature is exhausted.');
+      }
 
       if (storageRow) {
         await ctx.db.patch(storageRow._id, {

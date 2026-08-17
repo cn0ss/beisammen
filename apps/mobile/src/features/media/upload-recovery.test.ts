@@ -84,6 +84,56 @@ describe('upload recovery store', () => {
     ).resolves.toEqual([recoverable]);
   });
 
+  test('round-trips ciphertext file URIs and the sealed encryption envelope', async () => {
+    const driver = createMemoryDriver();
+    const store = createUploadRecoveryStore(driver);
+    const encrypted = recoverableItem({
+      encryptedCacheUri: 'file:///recovery/item-1-encrypted.bin',
+      encryptedPreviewCacheUri: 'file:///recovery/item-1-encrypted-preview.bin',
+      encryption: {
+        v: 1,
+        circleEpoch: 2,
+        wrappedFileKey: 'wrapped-file-key',
+        encMetadata: 'sealed-metadata',
+      },
+    });
+
+    await store.saveQueue({
+      instanceUrl: 'https://one.example.com',
+      shareBatchId: 'share-1',
+      items: [encrypted],
+    });
+
+    await expect(
+      store.loadQueue({
+        instanceUrl: 'https://one.example.com',
+        shareBatchId: 'share-1',
+      }),
+    ).resolves.toEqual([encrypted]);
+  });
+
+  test('drops malformed persisted envelopes instead of retrying with them', async () => {
+    const driver = createMemoryDriver();
+    const store = createUploadRecoveryStore(driver);
+
+    await store.saveQueue({
+      instanceUrl: 'https://one.example.com',
+      shareBatchId: 'share-1',
+      items: [
+        recoverableItem({
+          encryption: { v: 2, circleEpoch: 2, wrappedFileKey: 'wrapped' } as never,
+        }),
+      ],
+    });
+
+    const [restored] = await store.loadQueue({
+      instanceUrl: 'https://one.example.com',
+      shareBatchId: 'share-1',
+    });
+
+    expect(restored?.encryption).toBeUndefined();
+  });
+
   test('clears cached files and persisted metadata for a share batch', async () => {
     const driver = createMemoryDriver();
     const store = createUploadRecoveryStore(driver);
@@ -95,6 +145,8 @@ describe('upload recovery store', () => {
         recoverableItem({
           cacheUri: 'file:///cache/original.jpg',
           previewCacheUri: 'file:///cache/preview.jpg',
+          encryptedCacheUri: 'file:///recovery/original-encrypted.bin',
+          encryptedPreviewCacheUri: 'file:///recovery/preview-encrypted.bin',
         }),
       ],
     });
@@ -107,6 +159,8 @@ describe('upload recovery store', () => {
     expect(driver.deletedUris).toEqual([
       'file:///cache/original.jpg',
       'file:///cache/preview.jpg',
+      'file:///recovery/original-encrypted.bin',
+      'file:///recovery/preview-encrypted.bin',
       'upload-recovery/https%3A%2F%2Fone.example.com/share-1.json',
     ]);
   });

@@ -1,5 +1,5 @@
 import { normalizeBaseUrl, type MediaLocation } from '@beisammen/contracts';
-import type { UploadQueueItem } from '@beisammen/upload-client';
+import type { UploadEncryptionEnvelope, UploadQueueItem } from '@beisammen/upload-client';
 
 export interface UploadRecoveryFileDriver {
   readText(path: string): Promise<string | null>;
@@ -13,7 +13,12 @@ export interface UploadRecoveryStore {
   saveQueue(input: UploadRecoveryScope & { items: UploadQueueItem[] }): Promise<void>;
   clearShareBatch(input: UploadRecoveryScope): Promise<void>;
   clearInstance(input: { instanceUrl: string }): Promise<void>;
-  clearItemFiles(item: Pick<UploadQueueItem, 'cacheUri' | 'previewCacheUri'>): Promise<void>;
+  clearItemFiles(
+    item: Pick<
+      UploadQueueItem,
+      'cacheUri' | 'previewCacheUri' | 'encryptedCacheUri' | 'encryptedPreviewCacheUri'
+    >,
+  ): Promise<void>;
 }
 
 interface UploadRecoveryScope {
@@ -77,6 +82,30 @@ function optionalLocation(value: unknown): MediaLocation | undefined {
   };
 }
 
+// Only the sealed envelope is ever persisted: wrappedFileKey and encMetadata
+// are ciphertext, so recovery storage never holds raw key material.
+function optionalEncryption(value: unknown): UploadEncryptionEnvelope | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const circleEpoch = optionalNumber(value.circleEpoch);
+  const wrappedFileKey = optionalString(value.wrappedFileKey);
+
+  if (value.v !== 1 || circleEpoch === undefined || wrappedFileKey === undefined) {
+    return undefined;
+  }
+
+  return {
+    v: 1,
+    circleEpoch,
+    wrappedFileKey,
+    ...(optionalString(value.encMetadata)
+      ? { encMetadata: optionalString(value.encMetadata) }
+      : {}),
+  };
+}
+
 function isRecoverableItem(item: UploadQueueItem): boolean {
   return item.recoverable === true && Boolean(item.cacheUri) && item.status !== 'uploaded';
 }
@@ -105,6 +134,7 @@ function parseItem(value: unknown): UploadQueueItem | null {
   const createdAt = optionalNumber(value.createdAt);
   const updatedAt = optionalNumber(value.updatedAt);
   const sizeBytes = optionalNumber(value.sizeBytes);
+  const previewSizeBytes = optionalNumber(value.previewSizeBytes);
   const width = optionalNumber(value.width);
   const height = optionalNumber(value.height);
   const durationSeconds = optionalNumber(value.durationSeconds);
@@ -139,12 +169,22 @@ function parseItem(value: unknown): UploadQueueItem | null {
     ...(optionalString(value.previewCacheUri)
       ? { previewCacheUri: optionalString(value.previewCacheUri) }
       : {}),
+    ...(optionalString(value.encryptedCacheUri)
+      ? { encryptedCacheUri: optionalString(value.encryptedCacheUri) }
+      : {}),
+    ...(optionalString(value.encryptedPreviewCacheUri)
+      ? { encryptedPreviewCacheUri: optionalString(value.encryptedPreviewCacheUri) }
+      : {}),
+    ...(optionalEncryption(value.encryption)
+      ? { encryption: optionalEncryption(value.encryption) }
+      : {}),
     ...(optionalString(value.recoveryKey) ? { recoveryKey: optionalString(value.recoveryKey) } : {}),
     ...(value.recoverable === true ? { recoverable: true } : { recoverable: false }),
     ...(createdAt !== undefined ? { createdAt } : {}),
     ...(updatedAt !== undefined ? { updatedAt } : {}),
     ...(optionalString(value.previewUri) ? { previewUri: optionalString(value.previewUri) } : {}),
     ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+    ...(previewSizeBytes !== undefined ? { previewSizeBytes } : {}),
     ...(width !== undefined ? { width } : {}),
     ...(height !== undefined ? { height } : {}),
     ...(durationSeconds !== undefined ? { durationSeconds } : {}),
@@ -161,9 +201,17 @@ function parseItem(value: unknown): UploadQueueItem | null {
   return item;
 }
 
-function uniqueUris(item: Pick<UploadQueueItem, 'cacheUri' | 'previewCacheUri'>): string[] {
+function uniqueUris(
+  item: Pick<
+    UploadQueueItem,
+    'cacheUri' | 'previewCacheUri' | 'encryptedCacheUri' | 'encryptedPreviewCacheUri'
+  >,
+): string[] {
   return Array.from(
-    new Set([item.cacheUri, item.previewCacheUri].filter((uri): uri is string => Boolean(uri))),
+    new Set(
+      [item.cacheUri, item.previewCacheUri, item.encryptedCacheUri, item.encryptedPreviewCacheUri]
+        .filter((uri): uri is string => Boolean(uri)),
+    ),
   );
 }
 

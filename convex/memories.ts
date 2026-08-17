@@ -182,6 +182,7 @@ async function mapMemoryItem(ctx: QueryCtx, item: MemoryItem) {
       durationSeconds: asset.durationSeconds,
       location: asset.location,
       capturedAt: asset.capturedAt,
+      encryption: asset.encryption,
     },
   };
 }

@@ -39,7 +39,12 @@ export const SettingsScreenHeader = memo(function SettingsScreenHeader({
         >
           <Ionicons name="chevron-back" size={26} color={theme.text} />
         </Pressable>
-        <Text style={[styles.title, { color: theme.text }]} numberOfLines={2}>
+        <Text
+          style={[styles.title, { color: theme.text }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.6}
+        >
           {title}
         </Text>
       </View>

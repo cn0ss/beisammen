@@ -2,7 +2,11 @@ import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
 const circleRole = v.union(v.literal('owner'), v.literal('admin'), v.literal('member'));
-// Legacy: 'convex-files' retained for existing data. New uploads always use 's3'.
+// The 'convex-files' code path has been removed; no media bytes flow through
+// Convex storage anymore. The union member survives only so the schema keeps
+// validating rows written before the S3 migration. Once
+// `legacyStorage:countLegacyRows` reports zero rows (isTruncated false) in
+// production, drop 'convex-files' here and delete convex/legacyStorage.ts.
 const storageProviderKind = v.union(v.literal('convex-files'), v.literal('s3'));
 const mediaLocation = v.object({
   latitude: v.number(),
@@ -14,6 +18,19 @@ const mediaLocation = v.object({
   country: v.optional(v.string()),
   source: v.union(v.literal('embedded'), v.literal('device-fallback')),
 });
+// E2EE envelope for an asset. Present on all uploads from encrypting clients;
+// absent on legacy plaintext assets. `wrappedFileKey` is the per-asset file
+// key wrapped with the circle key of `circleEpoch`; `encMetadata` is a
+// BSE1-encrypted JSON envelope (location, original file name) under the same
+// file key. Media objects in S3 are BSE1 ciphertext when this is set.
+const assetEncryption = v.object({
+  v: v.literal(1),
+  circleEpoch: v.number(),
+  wrappedFileKey: v.string(),
+  encMetadata: v.optional(v.string()),
+});
+// See the note on `storageProviderKind`: the 'convex-files' member only keeps
+// legacy rows valid until `legacyStorage:migrateBatch` has drained them.
 const storageReference = v.union(
   v.object({
     provider: v.literal('convex-files'),
@@ -46,6 +63,46 @@ export default defineSchema({
     .index('by_token_identifier', ['tokenIdentifier'])
     .index('by_auth_provider_and_auth_subject', ['authProvider', 'authSubject'])
     .index('by_email', ['email']),
+
+  // E2EE key registry, one row per user. All key material is generated
+  // client-side; the server only ever stores public keys and ciphertext.
+  // Wrapped values are base64(nonce || secretbox(...)) as produced by
+  // @beisammen/crypto; the master key itself never reaches the server.
+  userKeys: defineTable({
+    userId: v.id('users'),
+    keyVersion: v.number(),
+    publicKey: v.string(),
+    encPrivateKey: v.string(),
+    encMasterKeyByRecovery: v.string(),
+    encRecoveryKeyByMaster: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_user', ['userId']),
+
+  // One row per circle-key generation. Rotation (e.g. after removing a
+  // member) creates the next epoch; assets reference the epoch their file
+  // key was wrapped with, so older epochs stay resolvable forever.
+  circleKeyEpochs: defineTable({
+    circleId: v.id('circles'),
+    epoch: v.number(),
+    reason: v.union(v.literal('initial'), v.literal('rotation')),
+    createdBy: v.id('users'),
+    createdAt: v.number(),
+  }).index('by_circle_and_epoch', ['circleId', 'epoch']),
+
+  // Per-member access to a circle-key epoch: the circle key sealed to the
+  // member's public key (crypto_box_seal). Written only by member clients.
+  circleKeyGrants: defineTable({
+    circleId: v.id('circles'),
+    epoch: v.number(),
+    userId: v.id('users'),
+    grantedBy: v.id('users'),
+    sealedCircleKey: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_circle_and_user_and_epoch', ['circleId', 'userId', 'epoch'])
+    .index('by_circle_and_epoch', ['circleId', 'epoch'])
+    .index('by_user', ['userId']),
 
   circles: defineTable({
     name: v.string(),
@@ -177,10 +234,13 @@ export default defineSchema({
     sizeBytes: v.optional(v.number()),
     storage: storageReference,
     previewStorage: v.optional(storageReference),
+    encryption: v.optional(assetEncryption),
     createdAt: v.number(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
+    // Plaintext location exists only on legacy assets; encrypted uploads
+    // carry it inside `encryption.encMetadata` instead.
     location: v.optional(mediaLocation),
     capturedAt: v.optional(v.number()),
   })
@@ -251,6 +311,11 @@ export default defineSchema({
     kind: v.union(v.literal('image'), v.literal('video')),
     fileName: v.string(),
     mimeType: v.string(),
+    // Client-declared byte sizes, enforced by signing content-length into the
+    // presigned PUT and re-checked against the S3 HEAD at completion.
+    // Optional only for legacy in-flight rows created before enforcement.
+    declaredSizeBytes: v.optional(v.number()),
+    declaredPreviewSizeBytes: v.optional(v.number()),
     storage: v.optional(storageReference),
     previewStorage: v.optional(storageReference),
     status: v.union(

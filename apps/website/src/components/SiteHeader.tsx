@@ -49,7 +49,7 @@ export function SiteHeader({ locale, page = '', showNav = true }: SiteHeaderProp
     { id: 'why', label: t.nav.why },
     { id: 'circles', label: t.nav.circles },
     { id: 'promises', label: t.nav.promises },
-    { id: 'access', label: t.nav.waitlist },
+    { id: 'download', label: t.nav.download },
   ];
 
   const langSwitch = (
@@ -126,7 +126,7 @@ export function SiteHeader({ locale, page = '', showNav = true }: SiteHeaderProp
                 size="sm"
                 className="rounded-full max-sm:hidden"
                 nativeButton={false}
-                render={<Link to={`${homeHref}#access`} />}
+                render={<Link to={`${homeHref}#download`} />}
               >
                 {t.nav.cta}
               </Button>
@@ -179,7 +179,7 @@ export function SiteHeader({ locale, page = '', showNav = true }: SiteHeaderProp
                             size="lg"
                             className="w-full rounded-full"
                             nativeButton={false}
-                            render={<Link to={`${homeHref}#access`} />}
+                            render={<Link to={`${homeHref}#download`} />}
                           />
                         }
                       >

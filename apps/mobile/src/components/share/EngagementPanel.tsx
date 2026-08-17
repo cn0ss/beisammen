@@ -1,10 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Num, T, useGT, useMessages, Var } from 'gt-react-native';
+import { Num, T, useGT } from 'gt-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,23 +11,19 @@ import {
   View,
 } from 'react-native';
 
-import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+import { useMutation, usePaginatedQuery } from 'convex/react';
 import { COMMENT_MAX_BODY_LENGTH } from '@beisammen/contracts';
 
-import { Button, LoadingBox } from '@/components/ui';
+import { AnimatedPressable, Avatar, Button, LoadingBox } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type {
   CommentRecord,
-  ReactionTargetRecord,
   ShareAssetRecord,
   ShareBatchRecord,
 } from '@/features/convex/api';
 import { api } from '@/features/convex/api';
-import {
-  buildCommentTarget,
-  normalizeCommentDraft,
-  normalizeReactionEmoji,
-} from '@/features/engagement/validation';
+import { buildCommentTarget, normalizeCommentDraft } from '@/features/engagement/validation';
+import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
 
@@ -36,19 +31,6 @@ const COMMENT_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   dateStyle: 'short',
   timeStyle: 'short',
 };
-
-function formatCommentTime(timestamp: number, format: Intl.DateTimeFormat): string {
-  return format.format(new Date(timestamp));
-}
-
-function reactionTargetMatches(
-  target: ReactionTargetRecord,
-  input: { targetKind: 'share' | 'asset'; assetId?: string },
-) {
-  return input.targetKind === 'share'
-    ? target.targetKind === 'share' && target.assetId === null
-    : target.targetKind === 'asset' && target.assetId === input.assetId;
-}
 
 const CommentRow = memo(function CommentRow({
   comment,
@@ -60,36 +42,79 @@ const CommentRow = memo(function CommentRow({
   const theme = useTheme();
   const gt = useGT();
   const commentTimeFormat = useDateFormat(COMMENT_TIME_OPTIONS);
+  const customImageUrl = useUserProfileImageUrl(comment.authorId, comment.authorHasProfileImage);
+  const avatarUrl = customImageUrl ?? comment.authorAvatarUrl ?? null;
 
   return (
-    <View style={[styles.commentRow, { borderColor: theme.borderLight }]}>
-      <View style={styles.commentHeader}>
-        <Text style={[styles.commentAuthor, { color: theme.text }]} numberOfLines={1}>
-          {comment.authorName}
-        </Text>
-        <Text style={[styles.commentTime, { color: theme.textTertiary }]}>
-          {formatCommentTime(comment.createdAt, commentTimeFormat)}
-        </Text>
+    <View style={styles.commentRow}>
+      <Avatar name={comment.authorName} imageUrl={avatarUrl} size="sm" />
+      <View style={styles.commentContent}>
+        <View style={styles.commentHeader}>
+          <Text style={[styles.commentAuthor, { color: theme.text }]} numberOfLines={1}>
+            {comment.authorName}
+          </Text>
+          <Text style={[styles.commentTime, { color: theme.textTertiary }]}>
+            {commentTimeFormat.format(new Date(comment.createdAt))}
+          </Text>
+          {comment.canDelete ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={gt('Kommentar entfernen')}
+              hitSlop={10}
+              onPress={() => onDelete(comment)}
+            >
+              <Ionicons name="trash-outline" size={14} color={theme.textTertiary} />
+            </Pressable>
+          ) : null}
+        </View>
+        <Text style={[styles.commentBody, { color: theme.textSecondary }]}>{comment.body}</Text>
       </View>
-      <Text style={[styles.commentBody, { color: theme.textSecondary }]}>{comment.body}</Text>
-      {comment.canDelete ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={gt('Kommentar entfernen')}
-          hitSlop={10}
-          onPress={() => onDelete(comment)}
-          style={styles.commentDelete}
-        >
-          <Ionicons name="trash-outline" size={14} color={theme.danger} />
-          <T>
-            <Text style={[styles.commentDeleteText, { color: theme.danger }]}>Entfernen</Text>
-          </T>
-        </Pressable>
-      ) : null}
     </View>
   );
 });
 
+function ScopeChip({
+  icon,
+  label,
+  onPress,
+  selected,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  selected: boolean;
+}) {
+  const theme = useTheme();
+
+  return (
+    <AnimatedPressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      pressedScale={0.96}
+      style={[
+        styles.scopeChip,
+        { backgroundColor: selected ? theme.primaryMuted : theme.surfacePressed },
+      ]}
+    >
+      <Ionicons name={icon} size={14} color={selected ? theme.primary : theme.textSecondary} />
+      <Text
+        style={[
+          styles.scopeChipText,
+          { color: selected ? theme.primary : theme.textSecondary },
+        ]}
+      >
+        {label}
+      </Text>
+    </AnimatedPressable>
+  );
+}
+
+/**
+ * The conversation under a share: comments on the whole post or — for posts
+ * with several photos — on the one currently in view, chosen with two chips.
+ */
 export const EngagementPanel = memo(function EngagementPanel({
   activeAsset,
   onFeedback,
@@ -101,12 +126,11 @@ export const EngagementPanel = memo(function EngagementPanel({
 }) {
   const theme = useTheme();
   const gt = useGT();
-  const m = useMessages();
   const [engagementScope, setEngagementScope] = useState<'share' | 'asset'>('share');
   const [commentDraft, setCommentDraft] = useState('');
-  const [reactionDraft, setReactionDraft] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
-  const [isReacting, setIsReacting] = useState(false);
+
+  const hasMultipleAssets = share.assets.length > 1;
 
   const commentTarget = useMemo(
     () =>
@@ -124,32 +148,14 @@ export const EngagementPanel = memo(function EngagementPanel({
     },
     { initialNumItems: 20 },
   );
-  const reactionState = useQuery(api.reactions.listForShare, { shareBatchId: share._id });
   const createComment = useMutation(api.comments.create);
   const deleteComment = useMutation(api.comments.delete);
-  const setReaction = useMutation(api.reactions.set);
-  const removeReaction = useMutation(api.reactions.remove);
 
   useEffect(() => {
-    if (engagementScope === 'asset' && !activeAsset) {
+    if (engagementScope === 'asset' && (!activeAsset || !hasMultipleAssets)) {
       setEngagementScope('share');
     }
-  }, [activeAsset, engagementScope]);
-
-  const activeReactionTarget = useMemo(() => {
-    if (!reactionState) {
-      return null;
-    }
-
-    return (
-      reactionState.targets.find((target) =>
-        reactionTargetMatches(target, {
-          targetKind: commentTarget.targetKind,
-          assetId: commentTarget.assetId,
-        }),
-      ) ?? null
-    );
-  }, [commentTarget.assetId, commentTarget.targetKind, reactionState]);
+  }, [activeAsset, engagementScope, hasMultipleAssets]);
 
   const handleSubmitComment = useCallback(async () => {
     setIsSubmittingComment(true);
@@ -171,45 +177,6 @@ export const EngagementPanel = memo(function EngagementPanel({
       setIsSubmittingComment(false);
     }
   }, [commentDraft, commentTarget, createComment, gt, onFeedback]);
-
-  const handleSetReaction = useCallback(async () => {
-    setIsReacting(true);
-    onFeedback(null);
-
-    try {
-      const emoji = normalizeReactionEmoji(reactionDraft || '❤️');
-      await setReaction({
-        shareBatchId: commentTarget.shareBatchId,
-        ...(commentTarget.assetId ? { assetId: commentTarget.assetId } : {}),
-        emoji,
-      });
-      setReactionDraft('');
-    } catch (error) {
-      onFeedback(
-        error instanceof Error ? error.message : gt('Reaktion konnte nicht gespeichert werden.'),
-      );
-    } finally {
-      setIsReacting(false);
-    }
-  }, [commentTarget, gt, onFeedback, reactionDraft, setReaction]);
-
-  const handleRemoveReaction = useCallback(async () => {
-    setIsReacting(true);
-    onFeedback(null);
-
-    try {
-      await removeReaction({
-        shareBatchId: commentTarget.shareBatchId,
-        ...(commentTarget.assetId ? { assetId: commentTarget.assetId } : {}),
-      });
-    } catch (error) {
-      onFeedback(
-        error instanceof Error ? error.message : gt('Reaktion konnte nicht entfernt werden.'),
-      );
-    } finally {
-      setIsReacting(false);
-    }
-  }, [commentTarget, gt, onFeedback, removeReaction]);
 
   const handleDeleteComment = useCallback(
     (comment: CommentRecord) => {
@@ -239,185 +206,63 @@ export const EngagementPanel = memo(function EngagementPanel({
   );
 
   const targetSummary =
-    commentTarget.targetKind === 'asset'
-      ? activeAsset?.engagement
-      : share.shareTargetEngagement;
+    commentTarget.targetKind === 'asset' ? activeAsset?.engagement : share.shareTargetEngagement;
   const comments = commentsPage.results;
   const isCommentsLoading = commentsPage.status === 'LoadingFirstPage';
   const hasMoreComments = commentsPage.status !== 'Exhausted';
-  const isReactionLoading = reactionState === undefined;
-  const isTargetLoading = isCommentsLoading || isReactionLoading;
-  const isTargetInvalid = commentTarget.targetKind === 'asset' && !activeAsset;
   const canSubmitComment =
-    !isTargetLoading &&
-    !isTargetInvalid &&
-    !isSubmittingComment &&
-    commentDraft.trim().length > 0;
-  const canSubmitReaction = !isTargetLoading && !isTargetInvalid && !isReacting;
-  const viewerReaction = activeReactionTarget?.viewerReaction ?? null;
-  const topReactions = activeReactionTarget?.topReactions ?? targetSummary?.topReactions ?? [];
+    !isCommentsLoading && !isSubmittingComment && commentDraft.trim().length > 0;
+  const assetScopeIndex = activeAsset
+    ? share.assets.findIndex((asset) => asset._id === activeAsset._id)
+    : -1;
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={84}
-      style={[styles.engagementPanel, { backgroundColor: theme.surface }]}
-    >
-      <View style={styles.engagementHeader}>
-        <View style={styles.engagementHeading}>
-          <T>
-            <Text style={[styles.engagementTitle, { color: theme.text }]}>Gespräch</Text>
-            <Text style={[styles.engagementMeta, { color: theme.textSecondary }]}>
-              <Num>{targetSummary?.commentCount ?? 0}</Num> Kommentare ·{' '}
-              <Num>{targetSummary?.reactionCount ?? 0}</Num> Reaktionen
-            </Text>
-          </T>
-        </View>
-        <View style={styles.scopeToggle}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={gt('Beitrag als Gesprächsfokus wählen')}
+    <View style={[styles.panel, { backgroundColor: theme.surface }]}>
+      <View style={styles.header}>
+        <T>
+          <Text style={[styles.title, { color: theme.text }]}>Gespräch</Text>
+          <Text style={[styles.meta, { color: theme.textTertiary }]}>
+            <Num>{targetSummary?.commentCount ?? 0}</Num> Kommentare
+          </Text>
+        </T>
+      </View>
+
+      {hasMultipleAssets ? (
+        <View style={styles.scopeRow}>
+          <ScopeChip
+            icon="albums-outline"
+            label={gt('Ganzer Beitrag')}
+            selected={engagementScope === 'share'}
             onPress={() => setEngagementScope('share')}
-            style={[
-              styles.scopeButton,
-              {
-                backgroundColor:
-                  engagementScope === 'share' ? theme.primaryMuted : theme.surfacePressed,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.scopeButtonText,
-                { color: engagementScope === 'share' ? theme.primary : theme.textSecondary },
-              ]}
-            >
-              {gt('Beitrag')}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={gt('Aktuelles Medium als Gesprächsfokus wählen')}
-            disabled={!activeAsset}
+          />
+          <ScopeChip
+            icon={activeAsset?.kind === 'video' ? 'videocam-outline' : 'image-outline'}
+            label={
+              activeAsset?.kind === 'video'
+                ? gt('Video {position}', { position: assetScopeIndex + 1 })
+                : gt('Foto {position}', { position: assetScopeIndex + 1 })
+            }
+            selected={engagementScope === 'asset'}
             onPress={() => setEngagementScope('asset')}
-            style={[
-              styles.scopeButton,
-              {
-                backgroundColor:
-                  engagementScope === 'asset' ? theme.primaryMuted : theme.surfacePressed,
-                opacity: activeAsset ? 1 : 0.5,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.scopeButtonText,
-                { color: engagementScope === 'asset' ? theme.primary : theme.textSecondary },
-              ]}
-            >
-              {gt('Medium')}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <T>
-        <Text style={[styles.targetLabel, { color: theme.textTertiary }]}>
-          Fokus: <Var>{m(commentTarget.label)}</Var>
-        </Text>
-      </T>
-
-      <View style={styles.reactionComposer}>
-        <View style={styles.reactionSummary}>
-          {topReactions.length > 0 ? (
-            topReactions.map((reaction) => (
-              <View
-                key={reaction.emoji}
-                style={[
-                  styles.reactionChip,
-                  {
-                    backgroundColor: reaction.reactedByViewer
-                      ? theme.accentMuted
-                      : theme.surfacePressed,
-                  },
-                ]}
-              >
-                <Text style={styles.reactionChipEmoji}>{reaction.emoji}</Text>
-                <Text
-                  style={[
-                    styles.reactionChipCount,
-                    { color: reaction.reactedByViewer ? theme.accent : theme.textSecondary },
-                  ]}
-                >
-                  {reaction.count}
-                </Text>
-              </View>
-            ))
-          ) : (
-            <T>
-              <Text style={[styles.noEngagementText, { color: theme.textTertiary }]}>
-                Noch keine Reaktionen.
-              </Text>
-            </T>
-          )}
-        </View>
-        <View style={styles.reactionInputRow}>
-          <TextInput
-            accessibilityLabel={gt('Reaktion')}
-            value={reactionDraft}
-            onChangeText={setReactionDraft}
-            placeholder={viewerReaction ?? '❤️'}
-            placeholderTextColor={theme.textTertiary}
-            style={[
-              styles.reactionInput,
-              {
-                borderColor: theme.border,
-                color: theme.text,
-                backgroundColor: theme.background,
-              },
-            ]}
-            maxLength={8}
-            autoCorrect={false}
-            returnKeyType="done"
           />
-          <Button
-            label={viewerReaction ? gt('Ändern') : gt('Reagieren')}
-            icon="heart-outline"
-            variant="outline"
-            loading={isReacting}
-            disabled={!canSubmitReaction}
-            onPress={() => {
-              void handleSetReaction();
-            }}
-          />
-          {viewerReaction ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={gt('Reaktion entfernen')}
-              hitSlop={10}
-              disabled={isReacting}
-              onPress={() => {
-                void handleRemoveReaction();
-              }}
-              style={[styles.removeReactionButton, { backgroundColor: theme.dangerMuted }]}
-            >
-              <Ionicons name="close" size={16} color={theme.danger} />
-            </Pressable>
-          ) : null}
         </View>
-      </View>
+      ) : null}
 
-      <View style={styles.commentComposer}>
+      <View style={styles.composerRow}>
         <TextInput
           accessibilityLabel={gt('Kommentar schreiben')}
           value={commentDraft}
           onChangeText={setCommentDraft}
-          placeholder={gt('Antwort schreiben')}
+          placeholder={
+            engagementScope === 'asset'
+              ? gt('Zu diesem Medium schreiben…')
+              : gt('Antwort schreiben…')
+          }
           placeholderTextColor={theme.textTertiary}
           multiline
           maxLength={COMMENT_MAX_BODY_LENGTH}
           style={[
-            styles.commentInput,
+            styles.composerInput,
             {
               borderColor: theme.border,
               color: theme.text,
@@ -425,31 +270,45 @@ export const EngagementPanel = memo(function EngagementPanel({
             },
           ]}
         />
-        <Text style={[styles.commentLimit, { color: theme.textTertiary }]}>
-          {commentDraft.length}/{COMMENT_MAX_BODY_LENGTH}
-        </Text>
-        <Button
-          label={gt('Senden')}
-          icon="send-outline"
-          loading={isSubmittingComment}
+        <AnimatedPressable
+          accessibilityRole="button"
+          accessibilityLabel={gt('Kommentar senden')}
           disabled={!canSubmitComment}
           onPress={() => {
             void handleSubmitComment();
           }}
-        />
+          pressedScale={0.92}
+          style={[styles.sendButton, { backgroundColor: theme.primary }]}
+        >
+          {isSubmittingComment ? (
+            <ActivityIndicator size="small" color={theme.primaryText} />
+          ) : (
+            <Ionicons name="arrow-up" size={19} color={theme.primaryText} />
+          )}
+        </AnimatedPressable>
       </View>
+      {commentDraft.length > 0 ? (
+        <Text style={[styles.composerLimit, { color: theme.textTertiary }]}>
+          {commentDraft.length}/{COMMENT_MAX_BODY_LENGTH}
+        </Text>
+      ) : null}
 
       <View style={styles.commentsList}>
         {isCommentsLoading ? (
           <LoadingBox />
         ) : comments.length > 0 ? (
-          comments.map((comment) => (
-            <CommentRow key={comment._id} comment={comment} onDelete={handleDeleteComment} />
+          comments.map((comment, index) => (
+            <View key={comment._id}>
+              {index > 0 ? (
+                <View style={[styles.separator, { backgroundColor: theme.borderLight }]} />
+              ) : null}
+              <CommentRow comment={comment} onDelete={handleDeleteComment} />
+            </View>
           ))
         ) : (
           <T>
-            <Text style={[styles.noEngagementText, { color: theme.textTertiary }]}>
-              Noch keine Kommentare in diesem Fokus.
+            <Text style={[styles.emptyText, { color: theme.textTertiary }]}>
+              Noch keine Kommentare — schreib den ersten.
             </Text>
           </T>
         )}
@@ -464,131 +323,97 @@ export const EngagementPanel = memo(function EngagementPanel({
           />
         ) : null}
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 });
 
 const styles = StyleSheet.create({
-  engagementPanel: {
+  panel: {
     borderRadius: Radius.xl,
     gap: Spacing.md,
     padding: Spacing.lg,
   },
-  engagementHeader: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: Spacing.md,
+  header: {
+    gap: 2,
   },
-  engagementHeading: {
-    flex: 1,
-    minWidth: 180,
-  },
-  engagementTitle: {
+  title: {
     fontFamily: Fonts.display,
     fontSize: FontSize.lg,
     fontWeight: '700',
+    letterSpacing: -0.3,
   },
-  engagementMeta: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-  },
-  scopeToggle: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-  },
-  scopeButton: {
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-  },
-  scopeButtonText: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-  },
-  targetLabel: {
+  meta: {
     fontFamily: Fonts.mono,
     fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-  reactionComposer: {
-    gap: Spacing.sm,
-  },
-  reactionSummary: {
+  scopeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    alignItems: 'center',
     gap: Spacing.sm,
   },
-  reactionChip: {
+  scopeChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     borderRadius: Radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 9,
   },
-  reactionChipEmoji: {
-    fontSize: FontSize.base,
-    lineHeight: 18,
-  },
-  reactionChipCount: {
-    fontFamily: Fonts.mono,
-    fontSize: 11,
+  scopeChipText: {
+    fontSize: FontSize.sm,
     fontWeight: '700',
   },
-  reactionInputRow: {
+  composerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
+    alignItems: 'flex-end',
     gap: Spacing.sm,
   },
-  reactionInput: {
-    width: 54,
-    minHeight: 48,
+  composerInput: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
     borderWidth: 1,
-    borderRadius: Radius.lg,
-    fontSize: FontSize.lg,
-    fontWeight: '700',
-    textAlign: 'center',
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.md,
+    paddingTop: 12,
+    paddingBottom: 12,
+    fontSize: FontSize.base,
+    lineHeight: 20,
+    textAlignVertical: 'top',
   },
-  removeReactionButton: {
+  sendButton: {
     width: 44,
     height: 44,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  commentComposer: {
-    gap: Spacing.sm,
-  },
-  commentInput: {
-    minHeight: 82,
-    borderWidth: 1,
-    borderRadius: Radius.lg,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    fontSize: FontSize.base,
-    lineHeight: 21,
-    textAlignVertical: 'top',
-  },
-  commentLimit: {
+  composerLimit: {
     alignSelf: 'flex-end',
     fontFamily: Fonts.mono,
     fontSize: 10,
     fontWeight: '700',
+    marginTop: -Spacing.xs,
   },
   commentsList: {
     gap: Spacing.sm,
   },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    marginBottom: Spacing.sm,
+    marginLeft: 32 + Spacing.sm,
+  },
   commentRow: {
-    borderWidth: 1,
-    borderRadius: Radius.lg,
-    gap: Spacing.xs,
-    padding: Spacing.md,
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  commentContent: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
   },
   commentHeader: {
     flexDirection: 'row',
@@ -609,18 +434,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     lineHeight: 21,
   },
-  commentDelete: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingTop: 2,
-  },
-  commentDeleteText: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-  },
-  noEngagementText: {
+  emptyText: {
     fontSize: FontSize.sm,
     fontWeight: '600',
   },

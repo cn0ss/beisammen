@@ -1,8 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useGT } from 'gt-react-native';
@@ -17,17 +28,21 @@ import { useSession } from '@/features/auth/session-provider';
 import {
   downloadAssetToCache,
   formatMediaLocation,
-  formatBytes,
   saveAssetToDeviceLibrary,
   shareLocalFile,
 } from '@/features/media/client';
-import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
+import { useCircleKeys } from '@/features/crypto/use-circle-keys';
+import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
+import { isVideoProxyUrl } from '@/features/media/video-proxy/server';
+import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
+import { enterSection } from '@/lib/motion';
 
-import { AssetThumbnail } from '@/components/media/AssetThumbnail';
-import { Button, FeedbackToast, LoadingBox } from '@/components/ui';
+import { AnimatedPressable, Avatar, FeedbackToast, LoadingBox } from '@/components/ui';
 import { EngagementPanel } from '@/components/share/EngagementPanel';
+import { FullscreenMediaViewer } from '@/components/share/FullscreenMediaViewer';
+import { ReactionBar } from '@/components/share/ReactionBar';
 
 function splitLead(caption: string): { lead: string; tail: string | null } {
   const trimmed = caption.trim();
@@ -73,73 +88,147 @@ const ASSET_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   dateStyle: 'medium',
 };
 
-function formatCapturedDate(
-  capturedAt: number | undefined,
-  format: Intl.DateTimeFormat,
-): string | null {
-  if (!capturedAt || capturedAt <= 0) {
+/** Compact dots under the media pager; only rendered for multi-asset shares. */
+function PagerDots({ count, index }: { count: number; index: number }) {
+  const theme = useTheme();
+
+  if (count <= 1) {
     return null;
   }
 
-  return format.format(new Date(capturedAt));
+  return (
+    <View style={styles.dotsRow} pointerEvents="none">
+      {Array.from({ length: count }, (_, dotIndex) => (
+        <View
+          key={dotIndex}
+          style={[
+            styles.dot,
+            {
+              backgroundColor: dotIndex === index ? theme.primary : theme.border,
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
 }
 
-function ShareAssetViewer({ asset }: { asset: ShareAssetRecord | null }) {
+function MediaSlide({
+  asset,
+  circleId,
+  height,
+  isActive,
+  isFocused,
+  onExpand,
+  width,
+}: {
+  asset: ShareAssetRecord;
+  circleId: string;
+  height: number;
+  isActive: boolean;
+  isFocused: boolean;
+  onExpand: () => void;
+  width: number;
+}) {
   const theme = useTheme();
-  const pathname = usePathname();
-  const isFocused = pathname.startsWith('/share/');
-  const signedUrl = useSignedAssetUrl(asset?._id, 'original');
-  const player = useVideoPlayer(asset?.kind === 'video' ? signedUrl : null, (instance) => {
+  const gt = useGT();
+  const signedUrl = useAssetMediaUri(asset, 'original', circleId);
+  const player = useVideoPlayer(asset.kind === 'video' ? signedUrl : null, (instance) => {
     instance.pause();
   });
 
   useEffect(() => {
-    if (!isFocused && asset?.kind === 'video') {
+    if (asset.kind === 'video' && (!isActive || !isFocused)) {
       try {
         player.pause();
       } catch {
         // useVideoPlayer releases the native object on unmount; ignore stale cleanup calls.
       }
     }
-  }, [asset?.kind, isFocused, player, signedUrl]);
-
-  if (!asset) {
-    return (
-      <View style={[styles.viewerFallback, { backgroundColor: theme.surfacePressed }]}>
-        <Ionicons name="images-outline" size={32} color={theme.textTertiary} />
-      </View>
-    );
-  }
+  }, [asset.kind, isActive, isFocused, player, signedUrl]);
 
   if (asset.kind === 'video') {
     return (
-      <View style={[styles.viewer, { backgroundColor: '#050505' }]}>
+      <View style={[styles.slide, { width, height, backgroundColor: '#050505' }]}>
         {signedUrl ? (
-          <VideoView
-            player={player}
-            style={styles.viewerMedia}
-            nativeControls
-            contentFit="contain"
-          />
+          <VideoView player={player} style={styles.slideMedia} nativeControls contentFit="contain" />
         ) : (
-          <View style={styles.viewerFallback}>
-            <Ionicons name="play-circle-outline" size={42} color="#FFFFFF" />
+          <View style={styles.slideFallback}>
+            <Ionicons name="play-circle-outline" size={44} color="rgba(255,255,255,0.6)" />
           </View>
         )}
+        {/* Top-right so it never overlaps the native controls' bottom bar. */}
+        <AnimatedPressable
+          accessibilityRole="button"
+          accessibilityLabel={gt('Video im Vollbild öffnen')}
+          onPress={onExpand}
+          pressedScale={0.92}
+          style={[styles.expandBadge, styles.expandBadgeVideo]}
+        >
+          <Ionicons name="expand-outline" size={16} color="#FFFFFF" />
+        </AnimatedPressable>
       </View>
     );
   }
 
   return (
-    <View style={[styles.viewer, { backgroundColor: theme.surfacePressed }]}>
+    <AnimatedPressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={gt('Foto im Vollbild öffnen')}
+      onPress={onExpand}
+      pressedScale={0.99}
+      pressedOpacity={0.97}
+      style={[styles.slide, { width, height, backgroundColor: theme.surfacePressed }]}
+    >
       {signedUrl ? (
-        <Image source={{ uri: signedUrl }} style={styles.viewerMedia} contentFit="contain" />
+        <Image
+          source={{ uri: signedUrl }}
+          style={styles.slideMedia}
+          contentFit="cover"
+          transition={280}
+          recyclingKey={asset._id}
+        />
       ) : (
-        <View style={styles.viewerFallback}>
+        <View style={styles.slideFallback}>
           <Ionicons name="image-outline" size={32} color={theme.textTertiary} />
         </View>
       )}
-    </View>
+      <View style={styles.expandBadge} pointerEvents="none">
+        <Ionicons name="expand-outline" size={16} color="#FFFFFF" />
+      </View>
+    </AnimatedPressable>
+  );
+}
+
+/** Round secondary action (save / share) sitting next to the reaction bar. */
+function MediaAction({
+  icon,
+  label,
+  loading,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <AnimatedPressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={loading}
+      onPress={onPress}
+      pressedScale={0.92}
+      style={[styles.mediaAction, { backgroundColor: theme.surfacePressed }]}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={theme.text} />
+      ) : (
+        <Ionicons name={icon} size={19} color={theme.text} />
+      )}
+    </AnimatedPressable>
   );
 }
 
@@ -155,7 +244,12 @@ export default function ShareDetailScreen() {
   const requestedAssetId = Array.isArray(params.assetId) ? params.assetId[0] : params.assetId;
   const theme = useTheme();
   const gt = useGT();
+  const pathname = usePathname();
+  const isFocused = pathname.startsWith('/share/');
   const assetDateFormat = useDateFormat(ASSET_DATE_FORMAT_OPTIONS);
+  const { width: windowWidth } = useWindowDimensions();
+  const mediaWidth = windowWidth - Spacing.lg * 2;
+  const mediaHeight = Math.min(Math.round(mediaWidth * 1.25), 520);
 
   const [isDeleted, setIsDeleted] = useState(false);
   const viewerState = useQuery(api.users.viewerState, convexAuth.isAuthenticated ? {} : 'skip');
@@ -179,6 +273,8 @@ export default function ShareDetailScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const pagerRef = useRef<FlatList<ShareAssetRecord>>(null);
 
   useEffect(() => {
     if (!isViewerBootstrapping && share === null) {
@@ -204,27 +300,54 @@ export default function ShareDetailScreen() {
     () => share?.assets.find((asset) => asset._id === activeAssetId) ?? share?.assets[0] ?? null,
     [activeAssetId, share],
   );
-  const activeAssetUrl = useSignedAssetUrl(activeAsset?._id, 'original');
+  const activeIndex = useMemo(() => {
+    if (!share || !activeAsset) {
+      return 0;
+    }
+    const index = share.assets.findIndex((asset) => asset._id === activeAsset._id);
+    return index >= 0 ? index : 0;
+  }, [activeAsset, share]);
+  const activeAssetUrl = useAssetMediaUri(activeAsset, 'original', share?.circleId);
+  // Save/share need the circle keys to decrypt encrypted assets imperatively.
+  const circleKeys = useCircleKeys(activeAsset?.encryption ? share?.circleId : null);
+  const keysByEpoch = circleKeys.status === 'ready' ? circleKeys.keysByEpoch : undefined;
+  const customAuthorImageUrl = useUserProfileImageUrl(
+    share?.authorId,
+    share?.authorHasProfileImage ?? false,
+  );
+  const authorImageUrl = customAuthorImageUrl ?? share?.authorAvatarUrl ?? null;
 
-  const handleSave = useCallback(async () => {
+  // Keep the pager in sync when the active asset changes elsewhere
+  // (deep link with assetId, swiping inside the fullscreen viewer).
+  useEffect(() => {
+    pagerRef.current?.scrollToOffset({ offset: activeIndex * mediaWidth, animated: false });
+  }, [activeIndex, mediaWidth]);
+
+  const downloadActiveAsset = useCallback(async () => {
     if (!activeAsset) {
-      return;
+      throw new Error(gt('Medium ist noch nicht geladen.'));
     }
 
+    // The local video proxy serves plaintext; the download path decrypts
+    // itself, so it needs the real signed ciphertext URL instead.
+    const signed =
+      activeAssetUrl && !isVideoProxyUrl(activeAssetUrl)
+        ? { url: activeAssetUrl }
+        : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
+    if (!signed.url) {
+      throw new Error(gt('Datei ist nicht mehr im Speicher vorhanden.'));
+    }
+    return await downloadAssetToCache({
+      asset: activeAsset,
+      url: signed.url,
+      ...(keysByEpoch ? { keysByEpoch } : {}),
+    });
+  }, [activeAsset, activeAssetUrl, getReadUrl, gt, keysByEpoch]);
+
+  const handleSave = useCallback(async () => {
     setIsSaving(true);
     try {
-      const signed =
-        activeAssetUrl
-          ? { url: activeAssetUrl }
-          : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
-      if (!signed.url) {
-        throw new Error(gt('Datei ist nicht mehr im Speicher vorhanden.'));
-      }
-      const localUri = await downloadAssetToCache({
-        asset: activeAsset,
-        url: signed.url,
-      });
-      await saveAssetToDeviceLibrary(localUri);
+      await saveAssetToDeviceLibrary(await downloadActiveAsset());
       setFeedback(gt('Medium wurde auf dem Gerät gespeichert.'));
     } catch (error) {
       setFeedback(
@@ -233,27 +356,12 @@ export default function ShareDetailScreen() {
     } finally {
       setIsSaving(false);
     }
-  }, [activeAsset, activeAssetUrl, getReadUrl, gt]);
+  }, [downloadActiveAsset, gt]);
 
   const handleShare = useCallback(async () => {
-    if (!activeAsset) {
-      return;
-    }
-
     setIsSharing(true);
     try {
-      const signed =
-        activeAssetUrl
-          ? { url: activeAssetUrl }
-          : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
-      if (!signed.url) {
-        throw new Error(gt('Datei ist nicht mehr im Speicher vorhanden.'));
-      }
-      const localUri = await downloadAssetToCache({
-        asset: activeAsset,
-        url: signed.url,
-      });
-      await shareLocalFile(localUri);
+      await shareLocalFile(await downloadActiveAsset());
     } catch (error) {
       setFeedback(
         error instanceof Error ? error.message : gt('Medium konnte nicht geteilt werden.'),
@@ -261,7 +369,7 @@ export default function ShareDetailScreen() {
     } finally {
       setIsSharing(false);
     }
-  }, [activeAsset, activeAssetUrl, getReadUrl, gt]);
+  }, [downloadActiveAsset, gt]);
 
   const performDelete = useCallback(async () => {
     if (!share) {
@@ -304,6 +412,16 @@ export default function ShareDetailScreen() {
     );
   }, [gt, performDelete, share?.canDelete]);
 
+  const handlePagerIndexChange = useCallback(
+    (index: number) => {
+      const asset = share?.assets[index];
+      if (asset) {
+        setActiveAssetId(asset._id);
+      }
+    },
+    [share?.assets],
+  );
+
   if (isViewerBootstrapping || (shareId && hasViewer && share === undefined)) {
     return <LoadingBox />;
   }
@@ -319,13 +437,14 @@ export default function ShareDetailScreen() {
   }
 
   const activeAssetMeta = [
-    formatCapturedDate(activeAsset?.capturedAt, assetDateFormat),
-    formatBytes(activeAsset?.sizeBytes),
+    activeAsset?.capturedAt && activeAsset.capturedAt > 0
+      ? assetDateFormat.format(new Date(activeAsset.capturedAt))
+      : null,
     formatDuration(activeAsset?.durationSeconds),
+    formatMediaLocation(activeAsset?.location),
   ]
     .filter(Boolean)
-    .join(' · ');
-  const activeAssetLocation = formatMediaLocation(activeAsset?.location);
+    .join('  ·  ');
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
@@ -333,22 +452,21 @@ export default function ShareDetailScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        automaticallyAdjustKeyboardInsets
       >
         <View style={styles.headerRow}>
-          <Pressable
+          <AnimatedPressable
             accessibilityRole="button"
             accessibilityLabel={gt('Zurück')}
             hitSlop={12}
             onPress={() => router.back()}
-            style={({ pressed }) => [styles.backChevron, { opacity: pressed ? 0.5 : 1 }]}
+            pressedScale={0.94}
+            style={styles.backChevron}
           >
             <Ionicons name="chevron-back" size={24} color={theme.text} />
-          </Pressable>
+          </AnimatedPressable>
           {circle ? (
-            <Text
-              style={[styles.circleLabel, { color: theme.text }]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.circleLabel, { color: theme.text }]} numberOfLines={1}>
               {circle.name}
             </Text>
           ) : (
@@ -356,18 +474,16 @@ export default function ShareDetailScreen() {
           )}
 
           {share.canDelete ? (
-            <Pressable
+            <AnimatedPressable
+              accessibilityRole="button"
+              accessibilityLabel={gt('Beitrag löschen')}
+              disabled={isDeleting}
               onPress={handleDelete}
-              style={({ pressed }) => [
-                styles.iconButton,
-                {
-                  backgroundColor: theme.dangerMuted,
-                  opacity: pressed || isDeleting ? 0.82 : 1,
-                },
-              ]}
+              pressedScale={0.92}
+              style={[styles.iconButton, { backgroundColor: theme.dangerMuted }]}
             >
               <Ionicons name="trash-outline" size={18} color={theme.danger} />
-            </Pressable>
+            </AnimatedPressable>
           ) : (
             <View style={styles.iconButtonPlaceholder}>
               <Ionicons name="lock-closed-outline" size={16} color={theme.textSecondary} />
@@ -375,72 +491,134 @@ export default function ShareDetailScreen() {
           )}
         </View>
 
-        <View style={styles.metaBlock}>
-          <Text style={[styles.authorName, { color: theme.text }]}>{share.authorName}</Text>
-          <Text style={[styles.timestamp, { color: theme.textSecondary }]}>{share.createdAtLabel}</Text>
-        </View>
+        {/* The media leads: a tall swipeable pager, tap a photo for fullscreen. */}
+        <Animated.View entering={enterSection(0)} style={styles.mediaBlock}>
+          <View
+            style={[
+              styles.pagerCard,
+              {
+                height: mediaHeight,
+                ...Platform.select({
+                  ios: { shadowColor: theme.text },
+                  android: {},
+                }),
+              },
+            ]}
+          >
+            {share.assets.length > 0 ? (
+              <FlatList
+                ref={pagerRef}
+                data={share.assets}
+                keyExtractor={(asset) => asset._id}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                getItemLayout={(_, index) => ({
+                  length: mediaWidth,
+                  offset: mediaWidth * index,
+                  index,
+                })}
+                onMomentumScrollEnd={(event) => {
+                  const index = Math.max(
+                    0,
+                    Math.min(
+                      Math.round(event.nativeEvent.contentOffset.x / mediaWidth),
+                      share.assets.length - 1,
+                    ),
+                  );
+                  handlePagerIndexChange(index);
+                }}
+                renderItem={({ index, item }) => (
+                  <MediaSlide
+                    asset={item}
+                    circleId={share.circleId}
+                    width={mediaWidth}
+                    height={mediaHeight}
+                    isActive={index === activeIndex}
+                    isFocused={isFocused && !isViewerOpen}
+                    onExpand={() => setIsViewerOpen(true)}
+                  />
+                )}
+              />
+            ) : (
+              <View style={[styles.slideFallback, { backgroundColor: theme.surfacePressed }]}>
+                <Ionicons name="images-outline" size={32} color={theme.textTertiary} />
+              </View>
+            )}
 
-        {share.caption ? (
-          <CaptionBlock caption={share.caption} accentColor={theme.accent} baseColor={theme.text} />
-        ) : null}
-
-        <ShareAssetViewer asset={activeAsset} />
-
-        {activeAsset ? (
-          <View style={styles.assetInfo}>
-            <Text style={[styles.assetFileName, { color: theme.text }]} numberOfLines={1}>
-              {activeAsset.fileName ?? (activeAsset.kind === 'video' ? 'video.mp4' : 'image.jpg')}
-            </Text>
-            {activeAssetMeta ? (
-              <Text style={[styles.assetMeta, { color: theme.textSecondary }]}>{activeAssetMeta}</Text>
-            ) : null}
-            {activeAssetLocation ? (
-              <Text style={[styles.assetLocation, { color: theme.textSecondary }]}>
-                {activeAssetLocation}
-              </Text>
+            {share.assets.length > 1 ? (
+              <View style={styles.counterChip} pointerEvents="none">
+                <Ionicons name="albums-outline" size={12} color="#FFFFFF" />
+                <Text allowFontScaling={false} style={styles.counterChipText}>
+                  {activeIndex + 1}/{share.assets.length}
+                </Text>
+              </View>
             ) : null}
           </View>
-        ) : null}
 
-        {share.assets.length > 1 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.thumbnailRow}
-          >
-            {share.assets.map((asset) => (
-              <AssetThumbnail
-                key={asset._id}
-                asset={asset}
-                size={96}
-                onPress={() => setActiveAssetId(asset._id)}
-              />
-            ))}
-          </ScrollView>
-        ) : null}
+          <PagerDots count={share.assets.length} index={activeIndex} />
+        </Animated.View>
 
-        <View style={styles.actionRow}>
-          <Button
-            label={isSaving ? gt('Speichert...') : gt('Speichern')}
-            icon="download-outline"
-            loading={isSaving}
-            onPress={() => {
-              void handleSave();
-            }}
-          />
-          <Button
-            label={isSharing ? gt('Teilt...') : gt('Teilen')}
-            icon="share-social-outline"
-            variant="outline"
-            loading={isSharing}
-            onPress={() => {
-              void handleShare();
-            }}
-          />
-        </View>
+        {/* Reactions and save/share live right at the photo. */}
+        <Animated.View entering={enterSection(1)} style={styles.socialRow}>
+          <View style={styles.reactionSlot}>
+            <ReactionBar shareBatchId={share._id} onFeedback={setFeedback} />
+          </View>
+          <View style={styles.mediaActions}>
+            <MediaAction
+              icon="download-outline"
+              label={gt('Speichern')}
+              loading={isSaving}
+              onPress={() => {
+                void handleSave();
+              }}
+            />
+            <MediaAction
+              icon="share-social-outline"
+              label={gt('Teilen')}
+              loading={isSharing}
+              onPress={() => {
+                void handleShare();
+              }}
+            />
+          </View>
+        </Animated.View>
 
-        <EngagementPanel share={share} activeAsset={activeAsset} onFeedback={setFeedback} />
+        <Animated.View entering={enterSection(2)} style={styles.storyBlock}>
+          <View style={styles.authorRow}>
+            <Avatar name={share.authorName ?? '?'} imageUrl={authorImageUrl} size="md" />
+            <View style={styles.authorInfo}>
+              <Text style={[styles.authorName, { color: theme.text }]} numberOfLines={1}>
+                {share.authorName}
+              </Text>
+              <Text style={[styles.timestamp, { color: theme.textTertiary }]} numberOfLines={1}>
+                {share.createdAtLabel}
+              </Text>
+            </View>
+          </View>
+
+          {share.caption ? (
+            <CaptionBlock caption={share.caption} accentColor={theme.accent} baseColor={theme.text} />
+          ) : null}
+
+          {activeAssetMeta ? (
+            <Text style={[styles.assetMeta, { color: theme.textTertiary }]}>{activeAssetMeta}</Text>
+          ) : null}
+        </Animated.View>
+
+        <Animated.View entering={enterSection(3)}>
+          <EngagementPanel share={share} activeAsset={activeAsset} onFeedback={setFeedback} />
+        </Animated.View>
       </ScrollView>
+
+      <FullscreenMediaViewer
+        visible={isViewerOpen}
+        assets={share.assets}
+        circleId={share.circleId}
+        initialIndex={activeIndex}
+        onIndexChange={handlePagerIndexChange}
+        onClose={() => setIsViewerOpen(false)}
+      />
 
       <FeedbackToast message={feedback} onDismiss={() => setFeedback(null)} />
     </SafeAreaView>
@@ -457,8 +635,8 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.xl,
   },
   scroll: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
     paddingBottom: Spacing['3xl'],
     gap: Spacing.lg,
   },
@@ -497,17 +675,124 @@ const styles = StyleSheet.create({
   circleLabelPlaceholder: {
     flex: 1,
   },
-  metaBlock: {
-    gap: 4,
+  mediaBlock: {
+    gap: Spacing.md,
+  },
+  pagerCard: {
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.14,
+        shadowRadius: 22,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  slide: {
+    overflow: 'hidden',
+  },
+  slideMedia: {
+    width: '100%',
+    height: '100%',
+  },
+  slideFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandBadge: {
+    position: 'absolute',
+    right: Spacing.md,
+    bottom: Spacing.md,
+    width: 32,
+    height: 32,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(12,12,14,0.55)',
+  },
+  expandBadgeVideo: {
+    bottom: undefined,
+    top: Spacing.md,
+  },
+  counterChip: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(12,12,14,0.55)',
+  },
+  counterChipText: {
+    color: '#FFFFFF',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    alignItems: 'center',
+    gap: 5,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: Radius.full,
+  },
+  socialRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+  },
+  reactionSlot: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mediaActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  mediaAction: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storyBlock: {
+    gap: Spacing.md,
+  },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  authorInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
   },
   authorName: {
     fontFamily: Fonts.display,
-    fontSize: FontSize.lg,
+    fontSize: FontSize.md,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   timestamp: {
-    fontSize: FontSize.sm,
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   captionBlock: {
     gap: 4,
@@ -525,38 +810,10 @@ const styles = StyleSheet.create({
     fontSize: FontSize.lg,
     lineHeight: 28,
   },
-  viewer: {
-    minHeight: 340,
-    borderRadius: Radius.xl,
-    overflow: 'hidden',
-  },
-  viewerMedia: {
-    width: '100%',
-    height: 340,
-  },
-  viewerFallback: {
-    width: '100%',
-    height: 340,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  assetInfo: {
-    gap: 4,
-  },
-  assetFileName: {
-    fontSize: FontSize.base,
-    fontWeight: '700',
-  },
   assetMeta: {
-    fontSize: FontSize.sm,
-  },
-  assetLocation: {
-    fontSize: FontSize.sm,
-  },
-  thumbnailRow: {
-    gap: Spacing.sm,
-  },
-  actionRow: {
-    gap: Spacing.sm,
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
 });

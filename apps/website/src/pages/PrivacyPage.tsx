@@ -28,7 +28,6 @@ function GermanContent() {
           Produktnutzung und Leistungsdaten wie App-Start- und Bildschirm-Ladezeiten, App- und
           Betriebssystemversion, Gerätemodell und Sprachregion
         </li>
-        <li>Warteliste-Einträge, die du über die Website sendest</li>
         <li>Technische Logs zum Betrieb, zur Sicherheit und Fehlersuche</li>
       </ul>
 
@@ -41,7 +40,6 @@ function GermanContent() {
         <li>um Abonnements bereitzustellen, wiederherzustellen und Kontingente durchzusetzen</li>
         <li>um gewünschte Push-Mitteilungen zuzustellen</li>
         <li>um Stabilität und Ladezeiten der App zu messen und zu verbessern</li>
-        <li>um auf Warteliste-Anfragen und Zugangswünsche zu antworten</li>
         <li>um Sicherheit, Missbrauchsschutz und Betrieb zu gewährleisten</li>
       </ul>
 
@@ -54,7 +52,7 @@ function GermanContent() {
         <li>Standort, um Medien mit Ortsangaben anzureichern, wenn du es erlaubst</li>
       </ul>
       <p>
-        Optionale Berechtigungen kannst du verweigern — einige Funktionen arbeiten dann
+        Optionale Berechtigungen kannst du verweigern. Einige Funktionen arbeiten dann
         möglicherweise nicht wie vorgesehen.
       </p>
 
@@ -83,7 +81,6 @@ function GermanContent() {
       <ul>
         <li>du entscheidest, ob du Medien hochlädst</li>
         <li>du entscheidest, welche optionalen Berechtigungen du erteilst</li>
-        <li>du kannst die Warteliste verlassen, indem du die Betreiber der Installation kontaktierst</li>
         <li>
           du kannst dein Konto und die zugehörigen Inhalte in der App unter Einstellungen → Konto
           → „Konto und Daten löschen“ dauerhaft löschen
@@ -134,7 +131,6 @@ function EnglishContent() {
           product interaction and performance data such as app start and screen loading times,
           app and operating-system version, device model, and locale
         </li>
-        <li>waitlist submissions you send through the website</li>
         <li>basic technical logs needed to operate, secure, and debug the service</li>
       </ul>
 
@@ -147,7 +143,6 @@ function EnglishContent() {
         <li>to provide and restore subscriptions and enforce plan limits</li>
         <li>to deliver push notifications you enable</li>
         <li>to measure and improve app stability and loading performance</li>
-        <li>to respond to waitlist requests and product access inquiries</li>
         <li>to maintain security, prevent abuse, and troubleshoot service problems</li>
       </ul>
 
@@ -159,7 +154,7 @@ function EnglishContent() {
         <li>microphone, to record video with audio</li>
         <li>location, to enrich media with place information when you allow it</li>
       </ul>
-      <p>You can deny optional permissions — some features may no longer work as intended.</p>
+      <p>You can deny optional permissions. Some features may no longer work as intended.</p>
 
       <h2>Storage and processors</h2>
       <p>
@@ -185,7 +180,6 @@ function EnglishContent() {
       <ul>
         <li>you can choose whether to upload media</li>
         <li>you can choose whether to grant optional device permissions</li>
-        <li>you can leave the waitlist by contacting the operator of the deployment</li>
         <li>
           you can permanently delete your account and associated content in Settings → Account →
           “Delete account and data” in the app
@@ -215,7 +209,7 @@ export function PrivacyPage({ locale }: { locale: Locale }) {
 
   usePageMeta({
     lang: locale,
-    title: de ? 'Datenschutz — beisammen' : 'Privacy policy — beisammen',
+    title: de ? 'Datenschutz · beisammen' : 'Privacy policy · beisammen',
     description: de
       ? 'Wie beisammen mit euren Fotos und Daten umgeht.'
       : 'How beisammen handles your photos and data.',
@@ -226,14 +220,13 @@ export function PrivacyPage({ locale }: { locale: Locale }) {
       locale={locale}
       page="privacy"
       eyebrow={de ? 'Datenschutz' : 'Privacy policy'}
-      titlePlain={de ? 'Wie wir über' : 'How we think'}
-      titleItalic={de ? 'eure Fotos denken.' : 'about your photos.'}
+      title={de ? 'Wie wir über eure Fotos denken.' : 'How we think about your photos.'}
       lede={
         de
           ? 'Kurz gesagt: Was du hochlädst, gehört deinen Kreisen. Diese Seite beschreibt, welche Daten wir anfassen, warum und wie lange.'
           : 'The short version: what you upload belongs to your circles. This page describes the data we touch, why, and for how long.'
       }
-      meta={de ? 'Zuletzt aktualisiert — 16. August 2026' : 'Last updated — August 16, 2026'}
+      meta={de ? 'Zuletzt aktualisiert: 16. August 2026' : 'Last updated: August 16, 2026'}
       backHref={localePath(locale, '')}
       backLabel={de ? 'Zurück zu beisammen' : 'Back to beisammen'}
     >

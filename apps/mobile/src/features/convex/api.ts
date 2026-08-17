@@ -18,6 +18,8 @@ import type {
   UploadTarget,
 } from '@beisammen/contracts';
 
+import type { AssetEncryptionEnvelope } from '@/features/crypto/asset-metadata';
+
 type StoredAuthProvider = AuthProvider;
 
 export interface ViewerRecord {
@@ -97,24 +99,6 @@ export interface CircleInviteRecord {
   canRevoke: boolean;
 }
 
-export interface PublicCircleLinkRecord {
-  _id: string;
-  circleId: string;
-  status: 'active' | 'expired' | 'revoked';
-  createdAt: number;
-  expiresAt: number;
-  revokedAt: number | null;
-  createdByName: string;
-  canRevoke: boolean;
-}
-
-export interface CreatePublicCircleLinkResult {
-  publicLinkId: string;
-  token: string;
-  shareUrl: string;
-  expiresAt: number;
-}
-
 export interface InvitePreview {
   inviteId: string;
   circleId: string;
@@ -148,6 +132,7 @@ export interface ShareAssetRecord {
   durationSeconds?: number;
   location?: MediaLocation;
   capturedAt?: number;
+  encryption?: AssetEncryptionEnvelope;
   engagement: EngagementSummary;
 }
 
@@ -286,6 +271,7 @@ export interface MemoryItemRecord {
     durationSeconds?: number;
     location?: MediaLocation;
     capturedAt?: number;
+    encryption?: AssetEncryptionEnvelope;
   };
 }
 
@@ -321,17 +307,19 @@ export interface MemoryDiscoveryRecord {
   places: MemoryPlaceFacet[];
 }
 
-export interface MemoryMapItem {
+/**
+ * Page item of `assets.listMetadataForCircle`: legacy assets carry plaintext
+ * `location`, encrypted assets carry their sealed envelope instead (their GPS
+ * lives inside `encMetadata` and is aggregated client-side).
+ */
+export interface AssetMetadataRecord {
   _id: string;
-  circleId: string;
-  circleName: string;
-  assetId: string;
+  shareBatchId: string;
   kind: 'image' | 'video';
-  timelineAt: number;
-  capturedAt: number | null;
-  latitude: number;
-  longitude: number;
-  placeLabel: string | null;
+  capturedAt?: number;
+  createdAt: number;
+  location?: MediaLocation;
+  encryption?: AssetEncryptionEnvelope;
 }
 
 export interface DraftUploadRecord {
@@ -382,12 +370,14 @@ export type CreateDraftArgs = {
 export type CreateProfileImageTargetArgs = {
   mimeType: string;
   fileName: string;
+  sizeBytes: number;
 };
 
 export type CreateCircleImageTargetArgs = {
   circleId: string;
   mimeType: string;
   fileName: string;
+  sizeBytes: number;
 };
 
 export type PublishArgs = {
@@ -436,6 +426,8 @@ export type CreateUploadTargetArgs = {
   mimeType: string;
   kind: 'image' | 'video';
   fileName: string;
+  sizeBytes: number;
+  previewSizeBytes: number;
 };
 
 export type PaginationOpts = {
@@ -459,9 +451,7 @@ export type PreparedImageUploadTarget = PreparedUploadTarget;
 
 export type CompleteUploadArgs = {
   uploadId: string;
-  storageId?: string;
   objectKey?: string;
-  previewStorageId?: string;
   previewObjectKey?: string;
   fileName?: string;
   sizeBytes?: number;
@@ -504,7 +494,7 @@ export const api = {
     >('users:createProfileImageTarget'),
     completeProfileImageUpload: makeFunctionReference<
       'action',
-      { uploadId: string; objectKey?: string; storageId?: string; sizeBytes?: number },
+      { uploadId: string; objectKey?: string; sizeBytes?: number },
       { uploadId: string }
     >('users:completeProfileImageUpload'),
     removeProfileImage: makeFunctionReference<'action', Record<string, never>, { removed: boolean }>(
@@ -545,23 +535,6 @@ export const api = {
       { inviteId: string },
       { inviteId: string }
     >('invites:revoke'),
-  },
-  publicLinks: {
-    createForCircle: makeFunctionReference<
-      'mutation',
-      { circleId: string },
-      CreatePublicCircleLinkResult
-    >('publicLinks:createForCircle'),
-    listForCircle: makeFunctionReference<
-      'query',
-      { circleId: string },
-      PublicCircleLinkRecord[]
-    >('publicLinks:listForCircle'),
-    revoke: makeFunctionReference<
-      'mutation',
-      { publicLinkId: string },
-      { publicLinkId: string; status: 'revoked' }
-    >('publicLinks:revoke'),
   },
   circles: {
     create: makeFunctionReference<'mutation', CreateCircleArgs, { circleId: string }>(
@@ -611,7 +584,7 @@ export const api = {
     >('circles:createImageTarget'),
     completeImageUpload: makeFunctionReference<
       'action',
-      { uploadId: string; objectKey?: string; storageId?: string; sizeBytes?: number },
+      { uploadId: string; objectKey?: string; sizeBytes?: number },
       { uploadId: string }
     >('circles:completeImageUpload'),
     removeImage: makeFunctionReference<
@@ -687,6 +660,11 @@ export const api = {
     deleteDraftAsset: makeFunctionReference<'action', { assetId: string }, { assetId: string }>(
       'assets:deleteDraftAsset',
     ),
+    listMetadataForCircle: makeFunctionReference<
+      'query',
+      { circleId: string; paginationOpts: PaginationOpts },
+      PaginatedResult<AssetMetadataRecord>
+    >('assets:listMetadataForCircle'),
   },
   comments: {
     listForShare: makeFunctionReference<
@@ -754,11 +732,6 @@ export const api = {
       { circleId?: string },
       MemoryDiscoveryRecord
     >('memories:discoveryForViewer'),
-    locatedForViewer: makeFunctionReference<
-      'query',
-      { circleId?: string },
-      MemoryMapItem[]
-    >('memories:locatedForViewer'),
   },
   notifications: {
     registerDevice: makeFunctionReference<

@@ -1,7 +1,7 @@
 import type { NamedExoticComponent } from 'react';
-import type { MemoryMapItem } from '@/features/convex/api';
+import type { LocatedMemoryItem } from '@/features/memories/use-located-memory-items';
 
 export declare const MemoryMapExplorer: NamedExoticComponent<{
-  items: MemoryMapItem[] | undefined;
-  onOpenMemory: (item: MemoryMapItem) => void;
+  items: LocatedMemoryItem[] | undefined;
+  onOpenMemory: (item: LocatedMemoryItem) => void;
 }>;

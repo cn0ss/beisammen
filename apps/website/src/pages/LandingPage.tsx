@@ -4,11 +4,11 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { SiteHeader } from '@/components/SiteHeader';
 import { dict, LANG_STORAGE_KEY, type Locale } from '@/i18n/ui';
 import { usePageMeta } from '@/lib/meta';
+import { Download } from '@/sections/Download';
 import { Hero } from '@/sections/Hero';
 import { Manifesto } from '@/sections/Manifesto';
 import { Moments } from '@/sections/Moments';
 import { Promises } from '@/sections/Promises';
-import { Waitlist } from '@/sections/Waitlist';
 
 export function LandingPage({ locale }: { locale: Locale }) {
   const t = dict[locale];
@@ -28,8 +28,8 @@ export function LandingPage({ locale }: { locale: Locale }) {
     } catch {
       stored = null;
     }
-    // Keep the search and hash so shared anchor links like /#access still
-    // land on the waitlist after the locale redirect.
+    // Keep the search and hash so shared anchor links like /#download still
+    // land on the right section after the locale redirect.
     const toEnglish = () =>
       navigate(
         { pathname: '/en/', search: window.location.search, hash: window.location.hash },
@@ -58,7 +58,7 @@ export function LandingPage({ locale }: { locale: Locale }) {
         <Manifesto locale={locale} />
         <Moments locale={locale} />
         <Promises locale={locale} />
-        <Waitlist locale={locale} />
+        <Download locale={locale} />
       </main>
       <SiteFooter locale={locale} />
     </div>

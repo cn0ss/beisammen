@@ -23,8 +23,8 @@ import Animated, {
 import { Num, Plural, T } from 'gt-react-native';
 
 import { FontSize, Radius, Spacing } from '@/constants/theme';
-import type { MemoryMapItem } from '@/features/convex/api';
-import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
+import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
+import type { LocatedMemoryItem } from '@/features/memories/use-located-memory-items';
 import { MemoryTile } from '@/features/memories/MemoryTile';
 import {
   bucketedZoomDelta,
@@ -52,8 +52,8 @@ const ZOOM_ANIMATION_MS = 350;
 const MARKER_REPAINT_MS = 600;
 
 interface MemoryMapExplorerProps {
-  items: MemoryMapItem[] | undefined;
-  onOpenMemory: (item: MemoryMapItem) => void;
+  items: LocatedMemoryItem[] | undefined;
+  onOpenMemory: (item: LocatedMemoryItem) => void;
 }
 
 export const MemoryMapExplorer = memo(function MemoryMapExplorer({
@@ -94,7 +94,7 @@ export const MemoryMapExplorer = memo(function MemoryMapExplorer({
   );
 
   const handleClusterPress = useCallback(
-    (cluster: MapCluster<MemoryMapItem>) => {
+    (cluster: MapCluster<LocatedMemoryItem>) => {
       if (cluster.count === 1) {
         onOpenMemory(cluster.newest);
         return;
@@ -162,11 +162,23 @@ const ClusterMarker = memo(function ClusterMarker({
   cluster,
   onPress,
 }: {
-  cluster: MapCluster<MemoryMapItem>;
-  onPress: (cluster: MapCluster<MemoryMapItem>) => void;
+  cluster: MapCluster<LocatedMemoryItem>;
+  onPress: (cluster: MapCluster<LocatedMemoryItem>) => void;
 }) {
   const theme = useTheme();
-  const signedUrl = useSignedAssetUrl(cluster.newest.assetId, 'preview');
+  // Map items carry the encryption envelope, so encrypted assets resolve to a
+  // real decrypted preview thumbnail just like plaintext legacy assets.
+  const signedUrl = useAssetMediaUri(
+    {
+      _id: cluster.newest.assetId,
+      kind: cluster.newest.kind,
+      mimeType: cluster.newest.asset.mimeType,
+      fileName: cluster.newest.asset.fileName,
+      encryption: cluster.newest.asset.encryption,
+    },
+    'preview',
+    cluster.newest.circleId,
+  );
   const [isImageReady, setIsImageReady] = useState(false);
   const [isRepainting, setIsRepainting] = useState(false);
   const lastCount = useRef(cluster.count);
@@ -225,9 +237,9 @@ function MapMemorySheet({
   containerHeight,
   onOpenMemory,
 }: {
-  items: MemoryMapItem[];
+  items: LocatedMemoryItem[];
   containerHeight: number;
-  onOpenMemory: (item: MemoryMapItem) => void;
+  onOpenMemory: (item: LocatedMemoryItem) => void;
 }) {
   const theme = useTheme();
   const { width } = useWindowDimensions();

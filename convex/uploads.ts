@@ -10,23 +10,22 @@ import {
   type BillingOwner,
   requireCloudOwnerFeatureAccess,
   resolveCircleBillingOwner,
+  resolveOwnerStorageCap,
   trackCloudOwnerUsage,
 } from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { canPublish } from './lib/permissions';
-import { createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
+import { createS3UploadTarget, deleteS3Object, verifyS3ObjectExists } from './lib/storage/s3';
 import {
   buildS3ObjectKey,
   buildS3PreviewObjectKey,
   buildS3StorageReference,
-  deleteStorageReference,
   getCurrentInstanceStorage,
-  storageReferenceKey,
 } from './lib/storage/shared';
 import {
-  assertCompletedUploadWithinBetaLimits,
-  assertDraftHasMediaCapacity,
   assertUploadTargetWithinBetaLimits,
+  assertValidDeclaredUploadSizes,
 } from './lib/uploadLimits';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
@@ -37,40 +36,27 @@ export const uploadFunctionSurface = [
   'uploads.discard',
 ] as const;
 
+interface S3PendingStorage {
+  provider: 's3';
+  objectKey: string;
+  bucket: string;
+  region?: string;
+  endpoint?: string;
+  basePath?: string;
+}
+
 interface PreparedUploadContext {
   uploadId: Id<'uploads'>;
-  providerKind: 'convex-files' | 's3';
+  providerKind: 's3';
   mimeType: string;
   fileName: string;
   kind: 'image' | 'video';
   shareBatchId: Id<'shareBatches'>;
   circleId: Id<'circles'>;
-  pendingStorage?:
-    | {
-        provider: 'convex-files';
-        storageId: Id<'_storage'>;
-      }
-    | {
-        provider: 's3';
-        objectKey: string;
-        bucket: string;
-        region?: string;
-        endpoint?: string;
-        basePath?: string;
-      };
-  previewPendingStorage?:
-    | {
-        provider: 'convex-files';
-        storageId: Id<'_storage'>;
-      }
-    | {
-        provider: 's3';
-        objectKey: string;
-        bucket: string;
-        region?: string;
-        endpoint?: string;
-        basePath?: string;
-      };
+  declaredSizeBytes: number;
+  declaredPreviewSizeBytes: number;
+  pendingStorage: S3PendingStorage;
+  previewPendingStorage?: S3PendingStorage;
 }
 
 interface AuthorizedCreateTargetContext {
@@ -83,41 +69,22 @@ interface AuthorizedRetryContext {
   uploadId: Id<'uploads'>;
   circleId: Id<'circles'>;
   billingOwner: BillingOwner;
+  declaredSizeBytes: number;
+  declaredPreviewSizeBytes: number;
 }
 
 interface CompleteUploadContext {
   uploadId: Id<'uploads'>;
-  providerKind: 'convex-files' | 's3';
+  providerKind: 's3';
   circleId: Id<'circles'>;
   billingOwner: BillingOwner;
   hasAsset: boolean;
   existingAssetSizeBytes: number;
-  pendingStorage?:
-    | {
-        provider: 'convex-files';
-        storageId: Id<'_storage'>;
-      }
-    | {
-        provider: 's3';
-        objectKey: string;
-        bucket: string;
-        region?: string;
-        endpoint?: string;
-        basePath?: string;
-      };
-  previewPendingStorage?:
-    | {
-        provider: 'convex-files';
-        storageId: Id<'_storage'>;
-      }
-    | {
-        provider: 's3';
-        objectKey: string;
-        bucket: string;
-        region?: string;
-        endpoint?: string;
-        basePath?: string;
-      };
+  // Optional only for legacy rows created before size enforcement.
+  declaredSizeBytes?: number;
+  declaredPreviewSizeBytes?: number;
+  pendingStorage: S3PendingStorage;
+  previewPendingStorage?: S3PendingStorage;
 }
 
 async function refundCloudUsage(input: {
@@ -189,6 +156,8 @@ async function authorizeCreateTargetRequest(
     mimeType: string;
     kind: 'image' | 'video';
     fileName: string;
+    sizeBytes: number;
+    previewSizeBytes: number;
   },
 ): Promise<AuthorizedCreateTargetContext> {
   const viewer = await requireViewer(ctx);
@@ -208,12 +177,15 @@ async function authorizeCreateTargetRequest(
     throw new Error('Only the draft author can upload into this share batch.');
   }
 
+  assertValidDeclaredUploadSizes({
+    sizeBytes: args.sizeBytes,
+    previewSizeBytes: args.previewSizeBytes,
+  });
   assertUploadTargetWithinBetaLimits({
     kind: args.kind,
     mimeType: args.mimeType,
     fileName: args.fileName,
   });
-  await assertDraftHasMediaCapacity(ctx, args.shareBatchId);
 
   return {
     circleId: args.circleId,
@@ -257,10 +229,30 @@ async function authorizeRetryRequest(
     throw new Error('Completed uploads cannot be retried.');
   }
 
+  // The convex-files code path is gone; the last such in-flight rows can only
+  // be discarded and re-created as S3 uploads.
+  if (upload.providerKind !== 's3') {
+    throw new Error('This upload cannot be retried. Remove it and add the file again.');
+  }
+
+  // Rows created before size enforcement carry no declared sizes, so no
+  // exact-size PUT can be signed for them. They must be discarded and
+  // re-created instead of retried.
+  if (
+    upload.declaredSizeBytes === undefined ||
+    upload.declaredPreviewSizeBytes === undefined
+  ) {
+    throw new Error(
+      'This upload cannot be retried. Remove it and add the file again.',
+    );
+  }
+
   return {
     uploadId: upload._id,
     circleId: upload.circleId,
     billingOwner: await resolveCircleBillingOwner(ctx, upload.circleId),
+    declaredSizeBytes: upload.declaredSizeBytes,
+    declaredPreviewSizeBytes: upload.declaredPreviewSizeBytes,
   };
 }
 
@@ -271,6 +263,8 @@ export const authorizeCreateTarget = internalQuery({
     mimeType: v.string(),
     kind: v.union(v.literal('image'), v.literal('video')),
     fileName: v.string(),
+    sizeBytes: v.number(),
+    previewSizeBytes: v.number(),
   },
   handler: async (ctx, args): Promise<AuthorizedCreateTargetContext> => {
     return await authorizeCreateTargetRequest(ctx, args);
@@ -293,6 +287,8 @@ export const prepareCreateTarget = internalMutation({
     mimeType: v.string(),
     kind: v.union(v.literal('image'), v.literal('video')),
     fileName: v.string(),
+    sizeBytes: v.number(),
+    previewSizeBytes: v.number(),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -307,6 +303,8 @@ export const prepareCreateTarget = internalMutation({
       kind: args.kind,
       fileName: args.fileName.trim(),
       mimeType: args.mimeType.trim(),
+      declaredSizeBytes: args.sizeBytes,
+      declaredPreviewSizeBytes: args.previewSizeBytes,
       status: 'uploading',
       createdAt: Date.now(),
     });
@@ -339,6 +337,8 @@ export const prepareCreateTarget = internalMutation({
       kind: args.kind,
       shareBatchId: args.shareBatchId,
       circleId: args.circleId,
+      declaredSizeBytes: args.sizeBytes,
+      declaredPreviewSizeBytes: args.previewSizeBytes,
       pendingStorage,
       previewPendingStorage,
     };
@@ -356,7 +356,11 @@ export const prepareRetry = internalMutation({
       throw new Error('Upload not found.');
     }
 
-    await authorizeRetryRequest(ctx, args.uploadId);
+    const retryContext = await authorizeRetryRequest(ctx, args.uploadId);
+
+    if (!upload.pendingStorage || upload.pendingStorage.provider !== 's3') {
+      throw new Error('S3 upload target could not be recreated.');
+    }
 
     await ctx.db.patch(upload._id, {
       status: 'uploading',
@@ -365,14 +369,18 @@ export const prepareRetry = internalMutation({
 
     return {
       uploadId: upload._id,
-      providerKind: upload.providerKind,
+      providerKind: 's3' as const,
       mimeType: upload.mimeType,
       fileName: upload.fileName,
       kind: upload.kind,
       shareBatchId: upload.shareBatchId,
       circleId: upload.circleId,
+      declaredSizeBytes: retryContext.declaredSizeBytes,
+      declaredPreviewSizeBytes: retryContext.declaredPreviewSizeBytes,
       pendingStorage: upload.pendingStorage,
-      previewPendingStorage: upload.previewPendingStorage,
+      ...(upload.previewPendingStorage && upload.previewPendingStorage.provider === 's3'
+        ? { previewPendingStorage: upload.previewPendingStorage }
+        : {}),
     };
   },
 });
@@ -384,6 +392,8 @@ export const createTarget = action({
     mimeType: v.string(),
     kind: v.union(v.literal('image'), v.literal('video')),
     fileName: v.string(),
+    sizeBytes: v.number(),
+    previewSizeBytes: v.number(),
   },
   handler: async (ctx, args) => {
     const policy = getDeploymentPolicyFromEnv();
@@ -393,12 +403,14 @@ export const createTarget = action({
     );
 
     if (policy.isCloud) {
-      // Only storage is limited; the exact file size is unknown here, so this
-      // verifies an active plan with headroom left in the storage pool.
+      // Only storage is limited. The declared sizes are enforced by signing
+      // them into the presigned PUTs, so requiring headroom for the full
+      // declared payload here is an honest pre-check.
       await requireCloudOwnerFeatureAccess(ctx, {
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
         featureId: BILLING_FEATURE_IDS.storageBytes,
+        requiredBalance: args.sizeBytes + args.previewSizeBytes,
       });
     }
 
@@ -414,12 +426,14 @@ export const createTarget = action({
     const target = await createS3UploadTarget({
       storage: prepared.pendingStorage,
       mimeType: prepared.mimeType,
+      sizeBytes: prepared.declaredSizeBytes,
     });
     const previewTarget =
       prepared.previewPendingStorage && prepared.previewPendingStorage.provider === 's3'
         ? await createS3UploadTarget({
             storage: prepared.previewPendingStorage,
             mimeType: 'image/jpeg',
+            sizeBytes: prepared.declaredPreviewSizeBytes,
           })
         : null;
 
@@ -447,6 +461,8 @@ export const retry = action({
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
         featureId: BILLING_FEATURE_IDS.storageBytes,
+        requiredBalance:
+          billingContext.declaredSizeBytes + billingContext.declaredPreviewSizeBytes,
       });
     }
 
@@ -459,15 +475,19 @@ export const retry = action({
       throw new Error('S3 upload target could not be recreated.');
     }
 
+    // Retries reuse the declared sizes stored at target creation, so the
+    // retried PUT is signed for exactly the same payload.
     const target = await createS3UploadTarget({
       storage: prepared.pendingStorage,
       mimeType: prepared.mimeType,
+      sizeBytes: prepared.declaredSizeBytes,
     });
     const previewTarget =
       prepared.previewPendingStorage && prepared.previewPendingStorage.provider === 's3'
         ? await createS3UploadTarget({
             storage: prepared.previewPendingStorage,
             mimeType: 'image/jpeg',
+            sizeBytes: prepared.declaredPreviewSizeBytes,
           })
         : null;
 
@@ -492,27 +512,92 @@ export const getCompleteContext = internalQuery({
     }
 
     await requireUploadCompletionAuthor(ctx, upload, viewer._id);
+
+    // The convex-files code path is gone; the last such in-flight rows can
+    // only be discarded and re-created as S3 uploads.
+    if (upload.providerKind !== 's3') {
+      throw new Error(
+        'Legacy uploads can no longer be completed. Remove the item and add the file again.',
+      );
+    }
+
+    if (!upload.pendingStorage || upload.pendingStorage.provider !== 's3') {
+      throw new Error('Completed upload is missing its S3 storage reference.');
+    }
+
     const existingAsset = upload.assetId ? await ctx.db.get(upload.assetId) : null;
     const billingOwner = await resolveCircleBillingOwner(ctx, upload.circleId);
 
     return {
       uploadId: upload._id,
-      providerKind: upload.providerKind,
+      providerKind: 's3' as const,
       circleId: upload.circleId,
       billingOwner,
       hasAsset: Boolean(upload.assetId),
       existingAssetSizeBytes: existingAsset?.sizeBytes ?? 0,
+      declaredSizeBytes: upload.declaredSizeBytes,
+      declaredPreviewSizeBytes: upload.declaredPreviewSizeBytes,
       pendingStorage: upload.pendingStorage,
-      previewPendingStorage: upload.previewPendingStorage,
+      ...(upload.previewPendingStorage && upload.previewPendingStorage.provider === 's3'
+        ? { previewPendingStorage: upload.previewPendingStorage }
+        : {}),
     };
   },
 });
 
+export const markFailed = internalMutation({
+  args: {
+    uploadId: v.id('uploads'),
+    failureReason: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const upload = await ctx.db.get(args.uploadId);
+
+    if (!upload || upload.status === 'uploaded') {
+      return null;
+    }
+
+    await ctx.db.patch(upload._id, {
+      status: 'failed',
+      failureReason: args.failureReason,
+    });
+
+    return null;
+  },
+});
+
+export const assetEncryptionValidator = v.object({
+  v: v.literal(1),
+  circleEpoch: v.number(),
+  wrappedFileKey: v.string(),
+  encMetadata: v.optional(v.string()),
+});
+
+async function assertValidAssetEncryption(
+  ctx: QueryCtx | MutationCtx,
+  upload: Doc<'uploads'>,
+  encryption: { circleEpoch: number; wrappedFileKey: string },
+): Promise<void> {
+  if (encryption.wrappedFileKey.trim().length === 0) {
+    throw new Error('wrappedFileKey is required for encrypted uploads.');
+  }
+
+  const epochRow = await ctx.db
+    .query('circleKeyEpochs')
+    .withIndex('by_circle_and_epoch', (q) =>
+      q.eq('circleId', upload.circleId).eq('epoch', encryption.circleEpoch),
+    )
+    .unique();
+
+  if (!epochRow) {
+    throw new Error('Encrypted upload references an unknown circle key epoch.');
+  }
+}
+
 export const finalizeComplete = internalMutation({
   args: {
     uploadId: v.id('uploads'),
-    storageId: v.optional(v.id('_storage')),
-    previewStorageId: v.optional(v.id('_storage')),
     previewObjectKey: v.optional(v.string()),
     fileName: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
@@ -520,6 +605,7 @@ export const finalizeComplete = internalMutation({
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
     capturedAt: v.optional(v.number()),
+    encryption: v.optional(assetEncryptionValidator),
     location: v.optional(
       v.object({
         latitude: v.number(),
@@ -541,39 +627,39 @@ export const finalizeComplete = internalMutation({
       throw new Error('Upload not found.');
     }
 
+    if (args.encryption) {
+      // Private metadata belongs inside the encrypted envelope; storing it in
+      // plaintext next to an encrypted asset would defeat the point.
+      if (args.location) {
+        throw new Error('Encrypted uploads must not include a plaintext location.');
+      }
+
+      await assertValidAssetEncryption(ctx, upload, args.encryption);
+    }
+
     const shareBatch = await requireUploadCompletionAuthor(ctx, upload, viewer._id);
-    assertCompletedUploadWithinBetaLimits({
+    assertUploadTargetWithinBetaLimits({
       kind: upload.kind,
       mimeType: upload.mimeType,
       fileName: args.fileName?.trim() || upload.fileName,
-      durationSeconds: args.durationSeconds,
     });
 
-    // Legacy: convex-files branch retained for existing in-flight uploads
+    if (upload.providerKind !== 's3') {
+      throw new Error(
+        'Legacy uploads can no longer be completed. Remove the item and add the file again.',
+      );
+    }
+
     const storage =
-      upload.providerKind === 'convex-files'
-        ? args.storageId
-          ? {
-              provider: 'convex-files' as const,
-              storageId: args.storageId,
-            }
-          : null
-        : upload.pendingStorage && upload.pendingStorage.provider === 's3'
-          ? upload.pendingStorage
-          : null;
+      upload.pendingStorage && upload.pendingStorage.provider === 's3'
+        ? upload.pendingStorage
+        : null;
     const previewStorage =
-      upload.providerKind === 'convex-files'
-        ? args.previewStorageId
-          ? {
-              provider: 'convex-files' as const,
-              storageId: args.previewStorageId,
-            }
-          : null
-        : args.previewObjectKey &&
-            upload.previewPendingStorage &&
-            upload.previewPendingStorage.provider === 's3'
-          ? upload.previewPendingStorage
-          : null;
+      args.previewObjectKey &&
+      upload.previewPendingStorage &&
+      upload.previewPendingStorage.provider === 's3'
+        ? upload.previewPendingStorage
+        : null;
 
     if (!storage) {
       throw new Error('Completed upload is missing its storage reference.');
@@ -588,6 +674,7 @@ export const finalizeComplete = internalMutation({
       durationSeconds: args.durationSeconds,
       capturedAt: args.capturedAt,
       location: args.location,
+      encryption: args.encryption,
     };
 
     if (upload.assetId) {
@@ -618,8 +705,6 @@ export const finalizeComplete = internalMutation({
       };
     }
 
-    await assertDraftHasMediaCapacity(ctx, upload.shareBatchId, upload._id);
-
     const assetId = await ctx.db.insert('assets', {
       shareBatchId: upload.shareBatchId,
       circleId: upload.circleId,
@@ -635,6 +720,7 @@ export const finalizeComplete = internalMutation({
       durationSeconds: nextAssetFields.durationSeconds,
       capturedAt: nextAssetFields.capturedAt,
       location: nextAssetFields.location,
+      encryption: nextAssetFields.encryption,
     });
 
     await ctx.db.patch(upload._id, {
@@ -662,9 +748,7 @@ export const finalizeComplete = internalMutation({
 export const complete = action({
   args: {
     uploadId: v.id('uploads'),
-    storageId: v.optional(v.id('_storage')),
     objectKey: v.optional(v.string()),
-    previewStorageId: v.optional(v.id('_storage')),
     previewObjectKey: v.optional(v.string()),
     fileName: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
@@ -672,6 +756,7 @@ export const complete = action({
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
     capturedAt: v.optional(v.number()),
+    encryption: v.optional(assetEncryptionValidator),
     location: v.optional(
       v.object({
         latitude: v.number(),
@@ -692,64 +777,78 @@ export const complete = action({
         uploadId: args.uploadId,
       },
     );
-    let serverObservedSizeBytes: number | undefined;
+    const pendingStorage = completeContext.pendingStorage;
 
-    // Legacy: convex-files branch retained for existing in-flight uploads
-    if (completeContext.providerKind === 'convex-files') {
-      if (!args.storageId) {
-        throw new Error('Convex file uploads must provide a storageId.');
+    if (!pendingStorage || pendingStorage.provider !== 's3') {
+      throw new Error('Completed upload is missing its S3 storage reference.');
+    }
+
+    if (args.objectKey && args.objectKey !== pendingStorage.objectKey) {
+      throw new Error('Completed upload object key does not match the prepared target.');
+    }
+
+    const verifiedOriginal = await verifyS3ObjectExists({
+      storage: pendingStorage,
+    });
+
+    // Belt and suspenders: the signed content-length already forces every
+    // PUT to match its declaration, so a mismatch here should be impossible.
+    // If it happens anyway, drop the uploaded objects and fail the upload
+    // instead of charging or attaching an unexpected payload.
+    const rejectSizeMismatch = async (failureReason: string): Promise<never> => {
+      await deleteS3Object({ storage: pendingStorage });
+
+      const previewStorage = completeContext.previewPendingStorage;
+
+      if (previewStorage && previewStorage.provider === 's3') {
+        await deleteS3Object({ storage: previewStorage });
       }
 
-      const storedFileUrl = await ctx.storage.getUrl(args.storageId);
-
-      if (!storedFileUrl) {
-        throw new Error('Uploaded Convex file was not found.');
-      }
-
-      if (args.previewStorageId) {
-        const storedPreviewUrl = await ctx.storage.getUrl(args.previewStorageId);
-
-        if (!storedPreviewUrl) {
-          throw new Error('Uploaded Convex preview file was not found.');
-        }
-      }
-    } else {
-      const pendingStorage = completeContext.pendingStorage;
-
-      if (!pendingStorage || pendingStorage.provider !== 's3') {
-        throw new Error('Completed upload is missing its S3 storage reference.');
-      }
-
-      if (args.objectKey && args.objectKey !== pendingStorage.objectKey) {
-        throw new Error('Completed upload object key does not match the prepared target.');
-      }
-
-      const verifiedOriginal = await verifyS3ObjectExists({
-        storage: pendingStorage,
+      await ctx.runMutation(internal.uploads.markFailed, {
+        uploadId: args.uploadId,
+        failureReason,
       });
-      serverObservedSizeBytes = verifiedOriginal.sizeBytes;
+      throw new Error(failureReason);
+    };
 
-      if (args.previewObjectKey) {
-        const previewPendingStorage = completeContext.previewPendingStorage;
+    if (
+      completeContext.declaredSizeBytes !== undefined &&
+      verifiedOriginal.sizeBytes !== completeContext.declaredSizeBytes
+    ) {
+      await rejectSizeMismatch(
+        'Uploaded file size does not match the declared upload size.',
+      );
+    }
 
-        if (!previewPendingStorage || previewPendingStorage.provider !== 's3') {
-          throw new Error('Completed upload is missing its S3 preview storage reference.');
-        }
+    if (args.previewObjectKey) {
+      const previewPendingStorage = completeContext.previewPendingStorage;
 
-        if (args.previewObjectKey !== previewPendingStorage.objectKey) {
-          throw new Error('Completed preview object key does not match the prepared target.');
-        }
+      if (!previewPendingStorage || previewPendingStorage.provider !== 's3') {
+        throw new Error('Completed upload is missing its S3 preview storage reference.');
+      }
 
-        await verifyS3ObjectExists({
-          storage: previewPendingStorage,
-        });
+      if (args.previewObjectKey !== previewPendingStorage.objectKey) {
+        throw new Error('Completed preview object key does not match the prepared target.');
+      }
+
+      const verifiedPreview = await verifyS3ObjectExists({
+        storage: previewPendingStorage,
+      });
+
+      if (
+        completeContext.declaredPreviewSizeBytes !== undefined &&
+        verifiedPreview.sizeBytes !== completeContext.declaredPreviewSizeBytes
+      ) {
+        await rejectSizeMismatch(
+          'Uploaded preview size does not match the declared preview size.',
+        );
       }
     }
 
     const policy = getDeploymentPolicyFromEnv();
     const mediaUploadsDelta = completeContext.hasAsset ? 0 : 1;
-    const completedSizeBytes =
-      completeContext.providerKind === 's3' ? serverObservedSizeBytes : args.sizeBytes;
+    // The server-observed S3 size is authoritative for billing and metadata.
+    const completedSizeBytes = verifiedOriginal.sizeBytes;
     const storageBytesDelta = (completedSizeBytes ?? 0) - completeContext.existingAssetSizeBytes;
     const chargedUsage = {
       mediaUploads: 0,
@@ -773,11 +872,20 @@ export const complete = action({
         }
 
         if (storageBytesDelta > 0) {
+          // The cap is enforced atomically inside the usage mutation, closing
+          // the race where parallel completions each passed the createTarget
+          // pre-check while under quota.
+          const storageCap = await resolveOwnerStorageCap(
+            ctx,
+            completeContext.billingOwner._id,
+          );
+
           await trackCloudOwnerUsage(ctx, {
             owner: completeContext.billingOwner,
             entityId: completeContext.circleId,
             featureId: BILLING_FEATURE_IDS.storageBytes,
             value: storageBytesDelta,
+            ...(storageCap !== null ? { maxStorageBytes: storageCap } : {}),
             properties: {
               uploadId: args.uploadId,
               circleId: completeContext.circleId,
@@ -801,15 +909,14 @@ export const complete = action({
     try {
       finalized = await ctx.runMutation(internal.uploads.finalizeComplete, {
         uploadId: args.uploadId,
-        ...(args.storageId ? { storageId: args.storageId } : {}),
-        ...(args.previewStorageId ? { previewStorageId: args.previewStorageId } : {}),
         ...(args.previewObjectKey ? { previewObjectKey: args.previewObjectKey } : {}),
         ...(args.fileName !== undefined ? { fileName: args.fileName } : {}),
-        ...(completedSizeBytes !== undefined ? { sizeBytes: completedSizeBytes } : {}),
+        sizeBytes: completedSizeBytes,
         ...(args.width !== undefined ? { width: args.width } : {}),
         ...(args.height !== undefined ? { height: args.height } : {}),
         ...(args.durationSeconds !== undefined ? { durationSeconds: args.durationSeconds } : {}),
         ...(args.capturedAt !== undefined ? { capturedAt: args.capturedAt } : {}),
+        ...(args.encryption !== undefined ? { encryption: args.encryption } : {}),
         ...(args.location !== undefined ? { location: args.location } : {}),
       });
     } catch (error) {
@@ -842,6 +949,9 @@ export const complete = action({
   },
 });
 
+// Mirrors the schema union: discard reads rows written before the S3
+// migration, so the legacy member stays until legacyStorage.migrateBatch has
+// drained all 'convex-files' rows (see convex/legacyStorage.ts).
 const storageReferenceValidator = v.union(
   v.object({
     provider: v.literal('convex-files'),

@@ -37,9 +37,10 @@ const config: ExpoConfig = {
   name: 'beisammen',
   slug: 'beisammen-mobile',
   version: '1.0',
-  // Fingerprint of the native project decides OTA compatibility: JS-only
-  // changes ship via `eas update`, native changes force a new store build.
-  runtimeVersion: { policy: 'fingerprint' },
+  // Keep production OTA updates scoped to the native app version. Expo
+  // recommends this stable policy for EAS Update; fingerprint runtimes are
+  // still experimental and can differ between local and clean EAS installs.
+  runtimeVersion: { policy: 'appVersion' },
   ...(easProjectId
     ? { updates: { url: `https://u.expo.dev/${easProjectId}` } }
     : {}),
@@ -107,6 +108,12 @@ const config: ExpoConfig = {
     'expo-status-bar',
     'expo-video',
     'expo-web-browser',
+    'react-native-libsodium',
+    // Narrow Android cleartext exemption for the loopback video proxy
+    // (release builds); iOS already allows localhost via
+    // NSAllowsLocalNetworking. react-native-tcp-socket itself autolinks and
+    // needs no plugin.
+    './plugins/with-localhost-cleartext.js',
     [
       'expo-location',
       {

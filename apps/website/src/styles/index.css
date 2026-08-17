@@ -8,7 +8,6 @@
 
 @theme {
   --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-serif: "Instrument Serif", "New York", Georgia, "Times New Roman", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-paper: #f7f4ee;
@@ -169,15 +168,6 @@
 
   .cn-font-heading {
     font-family: var(--font-heading);
-  }
-
-  /* The spinner-check badge sits on the cream waitlist button — tint the
-     recipe's track/arc toward ink so they stay visible there. */
-  .cn-button .t-check-ring {
-    border-color: rgb(15 14 12 / 0.18);
-  }
-  .cn-button .t-check-arc {
-    border-top-color: var(--color-ink);
   }
 }
 

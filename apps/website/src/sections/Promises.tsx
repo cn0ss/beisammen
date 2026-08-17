@@ -11,8 +11,7 @@ export function Promises({ locale }: { locale: Locale }) {
         <Reveal>
           <Eyebrow>{t.promises.eyebrow}</Eyebrow>
           <h2 className="mt-5 max-w-[30ch] text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            {t.promises.titlePlain}{' '}
-            <em className="font-serif font-normal text-ember italic">{t.promises.titleItalic}</em>
+            {t.promises.title}
           </h2>
         </Reveal>
 

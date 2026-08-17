@@ -30,6 +30,7 @@ import { api } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { MemoryMapExplorer } from '@/features/memories/MemoryMapExplorer';
 import { MemoryTile } from '@/features/memories/MemoryTile';
+import { useLocatedMemoryItems } from '@/features/memories/use-located-memory-items';
 import {
   buildMemoryMonthSections,
   buildMemoryViewerHref,
@@ -254,14 +255,16 @@ export default function MemoriesScreen() {
       : 'skip',
     { initialNumItems: 48 },
   );
-  const locatedItems = useQuery(
-    api.memories.locatedForViewer,
-    hasViewer && mode === 'places'
-      ? selectedCircleId
-        ? { circleId: selectedCircleId }
-        : {}
-      : 'skip',
-  );
+  // Client-side aggregation: encrypted assets only reveal their GPS after the
+  // sealed metadata is decrypted locally, so the map cannot be served from a
+  // plaintext server query.
+  const located = useLocatedMemoryItems({
+    circleId: selectedCircleId,
+    enabled: hasViewer && mode === 'places',
+  });
+  // undefined keeps the explorer's loading state until the first items land.
+  const locatedItems =
+    located.status === 'loading' && located.items.length === 0 ? undefined : located.items;
   const memories = hasViewer && mode === 'timeline' ? memoriesPage.results : [];
   const sections = useMemo(() => buildMemoryMonthSections(memories, locale), [locale, memories]);
   const isLoadingFirstPage = hasViewer && memoriesPage.status === 'LoadingFirstPage';

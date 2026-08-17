@@ -131,15 +131,27 @@ async function presignRequest(input: {
 export async function createS3UploadTarget(input: {
   storage: S3StorageReference;
   mimeType: string;
+  /**
+   * Exact declared byte size of the upload. Signed into the presigned PUT as
+   * `content-length`, so the storage provider rejects any PUT whose size
+   * differs from the declaration (SigV4 signature mismatch).
+   */
+  sizeBytes: number;
 }): Promise<UploadTarget> {
+  if (!Number.isInteger(input.sizeBytes) || input.sizeBytes <= 0) {
+    throw new Error('Upload targets require a positive declared size.');
+  }
+
+  const signedHeaders = {
+    'content-length': String(input.sizeBytes),
+    'content-type': input.mimeType,
+  };
   const target = await presignRequest({
     url: buildS3Url(input.storage),
     region: getS3Region(input.storage),
     method: 'PUT',
     expiresInSeconds: 15 * 60,
-    extraHeaders: {
-      'content-type': input.mimeType,
-    },
+    extraHeaders: signedHeaders,
   });
 
   return {
@@ -148,9 +160,7 @@ export async function createS3UploadTarget(input: {
     uploadUrl: target.url,
     objectKey: input.storage.objectKey,
     expiresAt: target.expiresAt,
-    headers: {
-      'content-type': input.mimeType,
-    },
+    headers: signedHeaders,
   };
 }
 

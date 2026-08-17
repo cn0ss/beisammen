@@ -132,6 +132,7 @@ export const Composer = memo(function Composer({
             <AssetThumbnail
               key={asset._id}
               asset={asset}
+              circleId={draft.circleId}
               onRemove={() => onDeleteAsset(asset._id)}
             />
           ))}

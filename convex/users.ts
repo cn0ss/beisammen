@@ -3,16 +3,20 @@ import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
-import { createS3ReadUrl, createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
+import {
+  createS3ReadUrl,
+  createS3UploadTarget,
+  deleteS3Object,
+  verifyS3ObjectExists,
+} from './lib/storage/s3';
 import {
   buildImageUploadObjectKey,
   buildS3StorageReference,
-  deleteStorageReference,
   getCurrentInstanceStorage,
   requireS3StorageProvider,
-  resolveConvexReadUrl,
-  storageReferenceKey,
 } from './lib/storage/shared';
+import { assertValidDeclaredImageSize } from './lib/uploadLimits';
 import { requireViewer } from './lib/viewer';
 
 export const userFunctionSurface = [
@@ -46,11 +50,13 @@ interface PreparedProfileImageUpload {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
   mimeType: string;
+  sizeBytes: number;
 }
 
 interface ProfileImageCompleteContext {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
+  declaredSizeBytes?: number;
 }
 
 export const viewer = query({
@@ -176,12 +182,14 @@ export const prepareProfileImageUpload = internalMutation({
   args: {
     mimeType: v.string(),
     fileName: v.string(),
+    sizeBytes: v.number(),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
     const storageMode = getCurrentInstanceStorage();
 
     requireS3StorageProvider(storageMode.providerKind);
+    assertValidDeclaredImageSize(args.sizeBytes);
 
     const uploadId = await ctx.db.insert('imageUploads', {
       targetKind: 'user-profile',
@@ -189,6 +197,9 @@ export const prepareProfileImageUpload = internalMutation({
       providerKind: storageMode.providerKind,
       fileName: args.fileName.trim(),
       mimeType: args.mimeType.trim(),
+      // Declared byte size, enforced by signing content-length into the
+      // presigned PUT and re-checked against the S3 HEAD at completion.
+      sizeBytes: args.sizeBytes,
       status: 'uploading',
       createdAt: Date.now(),
     });
@@ -210,6 +221,7 @@ export const prepareProfileImageUpload = internalMutation({
       uploadId,
       pendingStorage,
       mimeType: args.mimeType.trim(),
+      sizeBytes: args.sizeBytes,
     };
   },
 });
@@ -268,6 +280,7 @@ export const getProfileImageCompleteContext = internalQuery({
     return {
       uploadId: upload._id,
       pendingStorage: upload.pendingStorage,
+      declaredSizeBytes: upload.sizeBytes,
       previousSizeBytes: viewer.profileImageSizeBytes ?? 0,
     };
   },
@@ -276,20 +289,14 @@ export const getProfileImageCompleteContext = internalQuery({
 export const finalizeProfileImageUpload = internalMutation({
   args: {
     uploadId: v.id('imageUploads'),
-    storage: v.union(
-      v.object({
-        provider: v.literal('convex-files'),
-        storageId: v.id('_storage'),
-      }),
-      v.object({
-        provider: v.literal('s3'),
-        objectKey: v.string(),
-        bucket: v.string(),
-        region: v.optional(v.string()),
-        endpoint: v.optional(v.string()),
-        basePath: v.optional(v.string()),
-      }),
-    ),
+    storage: v.object({
+      provider: v.literal('s3'),
+      objectKey: v.string(),
+      bucket: v.string(),
+      region: v.optional(v.string()),
+      endpoint: v.optional(v.string()),
+      basePath: v.optional(v.string()),
+    }),
     sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -401,10 +408,13 @@ export const createProfileImageTarget = action({
   args: {
     mimeType: v.string(),
     fileName: v.string(),
+    sizeBytes: v.number(),
   },
   handler: async (ctx, args) => {
     // Profile images are deliberately exempt from cloud billing: one small,
     // client-compressed file per user, always allowed regardless of plan.
+    // The declared size is still validated and signed into the PUT so the
+    // presigned URL cannot be used to store an arbitrarily large object.
     await ctx.runQuery(internal.users.authorizeProfileImageUpload, {});
 
     const prepared: PreparedProfileImageUpload = await ctx.runMutation(
@@ -421,6 +431,7 @@ export const createProfileImageTarget = action({
       target: await createS3UploadTarget({
         storage: prepared.pendingStorage,
         mimeType: prepared.mimeType,
+        sizeBytes: prepared.sizeBytes,
       }),
     };
   },
@@ -430,7 +441,6 @@ export const completeProfileImageUpload = action({
   args: {
     uploadId: v.id('imageUploads'),
     objectKey: v.optional(v.string()),
-    storageId: v.optional(v.id('_storage')),
     sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -451,9 +461,19 @@ export const completeProfileImageUpload = action({
         throw new Error('Completed profile image object key does not match the prepared target.');
       }
 
-      await verifyS3ObjectExists({
+      const verified = await verifyS3ObjectExists({
         storage: completeContext.pendingStorage,
       });
+
+      // Belt and suspenders: the signed content-length already pins the PUT
+      // to the declared size. On a mismatch, drop the object and fail.
+      if (
+        completeContext.declaredSizeBytes !== undefined &&
+        verified.sizeBytes !== completeContext.declaredSizeBytes
+      ) {
+        await deleteS3Object({ storage: completeContext.pendingStorage });
+        throw new Error('Uploaded profile image size does not match the declared size.');
+      }
 
       const finalized: {
         previousStorage: Doc<'users'>['profileImageStorage'] | null;
@@ -462,7 +482,8 @@ export const completeProfileImageUpload = action({
       } = await ctx.runMutation(internal.users.finalizeProfileImageUpload, {
         uploadId: args.uploadId,
         storage: completeContext.pendingStorage,
-        ...(args.sizeBytes !== undefined ? { sizeBytes: args.sizeBytes } : {}),
+        // The server-observed size is authoritative.
+        sizeBytes: verified.sizeBytes,
       });
 
       if (
@@ -528,8 +549,10 @@ export const getProfileImageReadUrl = action({
       };
     }
 
-    if (context.storage.provider === 'convex-files') {
-      return await resolveConvexReadUrl(ctx, context.storage.storageId);
+    // The convex-files read path is gone. Remaining legacy rows must be moved
+    // to S3 first via `npx convex run legacyStorage:migrateBatch`.
+    if (context.storage.provider !== 's3') {
+      throw new Error('Legacy media must be migrated to S3.');
     }
 
     return await createS3ReadUrl({

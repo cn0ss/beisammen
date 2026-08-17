@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { DeleteAccountPage } from '@/pages/DeleteAccountPage';
 import { LandingPage } from '@/pages/LandingPage';
 import { PrivacyPage } from '@/pages/PrivacyPage';
-import { SharePage } from '@/pages/SharePage';
 
 /** Scrolls to the hash target after SPA navigations, or back to the top. */
 function ScrollManager() {
@@ -26,7 +25,7 @@ function ScrollManager() {
   return null;
 }
 
-/** Redirect that keeps the current search and hash (e.g. /de/#access → /#access). */
+/** Redirect that keeps the current search and hash (e.g. /de/#download → /#download). */
 function LegacyRedirect({ to }: { to: string }) {
   const location = useLocation();
   return (
@@ -45,7 +44,6 @@ export default function App() {
         <Route path="/en/privacy" element={<PrivacyPage locale="en" />} />
         <Route path="/delete-account" element={<DeleteAccountPage locale="de" />} />
         <Route path="/en/delete-account" element={<DeleteAccountPage locale="en" />} />
-        <Route path="/share" element={<SharePage />} />
         {/* The old Astro site advertised /de/ in hreflang links — keep it working. */}
         <Route path="/de" element={<LegacyRedirect to="/" />} />
         <Route path="/de/privacy" element={<LegacyRedirect to="/privacy" />} />

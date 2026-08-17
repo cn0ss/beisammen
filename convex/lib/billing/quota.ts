@@ -140,6 +140,32 @@ export async function resolveOwnerPlanTier(
   return null;
 }
 
+/**
+ * Resolves the hard storage cap to enforce when charging storage usage.
+ * Returns `null` when billing is not configured (nothing to enforce — cloud
+ * target creation already refuses uploads in that state). Throws when the
+ * owner no longer has an active plan at charge time.
+ */
+export async function resolveOwnerStorageCap(
+  ctx: RunQueryCtx,
+  ownerId: Id<'users'>,
+): Promise<number | null> {
+  if (!isBillingConfigured()) {
+    return null;
+  }
+
+  const tier = await resolveOwnerPlanTier(ctx, ownerId);
+
+  if (!tier) {
+    throw new CloudOwnerFeatureAccessError(
+      'not_allowed',
+      'An active cloud plan is required for this usage.',
+    );
+  }
+
+  return CLOUD_PLAN_QUOTAS[tier].storageBytes;
+}
+
 async function getOwnerUsage(ctx: RunQueryCtx, ownerId: Id<'users'>): Promise<OwnerUsage> {
   return await ctx.runQuery(internal.billingUsage.getUsageForOwner, { ownerId });
 }
@@ -223,6 +249,7 @@ async function trackOwnerUsage(
     ownerId: Id<'users'>;
     featureId: string;
     value: number;
+    maxStorageBytes?: number;
   },
 ): Promise<void> {
   if (input.value === 0) {
@@ -234,6 +261,9 @@ async function trackOwnerUsage(
     {
       ownerId: input.ownerId,
       ...usageDeltasForFeature(input.featureId, input.value),
+      ...(input.maxStorageBytes !== undefined
+        ? { maxStorageBytes: input.maxStorageBytes }
+        : {}),
     },
   );
 }
@@ -262,6 +292,11 @@ export async function trackCloudOwnerUsage(
     entityId: string;
     featureId: string;
     value: number;
+    /**
+     * Hard cap enforced atomically inside the usage mutation for positive
+     * storage charges. Pass the owner's plan storage quota at charge time.
+     */
+    maxStorageBytes?: number;
     properties?: Record<string, unknown>;
   },
 ): Promise<void> {
@@ -269,6 +304,9 @@ export async function trackCloudOwnerUsage(
     ownerId: input.owner._id,
     featureId: input.featureId,
     value: input.value,
+    ...(input.maxStorageBytes !== undefined
+      ? { maxStorageBytes: input.maxStorageBytes }
+      : {}),
   });
 }
 

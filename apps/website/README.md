@@ -33,9 +33,7 @@ command above. SPA fallback and trailing-slash handling live in
 - `PUBLIC_INSTANCE_BASE_URL` must point at the backend base URL that serves Convex HTTP actions.
   The production value is committed in `.env.production` (it is public and baked into the bundle);
   Vite picks it up automatically during `pnpm build`.
-- `PUBLIC_WEB_BASE_URL` should point at this web frontend. Convex uses it when creating public circle links.
 - The waitlist form submits to `${PUBLIC_INSTANCE_BASE_URL}/waitlist/join` (the backend expects `source=landing`).
-- The public circle viewer loads from `/share/#<token>` and fetches media through `${PUBLIC_INSTANCE_BASE_URL}/public/share/preview`.
 
 ## Routing model
 
@@ -50,7 +48,6 @@ assets.
 | `/en/`               | English landing page |
 | `/privacy/`, `/en/privacy/` | Privacy policy |
 | `/delete-account/`, `/en/delete-account/` | Account deletion instructions |
-| `/share/`            | No-install public viewer for revocable circle links (German) |
 
 Manual language switcher clicks write `beisammen:lang` to `localStorage`, so an
 override is remembered on future visits to `/`.

@@ -12,7 +12,7 @@ import {
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ShareFeedItem } from '@/features/convex/api';
-import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
+import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
 import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
@@ -141,9 +141,10 @@ export const FeedCard = memo(function FeedCard({
   const theme = useTheme();
   const gt = useGT();
   const heroAsset = share.heroAsset;
-  const heroUrl = useSignedAssetUrl(
-    heroAsset && (heroAsset.kind === 'image' || heroAsset.previewStorage) ? heroAsset._id : null,
+  const heroUrl = useAssetMediaUri(
+    heroAsset && (heroAsset.kind === 'image' || heroAsset.previewStorage) ? heroAsset : null,
     'preview',
+    share.circleId,
   );
   const hasMultipleAssets = share.assetCount > 1;
   const monthShortFormat = useDateFormat(MONTH_SHORT_OPTIONS);

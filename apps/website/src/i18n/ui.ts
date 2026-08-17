@@ -28,15 +28,13 @@ type Dictionary = {
     why: string;
     circles: string;
     promises: string;
-    waitlist: string;
+    download: string;
     cta: string;
     menuLabel: string;
   };
   hero: {
     eyebrow: string;
-    titlePlain: string;
-    titleItalic: string;
-    titleEnd: string;
+    title: string;
     lede: string;
     primaryCta: string;
     secondaryCta: string;
@@ -45,14 +43,12 @@ type Dictionary = {
   };
   manifesto: {
     eyebrow: string;
-    titlePlain: string;
-    titleItalic: string;
+    title: string;
     body: string;
   };
   moments: {
     eyebrow: string;
-    titlePlain: string;
-    titleItalic: string;
+    title: string;
     body: string;
     tablistLabel: string;
     hint: string;
@@ -62,25 +58,16 @@ type Dictionary = {
   };
   promises: {
     eyebrow: string;
-    titlePlain: string;
-    titleItalic: string;
+    title: string;
     items: Array<{ title: string; body: string; linkLabel?: string }>;
   };
-  waitlist: {
+  download: {
     eyebrow: string;
-    titlePlain: string;
-    titleItalic: string;
+    title: string;
     body: string;
-    emailPlaceholder: string;
-    emailLabel: string;
-    primary: string;
-    pending: string;
-    statusDone: string;
-    footnote: string;
-    success: string;
-    duplicate: string;
-    error: string;
-    configError: string;
+    appStore: string;
+    playStore: string;
+    note: string;
   };
   footer: {
     tagline: string;
@@ -95,50 +82,46 @@ export const dict: Record<Locale, Dictionary> = {
   en: {
     htmlLang: 'en',
     meta: {
-      title: 'beisammen — a quieter place for your closest photos',
+      title: 'beisammen · a quieter place for your closest photos',
       description:
-        'Private photo circles for partners, families, and close friends. No feed, no followers, no algorithm.',
+        'Private photo circles for partners, families, and close friends. End-to-end encrypted. No feed, no followers, no algorithm.',
     },
     masthead: {
-      availability: 'Private beta · 2026',
+      availability: 'Out now',
     },
     nav: {
       why: 'Why',
       circles: 'Circles',
       promises: 'Promises',
-      waitlist: 'Access',
-      cta: 'Request access',
+      download: 'Download',
+      cta: 'Get the app',
       menuLabel: 'Open menu',
     },
     hero: {
       eyebrow: 'Private photo circles',
-      titlePlain: 'Photos for',
-      titleItalic: 'your people,',
-      titleEnd: 'no one else.',
+      title: 'Photos for your people, no one else.',
       lede:
-        'No feed. No followers. No algorithm. Just the photos you take together — with the people who count.',
-      primaryCta: 'Request early access',
+        'No feed. No followers. No algorithm. Just the photos you take together, for the people who count.',
+      primaryCta: 'Get the app',
       secondaryCta: 'How it works',
       metaItems: [
         'Invite-only circles',
-        'Ready in a minute',
+        'End-to-end encrypted',
         'Your photos stay yours',
       ],
       imageAlt: 'Wide alpine meadow in soft morning light',
     },
     manifesto: {
       eyebrow: 'Why beisammen exists',
-      titlePlain: 'Some moments don’t belong',
-      titleItalic: 'on the internet.',
+      title: 'Some moments don’t belong on the internet.',
       body:
-        'They belong to the people who were there. beisammen is a small, private place for exactly those moments — no feed, no strangers, no stage.',
+        'They belong to the people who were there. beisammen is a small, private place for exactly those moments. No feed, no strangers, no stage.',
     },
     moments: {
       eyebrow: 'Circles',
-      titlePlain: 'A circle is',
-      titleItalic: 'your place.',
+      title: 'A circle is your place.',
       body:
-        'Create a circle for the people who belong together. What you share there is seen by them — and no one else.',
+        'Create a circle for the people who belong together. What you share there is seen by them and no one else.',
       tablistLabel: 'Choose a circle',
       hint: 'Tap the photo to open it',
       photoOpenLabel: 'Open photo',
@@ -193,44 +176,35 @@ export const dict: Record<Locale, Dictionary> = {
     },
     promises: {
       eyebrow: 'Promises',
-      titlePlain: 'Four promises,',
-      titleItalic: 'kept by design.',
+      title: 'Four promises, kept by design.',
       items: [
         {
           title: 'Invite-only',
-          body: 'Every circle starts empty. You decide who joins — nobody else, ever.',
+          body: 'Every circle starts empty. You decide who joins. Nobody else, ever.',
         },
         {
           title: 'No algorithm',
           body: 'Your photos appear in the order life happened. Nothing is ranked, nothing is recommended.',
         },
         {
-          title: 'Safe in the cloud',
-          body: 'Encrypted in transit and in storage, backed up automatically. Sign in and start — that is all it takes.',
+          title: 'End-to-end encrypted',
+          body: 'Your photos are encrypted on your phone before they are uploaded, and backed up automatically. Only your circle can open them. Not the cloud, not us.',
         },
         {
           title: 'Built in the open',
-          body: 'The source code is public. Read how it treats your photos — or run beisammen entirely yourself.',
+          body: 'The source code is public. Read how it treats your photos, or run beisammen entirely yourself.',
           linkLabel: 'View the source',
         },
       ],
     },
-    waitlist: {
-      eyebrow: 'Access',
-      titlePlain: 'We’re saving you',
-      titleItalic: 'a seat.',
+    download: {
+      eyebrow: 'Download',
+      title: 'Get beisammen.',
       body:
-        'beisammen opens in small rounds. Leave your email and we will let you know the moment it is your turn.',
-      emailPlaceholder: 'you@quiet.place',
-      emailLabel: 'Email',
-      primary: 'Request access',
-      pending: 'Sending…',
-      statusDone: 'Done',
-      footnote: 'No newsletter. Just one email when it is time.',
-      success: 'You are on the list — see you soon.',
-      duplicate: 'You are already on the list. We have not forgotten.',
-      error: 'Something went sideways. Try once more?',
-      configError: 'The waitlist is not configured yet.',
+        'beisammen is now open to everyone. Download the app, create your first circle, and share tonight with your people.',
+      appStore: 'Download on the App Store',
+      playStore: 'Get it on Google Play',
+      note: 'Free for iPhone and Android.',
     },
     footer: {
       tagline: 'For the ones who count.',
@@ -243,50 +217,46 @@ export const dict: Record<Locale, Dictionary> = {
   de: {
     htmlLang: 'de',
     meta: {
-      title: 'beisammen — ein leiserer Ort für eure Fotos',
+      title: 'beisammen · ein leiserer Ort für eure Fotos',
       description:
-        'Private Fotokreise für Partner, Familie und enge Freunde. Kein Feed, keine Follower, kein Algorithmus.',
+        'Private Fotokreise für Partner, Familie und enge Freunde. Ende-zu-Ende-verschlüsselt. Kein Feed, keine Follower, kein Algorithmus.',
     },
     masthead: {
-      availability: 'Private Beta · 2026',
+      availability: 'Jetzt erhältlich',
     },
     nav: {
       why: 'Warum',
       circles: 'Kreise',
       promises: 'Versprechen',
-      waitlist: 'Zugang',
-      cta: 'Zugang anfragen',
+      download: 'Download',
+      cta: 'App laden',
       menuLabel: 'Menü öffnen',
     },
     hero: {
       eyebrow: 'Private Fotokreise',
-      titlePlain: 'Fotos für',
-      titleItalic: 'deine Menschen,',
-      titleEnd: 'sonst niemand.',
+      title: 'Fotos für deine Menschen, sonst niemand.',
       lede:
-        'Kein Feed. Keine Follower. Kein Algorithmus. Nur die Fotos, die ihr zusammen macht — mit den Menschen, die zählen.',
-      primaryCta: 'Früher Zugang',
+        'Kein Feed. Keine Follower. Kein Algorithmus. Nur die Fotos, die ihr zusammen macht. Für die Menschen, die zählen.',
+      primaryCta: 'App laden',
       secondaryCta: 'So funktioniert es',
       metaItems: [
         'Nur auf Einladung',
-        'In einer Minute startklar',
+        'Ende-zu-Ende-verschlüsselt',
         'Deine Fotos gehören dir',
       ],
       imageAlt: 'Weite Almwiese in weichem Morgenlicht',
     },
     manifesto: {
       eyebrow: 'Warum es beisammen gibt',
-      titlePlain: 'Manche Momente gehören',
-      titleItalic: 'nicht ins Internet.',
+      title: 'Manche Momente gehören nicht ins Internet.',
       body:
-        'Sie gehören den Menschen, die dabei waren. beisammen ist ein kleiner, privater Ort für genau diese Momente — ohne Feed, ohne Fremde, ohne Bühne.',
+        'Sie gehören den Menschen, die dabei waren. beisammen ist ein kleiner, privater Ort für genau diese Momente. Ohne Feed, ohne Fremde, ohne Bühne.',
     },
     moments: {
       eyebrow: 'Kreise',
-      titlePlain: 'Ein Kreis ist',
-      titleItalic: 'euer Ort.',
+      title: 'Ein Kreis ist euer Ort.',
       body:
-        'Erstelle einen Kreis für die Menschen, die zusammengehören. Was ihr dort teilt, sehen nur sie — sonst niemand.',
+        'Erstelle einen Kreis für die Menschen, die zusammengehören. Was ihr dort teilt, sehen nur sie. Sonst niemand.',
       tablistLabel: 'Kreis auswählen',
       hint: 'Foto antippen zum Öffnen',
       photoOpenLabel: 'Foto öffnen',
@@ -341,44 +311,35 @@ export const dict: Record<Locale, Dictionary> = {
     },
     promises: {
       eyebrow: 'Versprechen',
-      titlePlain: 'Vier Versprechen,',
-      titleItalic: 'fest eingebaut.',
+      title: 'Vier Versprechen, fest eingebaut.',
       items: [
         {
           title: 'Nur auf Einladung',
-          body: 'Jeder Kreis beginnt leer. Wer dazukommt, entscheidet ihr — niemand sonst.',
+          body: 'Jeder Kreis beginnt leer. Wer dazukommt, entscheidet ihr. Niemand sonst.',
         },
         {
           title: 'Kein Algorithmus',
           body: 'Eure Fotos erscheinen in der Reihenfolge, in der das Leben passiert ist. Nichts wird sortiert, nichts wird empfohlen.',
         },
         {
-          title: 'Sicher in der Cloud',
-          body: 'Verschlüsselt übertragen und gespeichert, automatisch gesichert. Anmelden und loslegen — mehr braucht es nicht.',
+          title: 'Ende-zu-Ende-verschlüsselt',
+          body: 'Deine Fotos werden schon auf dem Handy verschlüsselt und automatisch gesichert. Öffnen kann sie nur euer Kreis. Nicht die Cloud, nicht wir.',
         },
         {
           title: 'Offen gebaut',
-          body: 'Der Quelltext ist öffentlich. Lies nach, wie beisammen mit euren Fotos umgeht — oder betreibe es komplett selbst.',
+          body: 'Der Quelltext ist öffentlich. Lies nach, wie beisammen mit euren Fotos umgeht, oder betreibe es komplett selbst.',
           linkLabel: 'Zum Quelltext',
         },
       ],
     },
-    waitlist: {
-      eyebrow: 'Zugang',
-      titlePlain: 'Wir halten dir',
-      titleItalic: 'einen Platz frei.',
+    download: {
+      eyebrow: 'Download',
+      title: 'Hol dir beisammen.',
       body:
-        'beisammen öffnet in kleinen Runden. Trag deine E-Mail ein und wir melden uns, sobald du dran bist.',
-      emailPlaceholder: 'du@leiser.ort',
-      emailLabel: 'E-Mail',
-      primary: 'Zugang anfragen',
-      pending: 'Wird gesendet…',
-      statusDone: 'Erledigt',
-      footnote: 'Kein Newsletter. Nur eine einzige E-Mail, wenn es so weit ist.',
-      success: 'Du stehst auf der Liste — schön, dass du da bist.',
-      duplicate: 'Du stehst schon auf der Liste. Wir haben dich nicht vergessen.',
-      error: 'Da ist etwas schiefgegangen. Noch einmal versuchen?',
-      configError: 'Die Warteliste ist noch nicht konfiguriert.',
+        'beisammen ist jetzt für alle da. Lade die App, erstelle deinen ersten Kreis und teile den heutigen Abend mit deinen Menschen.',
+      appStore: 'Im App Store laden',
+      playStore: 'Bei Google Play laden',
+      note: 'Kostenlos für iPhone und Android.',
     },
     footer: {
       tagline: 'Für die, die zählen.',
@@ -391,6 +352,8 @@ export const dict: Record<Locale, Dictionary> = {
 };
 
 export const repoUrl = 'https://github.com/cn0ss/beisammen';
+export const appStoreUrl = 'https://apps.apple.com/app/id6762514050';
+export const playStoreUrl = 'https://play.google.com/store/apps/details?id=app.beisammen.app';
 export const licenseUrl = `${repoUrl}/blob/main/docs/licensing.md`;
 
 export function localePath(locale: Locale, path: '' | 'privacy' | 'delete-account'): string {

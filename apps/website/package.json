@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/prerender-heads.mjs",
+    "build": "vite build && node scripts/prerender-heads.mjs && node scripts/generate-agent-md.mts",
     "preview": "vite preview",
     "deploy": "pnpm build && wrangler deploy",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json"

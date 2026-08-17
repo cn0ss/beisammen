@@ -8,8 +8,7 @@ type PolicyShellProps = {
   locale: Locale;
   page: 'privacy' | 'delete-account';
   eyebrow: string;
-  titlePlain: string;
-  titleItalic: string;
+  title: string;
   lede: string;
   meta?: string;
   backHref: string;
@@ -21,8 +20,7 @@ export function PolicyShell({
   locale,
   page,
   eyebrow,
-  titlePlain,
-  titleItalic,
+  title,
   lede,
   meta,
   backHref,
@@ -37,8 +35,7 @@ export function PolicyShell({
           <header className="flex flex-col gap-4">
             <Eyebrow>{eyebrow}</Eyebrow>
             <h1 className="max-w-[20ch] text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
-              {titlePlain}{' '}
-              <em className="font-serif font-normal text-ember italic">{titleItalic}</em>
+              {title}
             </h1>
             <p className="max-w-[48ch] text-lg/8 text-pretty text-ink/70">{lede}</p>
             {meta && (

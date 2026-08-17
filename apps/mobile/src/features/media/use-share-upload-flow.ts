@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAction, useMutation } from 'convex/react';
 
 import {
-  assertUploadBatchWithinBetaLimits,
   enqueue,
   initialUploadQueueState,
   markUploadStatus,
@@ -13,6 +12,7 @@ import {
   patchUploadQueueItem,
   removeUploadQueueItems,
   uploadQueueItemToPreparedAsset,
+  type UploadEncryptionEnvelope,
   type UploadQueueItem,
   type UploadQueueState,
 } from '@beisammen/upload-client';
@@ -20,28 +20,32 @@ import {
 import type { CircleListItem, ShareDraftRecord } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import type { CircleKeysState } from '@/features/crypto/use-circle-keys';
 import { recordClientDiagnostic } from '@/features/diagnostics/buffer';
 import { createLogger } from '@/lib/logger';
 
 import {
   assetKind,
-  createCompressedPreview,
   fileNameFromPickerAsset,
   formatMediaLocation,
+  getFileSize,
   mimeTypeForPickerAsset,
   optimizePickerAsset,
   resolvePickerAssetMetadata,
+  resolveUploadPreview,
   uploadPreparedFile,
   type PreparedUploadAsset,
 } from './client';
+import { assertPreparedAssetAllowed } from './upload-policy';
 import {
-  assertPreparedAssetAllowedForDeployment,
-  isCloudDeployment,
-  mediaSelectionLimitForDeployment,
-} from './upload-policy';
+  encryptedCompletionFields,
+  genericUploadFileName,
+  resolveUploadEncryption,
+} from './upload-encryption';
 import {
   cacheUploadRecoveryFile,
   clearUploadRecoveryItemFiles,
+  prepareUploadEncryptionTargets,
   uploadRecoveryStore,
 } from './upload-recovery-runtime';
 
@@ -64,14 +68,15 @@ function isUploadAlreadyCompletedError(error: unknown): boolean {
 interface UseShareUploadFlowArgs {
   selectedCircle: CircleListItem | null;
   activeDraft?: ShareDraftRecord | null;
-  existingDraftAssetCount: number;
+  /** Circle key state for the selected circle; uploads encrypt with it. */
+  circleKeys: CircleKeysState;
   onFeedback: (message: string | null) => void;
 }
 
 export function useShareUploadFlow({
   activeDraft,
   selectedCircle,
-  existingDraftAssetCount,
+  circleKeys,
   onFeedback,
 }: UseShareUploadFlowArgs) {
   const gt = useGT();
@@ -87,8 +92,6 @@ export function useShareUploadFlow({
   const [uploadQueue, setUploadQueue] =
     useState<UploadQueueState<ImagePicker.ImagePickerAsset>>(initialUploadQueueState);
   const [isUploading, setIsUploading] = useState(false);
-  const deploymentKind = instance.deployment.kind;
-  const isCloud = isCloudDeployment(deploymentKind);
   const hydratedDraftKeysRef = useRef<Set<string>>(new Set());
   const persistedShareBatchIdsRef = useRef<Set<string>>(new Set());
 
@@ -224,11 +227,82 @@ export function useShareUploadFlow({
       uploadId?: string;
       cacheUri?: string;
       previewCacheUri?: string;
+      encryptedCacheUri?: string;
+      encryptedPreviewCacheUri?: string;
+      encryption?: UploadEncryptionEnvelope;
     }) => {
-      assertPreparedAssetAllowedForDeployment({
-        deploymentKind,
-        asset: input.preparedAsset,
+      assertPreparedAssetAllowed(input.preparedAsset);
+
+      // The exact byte sizes are declared to the server and signed into the
+      // presigned PUTs, so both must be known before requesting the target.
+      const sizeBytes =
+        input.preparedAsset.sizeBytes ?? (await getFileSize(input.preparedAsset.uri));
+
+      if (sizeBytes === undefined || sizeBytes <= 0) {
+        throw new Error(gt('Die Dateigröße konnte nicht ermittelt werden.'));
+      }
+
+      // Generate (or on retry: reuse) the compressed preview before the
+      // target request. Retries must upload the identical preview file, since
+      // the server re-signs the PUT for the originally declared size.
+      const previewAsset = await resolveUploadPreview({
+        previewCacheUri: input.previewCacheUri,
+        sourceUri: input.preparedAsset.previewUri,
+        kind: input.preparedAsset.kind,
       });
+
+      if (previewAsset.sizeBytes === undefined || previewAsset.sizeBytes <= 0) {
+        throw new Error(gt('Die Vorschau konnte nicht erstellt werden.'));
+      }
+
+      const previewCacheUri = previewAsset.uri;
+
+      // Encrypt before the target request: the declared (and signed) sizes
+      // are ciphertext sizes. The ciphertext lives next to the recovery
+      // files so retries re-upload it byte-identically.
+      const encryptionTargets = await prepareUploadEncryptionTargets({
+        instanceUrl,
+        shareBatchId: input.shareBatchId,
+        queueId: input.queueId,
+      });
+
+      if (!encryptionTargets) {
+        throw new Error(gt('Für die Verschlüsselung ist kein lokaler Speicher verfügbar.'));
+      }
+
+      const encrypted = await resolveUploadEncryption({
+        circleKey:
+          circleKeys.status === 'ready'
+            ? { epoch: circleKeys.epoch, circleKey: circleKeys.circleKey }
+            : null,
+        metadata: {
+          fileName: input.preparedAsset.fileName,
+          ...(input.preparedAsset.location ? { location: input.preparedAsset.location } : {}),
+        },
+        sourceUri: input.preparedAsset.uri,
+        previewUri: previewAsset.uri,
+        encryptedTargetUri: encryptionTargets.encryptedUri,
+        encryptedPreviewTargetUri: encryptionTargets.encryptedPreviewUri,
+        persisted: {
+          ...(input.encryptedCacheUri ? { encryptedCacheUri: input.encryptedCacheUri } : {}),
+          ...(input.encryptedPreviewCacheUri
+            ? { encryptedPreviewCacheUri: input.encryptedPreviewCacheUri }
+            : {}),
+          ...(input.encryption ? { encryption: input.encryption } : {}),
+        },
+      });
+
+      setUploadQueue((state) =>
+        patchUploadQueueItem(state, input.queueId, {
+          sizeBytes: encrypted.encryptedSizeBytes,
+          previewUri: previewAsset.uri,
+          previewCacheUri: previewAsset.uri,
+          previewSizeBytes: encrypted.encryptedPreviewSizeBytes,
+          encryptedCacheUri: encrypted.encryptedUri,
+          encryptedPreviewCacheUri: encrypted.encryptedPreviewUri,
+          encryption: encrypted.envelope,
+        }),
+      );
 
       const prepared = input.uploadId
         ? await retryUpload({ uploadId: input.uploadId })
@@ -237,7 +311,14 @@ export function useShareUploadFlow({
             shareBatchId: input.shareBatchId,
             kind: input.preparedAsset.kind,
             mimeType: input.preparedAsset.mimeType,
-            fileName: input.preparedAsset.fileName,
+            // Generic name: object keys and the plaintext fileName column must
+            // not leak the original name; it lives in the encrypted metadata.
+            fileName: genericUploadFileName(
+              input.preparedAsset.fileName,
+              input.preparedAsset.kind,
+            ),
+            sizeBytes: encrypted.encryptedSizeBytes,
+            previewSizeBytes: encrypted.encryptedPreviewSizeBytes,
           });
 
       setUploadQueue((state) =>
@@ -249,67 +330,62 @@ export function useShareUploadFlow({
 
       const uploaded = await uploadPreparedFile({
         target: prepared.target,
-        asset: input.preparedAsset,
+        asset: {
+          ...input.preparedAsset,
+          uri: encrypted.encryptedUri,
+          sizeBytes: encrypted.encryptedSizeBytes,
+        },
         onProgress: (progress) => {
           setUploadQueue((state) => patchUploadProgress(state, input.queueId, progress));
         },
       });
-      let previewCacheUri = input.previewCacheUri;
       let previewUploaded: {
-        previewStorageId?: string;
         previewObjectKey?: string;
       } = {};
 
       if (prepared.previewTarget) {
-        const previewAsset = await createCompressedPreview({
-          uri: input.preparedAsset.previewUri,
-          kind: input.preparedAsset.kind,
-        });
-
-        setUploadQueue((state) =>
-          patchUploadQueueItem(state, input.queueId, {
-            previewUri: previewAsset.uri,
-            previewCacheUri: previewAsset.uri,
-          }),
-        );
-        previewCacheUri = previewAsset.uri;
-
         const uploadedPreview = await uploadPreparedFile({
           target: prepared.previewTarget,
           asset: {
             ...input.preparedAsset,
-            uri: previewAsset.uri,
+            uri: encrypted.encryptedPreviewUri,
             mimeType: previewAsset.mimeType,
-            sizeBytes: previewAsset.sizeBytes,
+            sizeBytes: encrypted.encryptedPreviewSizeBytes,
             width: previewAsset.width ?? input.preparedAsset.width,
             height: previewAsset.height ?? input.preparedAsset.height,
           },
         });
 
         previewUploaded = {
-          ...(uploadedPreview.storageId ? { previewStorageId: uploadedPreview.storageId } : {}),
-          ...(uploadedPreview.objectKey ? { previewObjectKey: uploadedPreview.objectKey } : {}),
+          previewObjectKey: uploadedPreview.objectKey,
         };
       }
 
+      // No plaintext location: the server rejects it next to `encryption`.
+      // Name and location live in the envelope's encMetadata instead.
       await completeUpload({
         uploadId: prepared.uploadId,
-        ...(uploaded.storageId ? { storageId: uploaded.storageId } : {}),
-        ...(uploaded.objectKey ? { objectKey: uploaded.objectKey } : {}),
+        objectKey: uploaded.objectKey,
         ...previewUploaded,
-        fileName: input.preparedAsset.fileName,
-        sizeBytes: input.preparedAsset.sizeBytes,
-        width: input.preparedAsset.width,
-        height: input.preparedAsset.height,
-        durationSeconds: input.preparedAsset.durationSeconds,
-        location: input.preparedAsset.location,
-        capturedAt: input.preparedAsset.capturedAt,
+        ...encryptedCompletionFields({
+          fileName: input.preparedAsset.fileName,
+          kind: input.preparedAsset.kind,
+          encrypted,
+          asset: {
+            width: input.preparedAsset.width,
+            height: input.preparedAsset.height,
+            durationSeconds: input.preparedAsset.durationSeconds,
+            capturedAt: input.preparedAsset.capturedAt,
+          },
+        }),
       });
 
       try {
         await uploadRecoveryStore.clearItemFiles({
           cacheUri: input.cacheUri,
           previewCacheUri,
+          encryptedCacheUri: encrypted.encryptedUri,
+          encryptedPreviewCacheUri: encrypted.encryptedPreviewUri,
         });
       } catch (error) {
         // The upload is already committed at this point. Some picker-provided
@@ -322,7 +398,7 @@ export function useShareUploadFlow({
         });
       }
     },
-    [completeUpload, createTarget, deploymentKind, retryUpload],
+    [circleKeys, completeUpload, createTarget, gt, instanceUrl, retryUpload],
   );
 
   const handlePickMedia = useCallback(async () => {
@@ -342,23 +418,10 @@ export function useShareUploadFlow({
       allowsMultipleSelection: true,
       exif: true,
       quality: 1,
-      selectionLimit: mediaSelectionLimitForDeployment(deploymentKind),
+      selectionLimit: 0,
     });
 
     if (result.canceled || !result.assets.length) return;
-
-    if (isCloud) {
-      try {
-        assertUploadBatchWithinBetaLimits({
-          selectedCount: result.assets.length,
-          existingDraftAssetCount,
-          existingPendingCount: selectedQueueItems.length,
-        });
-      } catch (error) {
-        onFeedback(errorMessage(error, gt('Zu viele Medien ausgewählt.')));
-        return;
-      }
-    }
 
     onFeedback(null);
     setIsUploading(true);
@@ -433,10 +496,7 @@ export function useShareUploadFlow({
         try {
           const preparedAsset = await optimizePickerAsset(uploadAsset, resolvedLocation, capturedAt);
 
-          assertPreparedAssetAllowedForDeployment({
-            deploymentKind,
-            asset: preparedAsset,
-          });
+          assertPreparedAssetAllowed(preparedAsset);
 
           setUploadQueue((state) =>
             patchUploadQueueItem(state, queueId, {
@@ -515,15 +575,11 @@ export function useShareUploadFlow({
     }
   }, [
     getOrCreateDraft,
-    existingDraftAssetCount,
-    deploymentKind,
     gt,
     instanceUrl,
-    isCloud,
     m,
     onFeedback,
     selectedCircle,
-    selectedQueueItems.length,
     uploadPreparedAsset,
   ]);
 
@@ -550,10 +606,7 @@ export function useShareUploadFlow({
             queueItem.location,
             queueItem.capturedAt,
           );
-          assertPreparedAssetAllowedForDeployment({
-            deploymentKind,
-            asset: preparedAsset,
-          });
+          assertPreparedAssetAllowed(preparedAsset);
 
           setUploadQueue((state) =>
             patchUploadQueueItem(state, itemId, {
@@ -582,6 +635,9 @@ export function useShareUploadFlow({
           uploadId: queueItem.uploadId,
           cacheUri: queueItem.cacheUri,
           previewCacheUri: queueItem.previewCacheUri,
+          encryptedCacheUri: queueItem.encryptedCacheUri,
+          encryptedPreviewCacheUri: queueItem.encryptedPreviewCacheUri,
+          encryption: queueItem.encryption,
         });
 
         setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === itemId));
@@ -608,7 +664,7 @@ export function useShareUploadFlow({
         setIsUploading(false);
       }
     },
-    [deploymentKind, gt, onFeedback, uploadPreparedAsset, uploadQueue.items],
+    [gt, onFeedback, uploadPreparedAsset, uploadQueue.items],
   );
 
   const handleRemoveFailedUpload = useCallback(

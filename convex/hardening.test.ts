@@ -54,17 +54,59 @@ import { billingBackendKind } from './lib/billing/quota';
 import { CLOUD_PLAN_QUOTAS, currentPeriodKey } from './lib/billing/plans';
 import { buildPublicInstanceConfigFromEnv } from './lib/httpHelpers';
 import {
-  BETA_MAX_VIDEO_DURATION_SECONDS,
   DEFAULT_CLOUD_BILLING_PLANS,
   getDeploymentPolicyFromEnv,
 } from './lib/instance';
 import { notificationsFunctionSurface } from './notifications';
 import { verifyS3ObjectExists } from './lib/storage/s3';
-import { BETA_MAX_MEDIA_SELECTION_COUNT } from './lib/uploadLimits';
 import { reactionFunctionSurface } from './reactions';
 import schema from './schema';
 
 const modules = import.meta.glob(['./**/*.ts', '!./**/*.test.ts']);
+
+// Media rows created by these tests reference the fake S3 bucket below. The
+// convex-files upload path is gone, so signing credentials are provided
+// globally and network access to the fake bucket is stubbed; individual tests
+// still layer their own fetch spies on top of this stub (mockRestore returns
+// to the stub, not to real fetch).
+process.env.S3_ACCESS_KEY_ID = process.env.S3_ACCESS_KEY_ID ?? 'test-access-key';
+process.env.S3_SECRET_ACCESS_KEY = process.env.S3_SECRET_ACCESS_KEY ?? 'test-secret-key';
+
+const TEST_S3_BUCKET = 'media-bucket';
+let testS3ObjectCounter = 0;
+
+function testS3StorageReference(fileName: string): {
+  provider: 's3';
+  bucket: string;
+  objectKey: string;
+} {
+  testS3ObjectCounter += 1;
+
+  return {
+    provider: 's3',
+    bucket: TEST_S3_BUCKET,
+    objectKey: `test/${testS3ObjectCounter}/${fileName}`,
+  };
+}
+
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url =
+    typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+
+  if (!url.includes(`/${TEST_S3_BUCKET}/`)) {
+    throw new Error(`Unexpected fetch in hardening tests: ${url}`);
+  }
+
+  if (init?.method === 'DELETE') {
+    return new Response(null, { status: 204 });
+  }
+
+  return new Response(null, {
+    status: 200,
+    headers: { 'content-length': '2048' },
+  });
+}) as typeof fetch;
+
 const EXPECTED_CIRCLE_INVITE_LIST_LIMIT = 100;
 const EXPECTED_CIRCLE_MEMBER_LIST_LIMIT = 200;
 const EXPECTED_STORAGE_STATS_CIRCLE_LIMIT = 100;
@@ -706,15 +748,13 @@ async function createUploadedDraftAsset(input: {
   const draft = await input.user.mutation(api.shares.getOrCreateDraft, {
     circleId: input.circleId,
   });
-  const storageId = await input.t.run(async (ctx) => {
-    return await ctx.storage.store(new Blob(['media'], { type: mimeType }));
-  });
   const uploadId = await input.t.run(async (ctx) => {
     return await ctx.db.insert('uploads', {
       shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
       circleId: input.circleId,
       createdBy: input.viewerId,
-      providerKind: 'convex-files',
+      providerKind: 's3',
+      pendingStorage: testS3StorageReference(fileName),
       kind,
       fileName,
       mimeType,
@@ -724,7 +764,6 @@ async function createUploadedDraftAsset(input: {
   });
   const completed = await input.user.mutation(internal.uploads.finalizeComplete, {
     uploadId,
-    storageId,
     fileName,
     sizeBytes: input.sizeBytes ?? 2048,
     ...(input.capturedAt !== undefined ? { capturedAt: input.capturedAt } : {}),
@@ -1030,7 +1069,7 @@ describe('http surface', () => {
 });
 
 describe('deployment billing policy', () => {
-  test('defaults to a cloud deployment with RevenueCat billing and finite cloud limits', () => {
+  test('defaults to a cloud deployment with RevenueCat billing', () => {
     expect(getDeploymentPolicyFromEnv({})).toEqual({
       kind: 'cloud',
       isCloud: true,
@@ -1039,24 +1078,16 @@ describe('deployment billing policy', () => {
         enabled: true,
         provider: 'revenuecat',
       },
-      limits: {
-        mediaSelectionCount: BETA_MAX_MEDIA_SELECTION_COUNT,
-        videoDurationSeconds: BETA_MAX_VIDEO_DURATION_SECONDS,
-      },
     });
   });
 
-  test('self-hosted deployments disable billing and app limits', () => {
+  test('self-hosted deployments disable billing', () => {
     expect(getDeploymentPolicyFromEnv({ PUBLIC_DEPLOYMENT_KIND: 'self-hosted' })).toEqual({
       kind: 'self-hosted',
       isCloud: false,
       isSelfHosted: true,
       billing: {
         enabled: false,
-      },
-      limits: {
-        mediaSelectionCount: null,
-        videoDurationSeconds: null,
       },
     });
   });
@@ -1074,6 +1105,7 @@ describe('deployment billing policy', () => {
     expect(assetFunctionSurface).toEqual([
       'assets.getReadUrl',
       'assets.listForShareBatch',
+      'assets.listMetadataForCircle',
       'assets.deleteDraftAsset',
     ]);
   });
@@ -2280,6 +2312,7 @@ describe('circle authorization and stats', () => {
         circleId: owner.circleId,
         mimeType: 'image/jpeg',
         fileName: 'circle.jpg',
+        sizeBytes: 2048,
       }),
     ).rejects.toThrow(/update the circle image/i);
   });
@@ -2405,6 +2438,8 @@ describe('shares, uploads, and feed', () => {
       mimeType: 'image/jpeg',
       kind: 'image',
       fileName: 'photo.jpg',
+      sizeBytes: 2048,
+      previewSizeBytes: 512,
     });
 
     expect(context.billingOwner._id).toBe(owner.viewer._id);
@@ -2455,12 +2490,8 @@ describe('shares, uploads, and feed', () => {
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
     });
-    const originalStorageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['original'], { type: 'image/jpeg' }));
-    });
-    const previewStorageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['preview'], { type: 'image/jpeg' }));
-    });
+    const originalStorage = testS3StorageReference('original.jpg');
+    const previewStorage = testS3StorageReference('preview.jpg');
     const assetId = await t.run(async (ctx) => {
       return await ctx.db.insert('assets', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
@@ -2468,22 +2499,47 @@ describe('shares, uploads, and feed', () => {
         kind: 'image',
         fileName: 'photo.jpg',
         mimeType: 'image/jpeg',
-        storage: {
-          provider: 'convex-files',
-          storageId: originalStorageId,
-        },
-        previewStorage: {
-          provider: 'convex-files',
-          storageId: previewStorageId,
-        },
+        storage: originalStorage,
+        previewStorage,
         createdAt: Date.now(),
       });
     });
-    const expectedOriginalUrl = await t.run(async (ctx) => {
-      return await ctx.storage.getUrl(originalStorageId);
+
+    const originalReadUrl = await owner.user.action(api.assets.getReadUrl, {
+      assetId,
+      variant: 'original',
     });
-    const expectedPreviewUrl = await t.run(async (ctx) => {
-      return await ctx.storage.getUrl(previewStorageId);
+    const previewReadUrl = await owner.user.action(api.assets.getReadUrl, {
+      assetId,
+      variant: 'preview',
+    });
+
+    expect(originalReadUrl.url).toContain(originalStorage.objectKey);
+    expect(previewReadUrl.url).toContain(previewStorage.objectKey);
+  });
+
+  test('asset read urls reject not-yet-migrated legacy convex-files storage', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
+      circleId: owner.circleId,
+    });
+    const storageId = await t.run(async (ctx) => {
+      return await ctx.storage.store(new Blob(['legacy'], { type: 'image/jpeg' }));
+    });
+    const assetId = await t.run(async (ctx) => {
+      return await ctx.db.insert('assets', {
+        shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
+        circleId: owner.circleId,
+        kind: 'image',
+        fileName: 'legacy.jpg',
+        mimeType: 'image/jpeg',
+        storage: {
+          provider: 'convex-files',
+          storageId,
+        },
+        createdAt: Date.now(),
+      });
     });
 
     await expect(
@@ -2491,17 +2547,7 @@ describe('shares, uploads, and feed', () => {
         assetId,
         variant: 'original',
       }),
-    ).resolves.toMatchObject({
-      url: expectedOriginalUrl,
-    });
-    await expect(
-      owner.user.action(api.assets.getReadUrl, {
-        assetId,
-        variant: 'preview',
-      }),
-    ).resolves.toMatchObject({
-      url: expectedPreviewUrl,
-    });
+    ).rejects.toThrow(/Legacy media must be migrated to S3/i);
   });
 
   test('upload completion stores optional preview storage on the created asset', async () => {
@@ -2510,18 +2556,16 @@ describe('shares, uploads, and feed', () => {
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
     });
-    const originalStorageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['original'], { type: 'video/mp4' }));
-    });
-    const previewStorageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['preview'], { type: 'image/jpeg' }));
-    });
+    const pendingStorage = testS3StorageReference('clip.mp4');
+    const previewPendingStorage = testS3StorageReference('clip-preview.jpg');
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage,
+        previewPendingStorage,
         kind: 'video',
         fileName: 'clip.mp4',
         mimeType: 'video/mp4',
@@ -2532,8 +2576,7 @@ describe('shares, uploads, and feed', () => {
 
     const completed = await owner.user.mutation(internal.uploads.finalizeComplete, {
       uploadId,
-      storageId: originalStorageId,
-      previewStorageId,
+      previewObjectKey: previewPendingStorage.objectKey,
       fileName: 'clip.mp4',
       sizeBytes: 8192,
       durationSeconds: 12,
@@ -2544,14 +2587,8 @@ describe('shares, uploads, and feed', () => {
 
     expect(storedAsset).toMatchObject({
       kind: 'video',
-      storage: {
-        provider: 'convex-files',
-        storageId: originalStorageId,
-      },
-      previewStorage: {
-        provider: 'convex-files',
-        storageId: previewStorageId,
-      },
+      storage: pendingStorage,
+      previewStorage: previewPendingStorage,
     });
   });
 
@@ -2604,7 +2641,7 @@ describe('shares, uploads, and feed', () => {
     expect(readUrl.url).toEqual(expect.any(String));
   });
 
-  test('standalone asset listing is bounded to the private beta media cap', async () => {
+  test('standalone asset listing returns every draft asset up to the display bound', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
@@ -2615,7 +2652,7 @@ describe('shares, uploads, and feed', () => {
     });
 
     await t.run(async (ctx) => {
-      for (let index = 0; index < BETA_MAX_MEDIA_SELECTION_COUNT + 2; index++) {
+      for (let index = 0; index < 12; index++) {
         await ctx.db.insert('assets', {
           shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
           circleId: owner.circleId,
@@ -2635,7 +2672,7 @@ describe('shares, uploads, and feed', () => {
       shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
     });
 
-    expect(assets).toHaveLength(BETA_MAX_MEDIA_SELECTION_COUNT);
+    expect(assets).toHaveLength(12);
   });
 
   test('self-hosted standalone asset listing is bounded for large shares', async () => {
@@ -2687,15 +2724,13 @@ describe('shares, uploads, and feed', () => {
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
     });
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['photo'], { type: 'image/jpeg' }));
-    });
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('photo.jpg'),
         kind: 'image',
         fileName: 'photo.jpg',
         mimeType: 'image/jpeg',
@@ -2707,7 +2742,6 @@ describe('shares, uploads, and feed', () => {
     await expect(
       member.user.mutation(internal.uploads.finalizeComplete, {
         uploadId,
-        storageId,
         fileName: 'photo.jpg',
         sizeBytes: 2048,
       }),
@@ -2725,10 +2759,6 @@ describe('shares, uploads, and feed', () => {
       fileName: 'ready.jpg',
       sizeBytes: 1024,
     });
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['late'], { type: 'image/jpeg' }));
-    });
-
     await owner.user.mutation(api.shares.publish, {
       shareBatchId: existing.shareBatchId,
     });
@@ -2738,7 +2768,8 @@ describe('shares, uploads, and feed', () => {
         shareBatchId: existing.shareBatchId,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('late.jpg'),
         kind: 'image',
         fileName: 'late.jpg',
         mimeType: 'image/jpeg',
@@ -2750,14 +2781,13 @@ describe('shares, uploads, and feed', () => {
     await expect(
       owner.user.mutation(internal.uploads.finalizeComplete, {
         uploadId,
-        storageId,
         fileName: 'late.jpg',
         sizeBytes: 2048,
       }),
     ).rejects.toThrow(/draft/i);
   });
 
-  test('upload finalization rejects an eleventh draft asset', async () => {
+  test('upload finalization accepts an eleventh draft asset', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
     let shareBatchId: Id<'shareBatches'> | null = null;
@@ -2773,15 +2803,13 @@ describe('shares, uploads, and feed', () => {
       shareBatchId = uploaded.shareBatchId;
     }
 
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['extra'], { type: 'image/jpeg' }));
-    });
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: shareBatchId!,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('too-many.jpg'),
         kind: 'image',
         fileName: 'too-many.jpg',
         mimeType: 'image/jpeg',
@@ -2793,11 +2821,12 @@ describe('shares, uploads, and feed', () => {
     await expect(
       owner.user.mutation(internal.uploads.finalizeComplete, {
         uploadId,
-        storageId,
         fileName: 'too-many.jpg',
         sizeBytes: 1024,
       }),
-    ).rejects.toThrow(/10 media/i);
+    ).resolves.toMatchObject({
+      assetId: expect.any(String),
+    });
   });
 
   test('upload finalization rejects unsupported image MIME metadata', async () => {
@@ -2806,15 +2835,13 @@ describe('shares, uploads, and feed', () => {
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
     });
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['gif'], { type: 'image/gif' }));
-    });
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('animated.gif'),
         kind: 'image',
         fileName: 'animated.gif',
         mimeType: 'image/gif',
@@ -2826,7 +2853,6 @@ describe('shares, uploads, and feed', () => {
     await expect(
       owner.user.mutation(internal.uploads.finalizeComplete, {
         uploadId,
-        storageId,
         fileName: 'animated.gif',
         sizeBytes: 1024,
       }),
@@ -2839,15 +2865,13 @@ describe('shares, uploads, and feed', () => {
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
     });
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['large'], { type: 'image/jpeg' }));
-    });
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('large.jpg'),
         kind: 'image',
         fileName: 'large.jpg',
         mimeType: 'image/jpeg',
@@ -2858,7 +2882,6 @@ describe('shares, uploads, and feed', () => {
 
     const completed = await owner.user.mutation(internal.uploads.finalizeComplete, {
       uploadId,
-      storageId,
       fileName: 'large.jpg',
       sizeBytes: 512 * 1024 * 1024,
     });
@@ -2872,21 +2895,19 @@ describe('shares, uploads, and feed', () => {
     });
   });
 
-  test('upload finalization rejects videos beyond the beta duration limit', async () => {
+  test('upload finalization accepts videos of any duration', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
-    });
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['video'], { type: 'video/mp4' }));
     });
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('long.mp4'),
         kind: 'video',
         fileName: 'long.mp4',
         mimeType: 'video/mp4',
@@ -2898,29 +2919,28 @@ describe('shares, uploads, and feed', () => {
     await expect(
       owner.user.mutation(internal.uploads.finalizeComplete, {
         uploadId,
-        storageId,
         fileName: 'long.mp4',
         sizeBytes: 1024,
-        durationSeconds: 31,
+        durationSeconds: 3600,
       }),
-    ).rejects.toThrow(/30 seconds/i);
+    ).resolves.toMatchObject({
+      assetId: expect.any(String),
+    });
   });
 
-  test('cloud upload finalization rejects videos without duration metadata', async () => {
+  test('upload finalization accepts videos without duration metadata', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
     const draft = await owner.user.mutation(api.shares.getOrCreateDraft, {
       circleId: owner.circleId,
-    });
-    const storageId = await t.run(async (ctx) => {
-      return await ctx.storage.store(new Blob(['video'], { type: 'video/mp4' }));
     });
     const uploadId = await t.run(async (ctx) => {
       return await ctx.db.insert('uploads', {
         shareBatchId: draft.shareBatchId as Id<'shareBatches'>,
         circleId: owner.circleId,
         createdBy: owner.viewer._id,
-        providerKind: 'convex-files',
+        providerKind: 's3',
+        pendingStorage: testS3StorageReference('missing-duration.mp4'),
         kind: 'video',
         fileName: 'missing-duration.mp4',
         mimeType: 'video/mp4',
@@ -2932,20 +2952,21 @@ describe('shares, uploads, and feed', () => {
     await expect(
       owner.user.mutation(internal.uploads.finalizeComplete, {
         uploadId,
-        storageId,
         fileName: 'missing-duration.mp4',
         sizeBytes: 1024,
       }),
-    ).rejects.toThrow(/duration/i);
+    ).resolves.toMatchObject({
+      assetId: expect.any(String),
+    });
   });
 
-  test('self-hosted upload finalization bypasses beta count and duration limits', async () => {
+  test('self-hosted upload finalization accepts long videos in large drafts', async () => {
     await withDeploymentKind('self-hosted', async () => {
       const t = createTestDb();
       const owner = await createCircleFor(t, 'owner@example.com');
       let shareBatchId: Id<'shareBatches'> | null = null;
 
-      for (let index = 0; index < BETA_MAX_MEDIA_SELECTION_COUNT; index++) {
+      for (let index = 0; index < 10; index++) {
         const uploaded = await createUploadedDraftAsset({
           t,
           user: owner.user,
@@ -2956,15 +2977,13 @@ describe('shares, uploads, and feed', () => {
         shareBatchId = uploaded.shareBatchId;
       }
 
-      const storageId = await t.run(async (ctx) => {
-        return await ctx.storage.store(new Blob(['long-video'], { type: 'video/mp4' }));
-      });
       const uploadId = await t.run(async (ctx) => {
         return await ctx.db.insert('uploads', {
           shareBatchId: shareBatchId!,
           circleId: owner.circleId,
           createdBy: owner.viewer._id,
-          providerKind: 'convex-files',
+          providerKind: 's3',
+          pendingStorage: testS3StorageReference('long-self-hosted.mp4'),
           kind: 'video',
           fileName: 'long-self-hosted.mp4',
           mimeType: 'video/mp4',
@@ -2976,17 +2995,16 @@ describe('shares, uploads, and feed', () => {
       await expect(
         owner.user.mutation(internal.uploads.finalizeComplete, {
           uploadId,
-          storageId,
           fileName: 'long-self-hosted.mp4',
           sizeBytes: 1024,
-          durationSeconds: BETA_MAX_VIDEO_DURATION_SECONDS + 60,
+          durationSeconds: 90,
         }),
       ).resolves.toMatchObject({
         assetId: expect.any(String),
       });
 
       await expect(countShareChildren(t, shareBatchId!)).resolves.toMatchObject({
-        assetCount: BETA_MAX_MEDIA_SELECTION_COUNT + 1,
+        assetCount: 11,
       });
     });
   });
@@ -5159,7 +5177,7 @@ describe('shares, uploads, and feed', () => {
         return await ctx.db.insert('shareBatches', {
           circleId: owner.circleId,
           authorId: owner.viewer._id,
-          assetCount: BETA_MAX_MEDIA_SELECTION_COUNT + 2,
+          assetCount: 12,
           status: 'published',
           createdAt: now,
           updatedAt: now,
@@ -5168,7 +5186,7 @@ describe('shares, uploads, and feed', () => {
       });
 
       await t.run(async (ctx) => {
-        for (let index = 0; index < BETA_MAX_MEDIA_SELECTION_COUNT + 2; index++) {
+        for (let index = 0; index < 12; index++) {
           const storageId = await ctx.storage.store(
             new Blob([`legacy-${index}`], { type: 'image/jpeg' }),
           );
@@ -5223,16 +5241,16 @@ describe('shares, uploads, and feed', () => {
         }
 
         await ctx.db.patch(stats._id, {
-          imageCount: BETA_MAX_MEDIA_SELECTION_COUNT + 2,
+          imageCount: 12,
           videoCount: 0,
-          totalSizeBytes: (BETA_MAX_MEDIA_SELECTION_COUNT + 2) * 100,
+          totalSizeBytes: 12 * 100,
           updatedAt: now,
         });
       });
 
       await expect(countShareChildren(t, shareBatchId)).resolves.toEqual({
-        assetCount: BETA_MAX_MEDIA_SELECTION_COUNT + 2,
-        uploadCount: BETA_MAX_MEDIA_SELECTION_COUNT + 2,
+        assetCount: 12,
+        uploadCount: 12,
       });
 
       await owner.user.action(api.shares.deleteShare, { shareBatchId });

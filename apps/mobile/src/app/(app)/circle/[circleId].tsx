@@ -17,16 +17,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Branch, Num, Plural, T, Var, msg, useGT, useMessages } from 'gt-react-native';
 
-import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+import {
+  useAction,
+  useConvex,
+  useConvexAuth,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from 'convex/react';
 
 import { Avatar, Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { InviteComposer, type InviteComposerSubmitArgs } from '@/components/invites/InviteComposer';
-import { PublicCircleLinkPanel } from '@/components/share/PublicCircleLinkPanel';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { enterSection } from '@/lib/motion';
 import type { CircleInviteRecord, CircleMemberRecord } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import { useCrypto } from '@/features/crypto/provider';
+import { rotateCircleKeyAfterMemberRemoval } from '@/features/crypto/rotation';
 import { inviteModeLabel } from '@/features/invites/preview-state';
 import { formatBytes, optimizePickerAsset, uploadPreparedFile } from '@/features/media/client';
 import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
@@ -98,6 +106,8 @@ export default function CircleManagementScreen() {
   const gt = useGT();
   const m = useMessages();
   const { setActiveCircleId } = useSession();
+  const convex = useConvex();
+  const crypto = useCrypto();
   const convexAuth = useConvexAuth();
   const params = useLocalSearchParams<{ circleId?: string | string[] }>();
   const circleId = firstParam(params.circleId);
@@ -106,10 +116,6 @@ export default function CircleManagementScreen() {
   const circle = useQuery(api.circles.getById, circleId && hasViewer ? { circleId } : 'skip');
   const members = useQuery(api.circles.listMembers, circleId && hasViewer ? { circleId } : 'skip');
   const invites = useQuery(api.invites.listForCircle, circleId && hasViewer ? { circleId } : 'skip');
-  const publicLinks = useQuery(
-    api.publicLinks.listForCircle,
-    circleId && hasViewer && circle?.canInvite ? { circleId } : 'skip',
-  );
   const updateCircle = useMutation(api.circles.update);
   const updateMemberRole = useMutation(api.circles.updateMemberRole);
   const removeMember = useMutation(api.circles.removeMember);
@@ -117,8 +123,6 @@ export default function CircleManagementScreen() {
   const leaveCircle = useMutation(api.circles.leave);
   const createInvite = useMutation(api.invites.create);
   const revokeInvite = useMutation(api.invites.revoke);
-  const createPublicLink = useMutation(api.publicLinks.createForCircle);
-  const revokePublicLink = useMutation(api.publicLinks.revoke);
   const createCircleImageTarget = useAction(api.circles.createImageTarget);
   const completeCircleImageUpload = useAction(api.circles.completeImageUpload);
   const removeCircleImage = useAction(api.circles.removeImage);
@@ -135,7 +139,6 @@ export default function CircleManagementScreen() {
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
-  const [busyPublicLinkId, setBusyPublicLinkId] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [isImageBusy, setIsImageBusy] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -206,10 +209,16 @@ export default function CircleManagementScreen() {
       }
 
       const processedAsset = await optimizePickerAsset(pickedAsset);
+
+      if (processedAsset.sizeBytes === undefined || processedAsset.sizeBytes <= 0) {
+        throw new Error(gt('Die Dateigröße konnte nicht ermittelt werden.'));
+      }
+
       const prepared = await createCircleImageTarget({
         circleId: circle._id,
         mimeType: processedAsset.mimeType,
         fileName: processedAsset.fileName,
+        sizeBytes: processedAsset.sizeBytes,
       });
       const uploaded = await uploadPreparedFile({
         target: prepared.target,
@@ -219,7 +228,6 @@ export default function CircleManagementScreen() {
       await completeCircleImageUpload({
         uploadId: prepared.uploadId,
         objectKey: uploaded.objectKey,
-        storageId: uploaded.storageId,
         sizeBytes: processedAsset.sizeBytes,
       });
       setFeedback(gt('Bild für "{name}" aktualisiert.', { name: circle.name }));
@@ -290,29 +298,6 @@ export default function CircleManagementScreen() {
     [circleId, createInvite, gt],
   );
 
-  const handleCreatePublicLink = useCallback(async () => {
-    if (!circleId) {
-      throw new Error(gt('Circle ist noch nicht geladen.'));
-    }
-
-    return await createPublicLink({
-      circleId,
-    });
-  }, [circleId, createPublicLink, gt]);
-
-  const handleRevokePublicLink = useCallback(
-    async (publicLinkId: string) => {
-      setBusyPublicLinkId(publicLinkId);
-
-      try {
-        await revokePublicLink({ publicLinkId });
-      } finally {
-        setBusyPublicLinkId(null);
-      }
-    },
-    [revokePublicLink],
-  );
-
   const handleToggleRole = useCallback(
     (member: CircleMemberRecord) => {
       const nextRole = member.role === 'admin' ? 'member' : 'admin';
@@ -378,6 +363,17 @@ export default function CircleManagementScreen() {
               })
                 .then(() => {
                   setFeedback(gt('{name} wurde entfernt.', { name: member.displayName }));
+
+                  // Best-effort E2EE key rotation so the removed member cannot
+                  // read future media. Failures are logged and never block the
+                  // removal UX (see docs/e2ee.md).
+                  if (crypto.status === 'ready' && crypto.userKeys) {
+                    void rotateCircleKeyAfterMemberRemoval({
+                      convex,
+                      circleId: circleId!,
+                      userKeys: crypto.userKeys,
+                    });
+                  }
                 })
                 .catch((error) => {
                   setFeedback(
@@ -394,7 +390,7 @@ export default function CircleManagementScreen() {
         ],
       );
     },
-    [circleId, gt, removeMember],
+    [circleId, convex, crypto.status, crypto.userKeys, gt, removeMember],
   );
 
   const handleTransferOwnership = useCallback(
@@ -610,8 +606,7 @@ export default function CircleManagementScreen() {
         {!hasViewer ||
         circle === undefined ||
         members === undefined ||
-        invites === undefined ||
-        (circle?.canInvite && publicLinks === undefined) ? (
+        invites === undefined ? (
           <Card>
             <LoadingBox />
           </Card>
@@ -783,34 +778,6 @@ export default function CircleManagementScreen() {
                   onPress={() => mediaPage.loadMore(24)}
                 />
               ) : null}
-            </Card>
-
-            <Card>
-              <View style={styles.sectionHeader}>
-                <T>
-                  <Text style={[styles.cardTitle, { color: theme.text }]}>Web-Link</Text>
-                </T>
-                <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
-                  {circle.canInvite ? gt('privat') : gt('read only')}
-                </Text>
-              </View>
-
-              {circle.canInvite ? (
-                <PublicCircleLinkPanel
-                  circleName={circle.name}
-                  links={publicLinks ?? []}
-                  disabled={busyPublicLinkId !== null}
-                  onCreatePublicLink={handleCreatePublicLink}
-                  onRevokePublicLink={handleRevokePublicLink}
-                  onFeedback={setFeedback}
-                />
-              ) : (
-                <T>
-                  <Text style={[styles.body, { color: theme.textSecondary }]}>
-                    Nur Owner und Admins dürfen öffentliche Web-Links verwalten.
-                  </Text>
-                </T>
-              )}
             </Card>
 
             <Card>

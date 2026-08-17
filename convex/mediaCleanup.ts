@@ -3,10 +3,7 @@ import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { internalAction, internalMutation, internalQuery } from './_generated/server';
-import {
-  deleteStorageReference,
-  storageReferenceKey,
-} from './lib/storage/shared';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 
 const DEFAULT_STALE_MEDIA_AGE_MS = 24 * 60 * 60 * 1000;
 const STALE_MEDIA_CLEANUP_BATCH_SIZE = 50;

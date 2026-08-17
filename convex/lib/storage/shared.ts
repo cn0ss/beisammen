@@ -2,16 +2,10 @@ import type {
   CreateUploadTargetInput,
   StorageProviderKind,
   InstanceStorageStatus,
-  SignedReadUrl,
   S3StorageReference,
-  StorageReference,
 } from '@beisammen/contracts';
 
 import type { Id } from '../../_generated/dataModel';
-import type { ActionCtx, MutationCtx, QueryCtx } from '../../_generated/server';
-import { deleteS3Object } from './s3';
-
-type StorageCtx = QueryCtx | MutationCtx;
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, '');
@@ -33,7 +27,10 @@ function requireEnv(name: string): string {
 }
 
 export function buildS3ObjectKey(
-  input: CreateUploadTargetInput & { uploadId: Id<'uploads'> },
+  input: Pick<
+    CreateUploadTargetInput,
+    'circleId' | 'shareBatchId' | 'mimeType' | 'kind' | 'fileName'
+  > & { uploadId: Id<'uploads'> },
 ): string {
   const date = new Date();
   const year = String(date.getUTCFullYear());
@@ -133,60 +130,6 @@ export function buildS3StorageReference(input: {
     ...(storage.endpoint ? { endpoint: storage.endpoint } : {}),
     ...(storage.basePath ? { basePath: storage.basePath } : {}),
   };
-}
-
-export async function resolveConvexReadUrl(
-  ctx: StorageCtx | ActionCtx,
-  storageId: Id<'_storage'>,
-): Promise<SignedReadUrl> {
-  const url = await ctx.storage.getUrl(storageId);
-
-  if (!url) {
-    return {
-      url: null,
-      expiresAt: null,
-    };
-  }
-
-  return {
-    url,
-    expiresAt: Date.now() + 5 * 60 * 1000,
-  };
-}
-
-export function storageReferenceKey(storage: StorageReference): string {
-  if (storage.provider === 'convex-files') {
-    return `convex-files:${storage.storageId}`;
-  }
-
-  return [
-    's3',
-    storage.bucket,
-    storage.region ?? '',
-    storage.endpoint ?? '',
-    storage.basePath ?? '',
-    storage.objectKey,
-  ].join(':');
-}
-
-export async function deleteStorageReference(
-  ctx: MutationCtx | ActionCtx,
-  storage: StorageReference,
-): Promise<void> {
-  if (storage.provider === 'convex-files') {
-    const existingUrl = await ctx.storage.getUrl(storage.storageId as Id<'_storage'>);
-
-    if (!existingUrl) {
-      return;
-    }
-
-    await ctx.storage.delete(storage.storageId as Id<'_storage'>);
-    return;
-  }
-
-  await deleteS3Object({
-    storage,
-  });
 }
 
 export function formatFeedTimestamp(timestamp: number): string {

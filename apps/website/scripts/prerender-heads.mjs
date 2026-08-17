@@ -15,39 +15,33 @@ const ROUTES = [
   {
     path: 'en',
     lang: 'en',
-    title: 'beisammen — a quieter place for your closest photos',
+    title: 'beisammen · a quieter place for your closest photos',
     description:
-      'Private photo circles for partners, families, and close friends. No feed, no followers, no algorithm.',
+      'Private photo circles for partners, families, and close friends. End-to-end encrypted. No feed, no followers, no algorithm.',
   },
   {
     path: 'privacy',
     lang: 'de',
-    title: 'Datenschutz — beisammen',
+    title: 'Datenschutz · beisammen',
     description: 'Wie beisammen mit euren Fotos und Daten umgeht.',
   },
   {
     path: 'en/privacy',
     lang: 'en',
-    title: 'Privacy policy — beisammen',
+    title: 'Privacy policy · beisammen',
     description: 'How beisammen handles your photos and data.',
   },
   {
     path: 'delete-account',
     lang: 'de',
-    title: 'Konto löschen — beisammen',
+    title: 'Konto löschen · beisammen',
     description: 'So löschst du dein beisammen-Konto und die zugehörigen Daten dauerhaft.',
   },
   {
     path: 'en/delete-account',
     lang: 'en',
-    title: 'Delete account — beisammen',
+    title: 'Delete account · beisammen',
     description: 'How to permanently delete your beisammen account and its data.',
-  },
-  {
-    path: 'share',
-    lang: 'de',
-    title: 'Beisammen ansehen',
-    description: 'Eine private Beisammen-Ansicht für geteilte Familienmomente.',
   },
 ];
 

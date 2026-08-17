@@ -4,16 +4,16 @@ import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { T } from 'gt-react-native';
 
 import { FontSize, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
-import type { MemoryMapItem } from '@/features/convex/api';
 import { MemoryTile } from '@/features/memories/MemoryTile';
+import type { LocatedMemoryItem } from '@/features/memories/use-located-memory-items';
 import { useTheme } from '@/hooks/use-theme';
 
 const GRID_COLUMNS = 3;
 const GRID_GAP = 6;
 
 interface MemoryMapExplorerProps {
-  items: MemoryMapItem[] | undefined;
-  onOpenMemory: (item: MemoryMapItem) => void;
+  items: LocatedMemoryItem[] | undefined;
+  onOpenMemory: (item: LocatedMemoryItem) => void;
 }
 
 /** Web fallback: no native map — plain list of located memories. */

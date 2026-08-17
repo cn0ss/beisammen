@@ -274,6 +274,7 @@ export const DraftSheet = memo(function DraftSheet({
                       <AssetThumbnail
                         key={asset._id}
                         asset={asset}
+                        circleId={draft.circleId}
                         size={100}
                         onRemove={() => onDeleteAsset(asset._id)}
                       />

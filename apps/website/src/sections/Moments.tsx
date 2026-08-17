@@ -40,8 +40,7 @@ export function Moments({ locale }: { locale: Locale }) {
         <Reveal>
           <Eyebrow>{t.moments.eyebrow}</Eyebrow>
           <h2 className="mt-5 max-w-[30ch] text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            {t.moments.titlePlain}{' '}
-            <em className="font-serif font-normal text-ember italic">{t.moments.titleItalic}</em>
+            {t.moments.title}
           </h2>
           <p className="mt-6 max-w-[48ch] text-lg/8 text-pretty text-ink/70">{t.moments.body}</p>
 
@@ -135,7 +134,7 @@ export function Moments({ locale }: { locale: Locale }) {
 
               <figure className="relative z-10 mx-auto -mt-9 w-fit max-w-[88%] rounded-2xl bg-cream p-4 shadow-lg ring-1 ring-ink/5 sm:p-5">
                 <figcaption className="flex items-baseline justify-between gap-6">
-                  <span className="font-serif text-lg text-ink italic">{active.caption}</span>
+                  <span className="text-base font-medium text-ink">{active.caption}</span>
                   <span className="font-mono text-[0.65rem] tracking-wide text-ink/40 uppercase">
                     {active.date}
                   </span>

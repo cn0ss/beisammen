@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 
 import type { Doc, Id } from './_generated/dataModel';
@@ -12,18 +13,15 @@ import {
   trackCloudOwnerUsage,
 } from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { listShareAssetsForDisplay } from './lib/shareAssets';
 import { createS3ReadUrl } from './lib/storage/s3';
-import {
-  deleteStorageReference,
-  resolveConvexReadUrl,
-  storageReferenceKey,
-} from './lib/storage/shared';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const assetFunctionSurface = [
   'assets.getReadUrl',
   'assets.listForShareBatch',
+  'assets.listMetadataForCircle',
   'assets.deleteDraftAsset',
 ] as const;
 
@@ -34,19 +32,12 @@ type AssetVisibilityCtx = QueryCtx;
 interface ReadContext {
   assetId: Id<'assets'>;
   variant: 'preview' | 'original';
-  storage:
-    | {
-        provider: 'convex-files';
-        storageId: Id<'_storage'>;
-      }
-    | {
-        provider: 's3';
-        objectKey: string;
-        bucket: string;
-        region?: string;
-        endpoint?: string;
-        basePath?: string;
-      };
+  kind: Doc<'assets'>['kind'];
+  mimeType: string;
+  encryption?: Doc<'assets'>['encryption'];
+  // Schema-shaped: rows written before the S3 migration may still carry a
+  // legacy 'convex-files' reference. Reads reject those; see getReadUrl.
+  storage: Doc<'assets'>['storage'];
 }
 
 async function requireAssetVisibleToViewer(
@@ -97,6 +88,11 @@ export const getReadContext = internalQuery({
     return {
       assetId: asset._id,
       variant,
+      kind: asset.kind,
+      mimeType: asset.mimeType,
+      // Imperative consumers (downloads) need the envelope to decrypt without
+      // issuing a separate query for the asset projection.
+      ...(asset.encryption ? { encryption: asset.encryption } : {}),
       storage: variant === 'original' ? asset.storage : asset.previewStorage ?? asset.storage,
     };
   },
@@ -133,7 +129,56 @@ export const listForShareBatch = query({
       durationSeconds: asset.durationSeconds,
       location: asset.location,
       capturedAt: asset.capturedAt,
+      encryption: asset.encryption,
     }));
+  },
+});
+
+/**
+ * Paginated metadata feed for client-side aggregation (map/places). Encrypted
+ * assets carry their sealed envelope; legacy assets still expose plaintext
+ * location so both generations land on the same client-built map.
+ */
+export const listMetadataForCircle = query({
+  args: {
+    circleId: v.id('circles'),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const viewer = await requireViewer(ctx);
+
+    await requireCircleMembership(ctx, viewer._id, args.circleId);
+
+    const page = await ctx.db
+      .query('assets')
+      .withIndex('by_circle', (q) => q.eq('circleId', args.circleId))
+      .order('desc')
+      .paginate(args.paginationOpts);
+    const items = [];
+
+    for (const asset of page.page) {
+      const shareBatch = await ctx.db.get(asset.shareBatchId);
+
+      // Draft assets stay private to their author, mirroring the read rules.
+      if (!shareBatch || (shareBatch.status === 'draft' && shareBatch.authorId !== viewer._id)) {
+        continue;
+      }
+
+      items.push({
+        _id: asset._id,
+        shareBatchId: asset.shareBatchId,
+        kind: asset.kind,
+        capturedAt: asset.capturedAt,
+        createdAt: asset.createdAt,
+        location: asset.location,
+        encryption: asset.encryption,
+      });
+    }
+
+    return {
+      ...page,
+      page: items,
+    };
   },
 });
 
@@ -145,19 +190,39 @@ export const getReadUrl = action({
   handler: async (
     ctx,
     args,
-  ): Promise<{ url: string | null; expiresAt: number | null }> => {
+  ): Promise<{
+    url: string | null;
+    expiresAt: number | null;
+    kind: 'image' | 'video';
+    mimeType: string;
+    encryption?: {
+      v: 1;
+      circleEpoch: number;
+      wrappedFileKey: string;
+      encMetadata?: string;
+    };
+  }> => {
     const context: ReadContext = await ctx.runQuery(internal.assets.getReadContext, {
       assetId: args.assetId,
       ...(args.variant ? { variant: args.variant } : {}),
     });
-
-    if (context.storage.provider === 'convex-files') {
-      return await resolveConvexReadUrl(ctx, context.storage.storageId);
+    // The convex-files read path is gone so no media bytes ever flow through
+    // Convex bandwidth. Remaining legacy rows must be moved to S3 first via
+    // `npx convex run legacyStorage:migrateBatch`.
+    if (context.storage.provider !== 's3') {
+      throw new Error('Legacy media must be migrated to S3.');
     }
 
-    return await createS3ReadUrl({
-      storage: context.storage,
-    });
+    const signed = await createS3ReadUrl({ storage: context.storage });
+
+    // The signed URL points at ciphertext when `encryption` is set; returning
+    // the envelope lets imperative consumers decrypt without another query.
+    return {
+      ...signed,
+      kind: context.kind,
+      mimeType: context.mimeType,
+      ...(context.encryption ? { encryption: context.encryption } : {}),
+    };
   },
 });
 

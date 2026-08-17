@@ -102,7 +102,14 @@ export default function SettingsScreen() {
               icon="notifications-outline"
               title={gt('Benachrichtigungen')}
               subtitle={gt('Push-Mitteilungen auswählen')}
+              hasSeparator
               onPress={() => router.push('/settings/notifications' as never)}
+            />
+            <SettingsNavRow
+              icon="key-outline"
+              title={gt('Wiederherstellungscode anzeigen')}
+              subtitle={gt('Zugriff auf verschlüsselte Fotos sichern')}
+              onPress={() => router.push('/settings/recovery-code' as never)}
             />
           </Card>
         </Animated.View>

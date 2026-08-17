@@ -66,8 +66,8 @@ application and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
 - With no active owner plan, attempt media selection as an invited member and
   confirm the app says the Circle owner needs to activate billing without
   showing balances or customer details.
-- Upload a large image and a large video under 30 seconds; confirm each item
-  shows upload progress and the app remains responsive during video upload.
+- Upload a large image and a large video; confirm each item shows upload
+  progress and the app remains responsive during video upload.
 - Interrupt one upload, reopen the app, retry the cached item, and confirm the
   draft remains recoverable while failed uploads can still be discarded.
 - Publish the draft and confirm the feed shows previews, pagination works, and video cards do not try to render the original video as an image.

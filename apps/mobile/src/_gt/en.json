@@ -21,6 +21,7 @@
     "i": 1,
     "t": "Text"
   },
+  "01fc8f6fa3aa08ee": "Export failed. Please try again.",
   "022a220bff2fd4a6": "Remove",
   "039572b9c58367f8": "Make Owner",
   "04014fdf93668bd7": "Show more",
@@ -93,12 +94,12 @@
   },
   "1681365fb984c8c9": "Member",
   "16e06311ba0e41ca": "Without access to your media library, you can't select photos or videos.",
+  "17f93700f8f4185d": "Recovery code",
   "183588a277913c4b": {
     "c": "Resend code",
     "i": 1,
     "t": "Text"
   },
-  "18e6782e3ec3f8c6": "Active until {date}",
   "1906256b127b760f": "Could not verify the instance.",
   "1a998c721ad22bc8": "Preparing...",
   "1af5a1cca29f5661": "Transfer",
@@ -153,18 +154,22 @@
     "i": 1,
     "t": "Text"
   },
-  "244331424dfc7423": "Could not share web link.",
   "24fff1e0c205e251": {
     "c": "No comments in this focus yet.",
     "i": 1,
     "t": "Text"
   },
+  "260d43576ced85d1": "Export as file",
   "26200a7a2f175a28": "Your media",
   "262e41be59156dec": "Glad you're here",
   "264fa583e61b7d34": "Failed",
+  "266dcced130013ec": {
+    "c": "We couldn't retrieve the code. Please try again later.",
+    "i": 1,
+    "t": "Text"
+  },
   "27dad249fed6c222": "More",
   "2b0d350fc56ba187": "Delete Circle",
-  "2b11518d3284f067": "Web link revoked.",
   "2b73806be5e7ebbc": "Invitation for {email} was revoked.",
   "2bfc087b315be573": "You can't select an image without access to your media library.",
   "2c33106654cfef22": "Unlimited",
@@ -296,22 +301,22 @@
   ],
   "4285d656b7847b1f": "Your profile hasn't loaded yet.",
   "42eca0dce9b76b14": "Memories",
-  "4314a73b0ab79432": {
-    "c": "Only Owners and Admins can manage public Web Links.",
-    "i": 1,
-    "t": "Text"
-  },
   "43204a56109daccd": "Signed in",
   "4320bb61c3060389": "Expired",
   "437890f5f0ab1ae6": "Comments",
   "43a7414980ab0bfc": "Storage & diagnostics",
   "43b21981e1c2b2ec": "Choose image",
   "451c997ff0226aa7": "Share",
+  "45de84e32899b361": "The preview could not be created.",
   "46aee1783fd42c98": "You'll leave \"{name}\" and lose access.",
   "46fb35701f72d8f4": "Go to app",
   "472ab18ca1f65251": "Invitation has already been used",
+  "47f9aad4bb836a6e": {
+    "c": "This code lets you access your encrypted photos on a new device. On iPhone, iCloud Keychain can also help. Keep the code safe and don't share it with anyone.",
+    "i": 1,
+    "t": "Text"
+  },
   "480f83fa318e408b": "Delete Circle?",
-  "48135fc1caa3a4c4": "Web link created.",
   "48343a3f5a470ae1": {
     "c": "Memories",
     "i": 1,
@@ -370,14 +375,8 @@
     "i": 1,
     "t": "Text"
   },
-  "4c2aa5611b23ce38": "Create new link",
   "4c5833d908d513a4": "{count, plural, one {# person} other {# people}}",
   "4cb9a01453ccea45": "Edit draft",
-  "4ddf288565acb8cd": {
-    "c": "Web Link",
-    "i": 1,
-    "t": "Text"
-  },
   "4e0f8855bb4745ec": "Email address",
   "500c6839cd8f308d": "Address",
   "5049f810095ae756": "Open account",
@@ -497,6 +496,7 @@
   "5a533d77696e1a97": "Media was removed.",
   "5a65f1998da194a3": "Could not create Circle.",
   "5b36c969a22e5c04": "Billing",
+  "5bcc41fbb52d25a8": "Show recovery code",
   "5c45875a72f4389f": "The account could not be completely deleted. Try again.",
   "5cbfa25cdac6844b": "Loading instance...",
   "5e0a042031bf8aa2": "Please select a Circle first.",
@@ -555,6 +555,7 @@
     "i": 1,
     "t": "Text"
   },
+  "64b13616147f8b92": "Copy code",
   "64f896014cab2cc7": "Remove comment",
   "651087c489d10c11": "React",
   "6659cec4933ade1b": "Settings",
@@ -568,8 +569,8 @@
   "69cf13fea6bb4872": "Clear",
   "6b0df79992c02997": "active",
   "6b3b5c06da72ed81": "Could not change role.",
-  "6bc9130025df3eaa": "Creating a new one replaces any older active Web Links.",
   "6c90dfe0858e626a": "Creating...",
+  "6ce89d05044cb7ad": "I've saved the code",
   "6d96caaa6fea68e0": "Circle created.",
   "6e1f009430844d25": {
     "c": "Circle management",
@@ -605,6 +606,7 @@
     "i": 1,
     "t": "Text"
   },
+  "73e8e9d192918bc1": "Restore access",
   "7468f52ca5b76650": [
     {
       "c": "Invite people",
@@ -709,10 +711,13 @@
   "7ccc922fd2ef254e": "Resets on {date}",
   "7cd54b4af08a62d4": "The post and all media items will be permanently deleted.",
   "7cf5c09789663c49": "Billing unavailable",
-  "7cfda5da40f32577": "Could not create web link.",
   "7e1a6e26bbcbaaed": "{count, plural, one {# media item} other {# media items}}",
   "7e331c6a098867c1": "We sent you a new code.",
-  "7f7fd85191066d52": "Photo",
+  "7f1e38acca74fe83": {
+    "c": "This device doesn't have the key for your encrypted photos. Enter your recovery code to restore access.",
+    "i": 1,
+    "t": "Text"
+  },
   "7fd5525d2b6a7387": "Plan & usage",
   "7fda8feba9bfacd5": "Published photos and videos will appear here by the date they were taken.",
   "8070761498415893": "Could not revoke invitation.",
@@ -793,6 +798,18 @@
     "i": 1,
     "t": "Text"
   },
+  "8721046acd5bcd31": [
+    {
+      "c": "Encryption",
+      "i": 1,
+      "t": "Text"
+    },
+    {
+      "c": "Your recovery code",
+      "i": 2,
+      "t": "Text"
+    }
+  ],
   "873f01d859e9d585": "Select Circle",
   "87ac5c823f33129a": "No active plan",
   "87b2efbd27d6fe33": "Circle {name}",
@@ -806,8 +823,6 @@
   "89be0a7399a0be31": "Download update",
   "8ad13c6df3df248d": "Connected to {name}.",
   "8ae1bde08b9b2949": "Could not remove reaction.",
-  "8b4be72e6ca864c4": "Created by {name}",
-  "8bb35279944e8230": "You can view the latest moments from \"{circleName}\" here:\n{shareUrl}",
   "8c0c0d9aa942415c": "Choose an active Cloud plan before uploading media items.",
   "8cffa7e07e7a0961": "Sign-in failed.",
   "8dc911190e3a4049": "The draft and all uploaded media items will be permanently removed.",
@@ -878,6 +893,7 @@
   "96ad945bae9c7292": "Write something about it if you like",
   "96b07b80474d1417": "Load more",
   "96b477ca32caf9fd": "Select photos or videos",
+  "96c26c2c430ff28f": "Your Beisammen recovery code. Use this code to regain access to your encrypted photos on a new device. Keep this file safe and don't share it with anyone.",
   "985775f88843b6b8": {
     "c": "No Circles with media yet.",
     "i": 1,
@@ -899,6 +915,11 @@
   "9ab1896932c2e6b8": "Share family and partner media items\nprivately and on your own terms.",
   "9adfd1f931a92035": "Active account",
   "9afae6494295d7c4": "The media couldn't be saved.",
+  "9b73eb7abe8fe788": {
+    "c": "Your photos are end-to-end encrypted. This code is the only way to access your photos on a new device. On iPhone, iCloud Keychain can also help. Keep the code safe, for example in your password manager.",
+    "i": 1,
+    "t": "Text"
+  },
   "9c2d2a1d59d74d67": "Open {displayText} post",
   "9ca1900419b0c005": "Photos",
   "9ca4094fb14fed77": "When someone reacts to shared memories with an emoji.",
@@ -910,6 +931,11 @@
   },
   "9e47cd3ec4fdd01b": "Compressing",
   "9f1587052393a7ba": "Loading...",
+  "9f34ee1c7bdceceb": {
+    "c": "Encryption is being set up. Please try again in a moment.",
+    "i": 1,
+    "t": "Text"
+  },
   "9faeedf5b12d0a44": "Your account, posts, comments, reactions, and media will be permanently deleted. Circles you own, including other members' content, will also be deleted. Transfer ownership first if you want to keep them. An App Store subscription will not be canceled automatically; cancel it first through “Manage Subscription”. This cannot be undone.",
   "9fcf4cde0d4c5e51": [
     {
@@ -955,7 +981,6 @@
   "a9dc1462b9cad2cc": "Write something about it...",
   "aad0c7cb3140ab7e": "Couldn't change push notification settings.",
   "ab8daa10ce5b9b2f": "Sign in with {email} to accept this invitation.",
-  "ad4b7ef1a7d8af0a": "No active Web Link",
   "ae1faa567c5599ef": "Circle limit reached",
   "af0c8525da17e580": "Password",
   "b0e92b5f17293559": "Later",
@@ -977,40 +1002,22 @@
     "t": "Text"
   },
   "b5a67083f398f43d": "Account",
-  "b6646cbc6a0cd0a0": "Could not revoke web link.",
   "b678e879e97d40ec": "Media items added to draft.",
   "b6e5b31255e011c5": "OK",
   "b7943c5d8fb7dcf2": "Leave Circle",
   "b82cccf85c0a81fd": "The invitation for {email} will immediately become invalid.",
   "b83d53d4e1aefbbd": "Open {text} post",
   "b8976b12bbc2c155": "Circles",
+  "b8b533b0e5d9b31f": "Conversation",
   "b8ce283f0a846927": "For your family, partner, or close friends. Then invite everyone.",
   "b8cf72d8327d8a89": "Quotas",
   "b98c76c2536601f8": "Purchases restored.",
   "b99588eac1c6d04f": "Diagnostics",
   "b9c62a802960e14e": "Confirm code",
   "b9cbbf0f39a78561": "Your plan doesn't include any additional Circles. Change your plan or delete a Circle to create a new one.",
-  "ba4d1854cc12cb9f": "Create Web Link",
   "baa0c1475b9eedba": "Description",
   "bc16a52bdd93d554": "Sign out",
   "bcb3266836fa2e13": "Close",
-  "bda5634b9ca02274": [
-    {
-      "c": "Public website",
-      "i": 1,
-      "t": "Text"
-    },
-    {
-      "c": "Family link",
-      "i": 2,
-      "t": "Text"
-    },
-    {
-      "c": "The link shows published posts without requiring the app. Only people with the link can open it.",
-      "i": 3,
-      "t": "Text"
-    }
-  ],
   "be2e87524830d351": "Session",
   "be45c9a7a3c287f2": "Upload failed.",
   "be7719a5a04b851c": "The media couldn't be shared.",
@@ -1027,7 +1034,6 @@
     "i": 1,
     "t": "Text"
   },
-  "bf3089586ca31366": "Open conversation",
   "bf76d5856ed23850": "Activity could not be opened.",
   "c13f406098a93796": "Withdrawn",
   "c15872aa1b923fd3": "Revoke",
@@ -1101,6 +1107,18 @@
     "i": 1,
     "t": "Text"
   },
+  "d8f7bb956084b74b": [
+    {
+      "c": "Encryption",
+      "i": 1,
+      "t": "Text"
+    },
+    {
+      "c": "Restore access",
+      "i": 2,
+      "t": "Text"
+    }
+  ],
   "d95ecb4808a5186b": "Go to sign in",
   "d9c740b3c9c694f8": {
     "c": "Activity",
@@ -1128,8 +1146,10 @@
     "t": "Text"
   },
   "dfa6c7c73ad88da7": "The Circle could not be created.",
+  "dffa132524f93de4": "The code is invalid. Please check your entry.",
   "e145cd8aa78c9f1f": "of {total}",
   "e2d70a54361f4211": "Set current media as conversation focus",
+  "e30f0f9df204d17d": "The file size could not be determined.",
   "e37f897b505bfbb8": "Remove member?",
   "e381376035d47da4": "Join \"{name}\"",
   "e4f61f2b3d31e88c": "Go to Home",
@@ -1151,25 +1171,6 @@
   "ea96a343057dd499": "Change image",
   "eb287187ffe94186": "Image",
   "eb78c37badfb0fbd": "Media could not be removed.",
-  "ebd9c11ec8977790": [
-    {
-      "c": "latest Web Link",
-      "i": 1,
-      "t": "Text"
-    },
-    {
-      "c": [
-        "valid until ",
-        {
-          "i": 3,
-          "k": "_gt_value_3",
-          "v": "v"
-        }
-      ],
-      "i": 2,
-      "t": "Text"
-    }
-  ],
   "ec1933aa5218cde5": "Members",
   "ecb5c533df14ffab": "Post",
   "ed0b8bf96b8d16ef": "This invitation can no longer be accepted.",
@@ -1192,6 +1193,7 @@
   "f019f1eee605f644": "Some media items don't contain GPS data. Would you like to use your current location once to add a location to these media items?",
   "f2255a27ff7dd8cd": "Enter the code from your email.",
   "f2434d74293e3aab": "Danger zone",
+  "f29cb82c8f3f6703": "Secure access to encrypted photos",
   "f37f7eea1ac0f179": "Delete account?",
   "f396be422acc8cef": {
     "c": "Members",
@@ -1219,6 +1221,7 @@
   "f4c25635ff520fe8": "Give your Circle a name.",
   "f4ee5116b0e85d38": "Join my Circle \"{circleName}\": {inviteLink}\n\nThis link can only be used once.",
   "f572dcdc1700aa53": "Post could not be deleted.",
+  "f669b5516dbac8e7": "Code copied.",
   "f680e1a1ef7f36a3": "Circle name",
   "f6a7f6c8162649d4": "Leave",
   "f75c0c2d74629504": "Timeline",
@@ -1249,6 +1252,5 @@
     "i": 1,
     "t": "Text"
   },
-  "ffb45fec4fd67dbd": "private",
   "fff3ee04d7ec41c5": "Delete draft?"
 }

@@ -13,7 +13,7 @@ import {
 
 import type { AssetKind, MediaLocation, UploadTarget } from '@beisammen/contracts';
 
-import type { ShareAssetRecord } from '@/features/convex/api';
+import type { AssetEncryptionEnvelope } from '@/features/crypto/asset-metadata';
 
 const LOCATION_COORDINATE_PRECISION = 4;
 const DOWNLOAD_DIRECTORY = `${FileSystem.cacheDirectory ?? ''}share-downloads/`;
@@ -542,7 +542,7 @@ export function assetKind(asset: ImagePicker.ImagePickerAsset): AssetKind {
   return asset.type === 'video' ? 'video' : 'image';
 }
 
-async function getFileSize(uri: string): Promise<number | undefined> {
+export async function getFileSize(uri: string): Promise<number | undefined> {
   const info = await FileSystem.getInfoAsync(normalizeFileUri(uri));
 
   if (!info.exists) {
@@ -679,7 +679,7 @@ export async function uploadPreparedFile(input: {
     bytesSent: number;
     totalBytesExpectedToSend?: number;
   }) => void;
-}): Promise<{ storageId?: string; objectKey?: string }> {
+}): Promise<{ objectKey: string }> {
   const uploadUri = normalizeFileUri(input.asset.uri);
 
   if (!uploadUri.startsWith('file://')) {
@@ -711,7 +711,19 @@ export async function uploadPreparedFile(input: {
   return { objectKey: input.target.objectKey };
 }
 
-function fallbackExtensionForAsset(asset: ShareAssetRecord): string {
+/**
+ * Structural subset of an asset record the download helpers need; satisfied
+ * by `ShareAssetRecord` and buildable from `MemoryItemRecord`.
+ */
+export interface DownloadableAssetInfo {
+  _id: string;
+  kind: AssetKind;
+  mimeType: string;
+  fileName?: string;
+  encryption?: AssetEncryptionEnvelope | null;
+}
+
+function fallbackExtensionForAsset(asset: Pick<DownloadableAssetInfo, 'kind' | 'mimeType'>): string {
   if (asset.kind === 'video') {
     return 'mp4';
   }
@@ -723,9 +735,20 @@ function fallbackExtensionForAsset(asset: ShareAssetRecord): string {
   return 'jpg';
 }
 
+function downloadTargetUri(baseName: string): string {
+  return `${DOWNLOAD_DIRECTORY}${Date.now()}-${baseName}`;
+}
+
+/**
+ * Materializes an asset as a plaintext local file for save/share. Encrypted
+ * assets are decrypted on the way (the signed URL points at BSE1 ciphertext)
+ * and named after the original file name sealed into their metadata; the
+ * caller must supply the circle keys for them.
+ */
 export async function downloadAssetToCache(input: {
-  asset: ShareAssetRecord;
+  asset: DownloadableAssetInfo;
   url: string;
+  keysByEpoch?: Map<number, Uint8Array>;
 }): Promise<string> {
   if (!DOWNLOAD_DIRECTORY) {
     throw new Error('Cache directory unavailable.');
@@ -735,13 +758,77 @@ export async function downloadAssetToCache(input: {
     intermediates: true,
   });
 
-  const baseName = input.asset.fileName?.trim()
-    ? sanitizeFileName(input.asset.fileName.trim())
-    : `${input.asset._id}.${fallbackExtensionForAsset(input.asset)}`;
-  const targetUri = `${DOWNLOAD_DIRECTORY}${Date.now()}-${baseName}`;
-  const result = await FileSystem.downloadAsync(input.url, targetUri);
+  const envelope = input.asset.encryption;
 
-  return result.uri;
+  if (!envelope) {
+    const baseName = input.asset.fileName?.trim()
+      ? sanitizeFileName(input.asset.fileName.trim())
+      : `${input.asset._id}.${fallbackExtensionForAsset(input.asset)}`;
+    const result = await FileSystem.downloadAsync(input.url, downloadTargetUri(baseName));
+
+    return result.uri;
+  }
+
+  if (!input.keysByEpoch) {
+    throw new Error('Schlüssel für dieses Medium sind noch nicht verfügbar.');
+  }
+
+  // Lazy imports keep libsodium out of the module graph for plaintext-only
+  // flows (and out of tests that only exercise the upload path).
+  const [{ getSodium }, { decryptFileToFile }, { openAssetMetadata, unwrapAssetFileKey }] =
+    await Promise.all([
+      import('@/features/crypto/sodium'),
+      import('@/features/crypto/file-crypto'),
+      import('@/features/crypto/asset-metadata'),
+    ]);
+  const sodium = await getSodium();
+  const fileKey = unwrapAssetFileKey({
+    sodium,
+    envelope,
+    keysByEpoch: input.keysByEpoch,
+  });
+  let fileName = input.asset.fileName;
+
+  if (envelope.encMetadata) {
+    try {
+      fileName = openAssetMetadata({
+        sodium,
+        fileKey,
+        encMetadata: envelope.encMetadata,
+      }).fileName ?? fileName;
+    } catch {
+      // Corrupt metadata must not block the media download itself.
+    }
+  }
+
+  const baseName = fileName?.trim()
+    ? sanitizeFileName(fileName.trim())
+    : `${input.asset._id}.${fallbackExtensionForAsset(input.asset)}`;
+  const targetUri = downloadTargetUri(baseName);
+
+  if (input.url.startsWith('file://')) {
+    // Already-decrypted plaintext from the display cache; just give it its
+    // proper download name instead of downloading and decrypting again.
+    await FileSystem.copyAsync({ from: input.url, to: targetUri });
+
+    return targetUri;
+  }
+
+  const ciphertextUri = `${DOWNLOAD_DIRECTORY}${Date.now()}-${input.asset._id}.enc`;
+
+  try {
+    await FileSystem.downloadAsync(input.url, ciphertextUri);
+    await decryptFileToFile({
+      sodium,
+      fileKey,
+      sourceUri: ciphertextUri,
+      targetUri,
+    });
+  } finally {
+    await FileSystem.deleteAsync(ciphertextUri, { idempotent: true }).catch(() => undefined);
+  }
+
+  return targetUri;
 }
 
 export async function saveAssetToDeviceLibrary(localUri: string): Promise<void> {
@@ -782,6 +869,37 @@ export function formatBytes(sizeBytes?: number): string | null {
   const inGigabytes = sizeBytes / gigabyte;
 
   return `${inGigabytes >= 10 ? Math.round(inGigabytes) : inGigabytes.toFixed(1)} GB`;
+}
+
+/**
+ * Resolves the preview asset BEFORE the upload target is requested: the exact
+ * preview byte size is declared to the server and signed into the presigned
+ * preview PUT. Retries must reuse the cached preview file from the first
+ * attempt, because recompressing could produce a different byte size than the
+ * one the server signed.
+ */
+export async function resolveUploadPreview(input: {
+  previewCacheUri?: string;
+  sourceUri: string;
+  kind: AssetKind;
+}): Promise<PreparedPreviewAsset> {
+  if (input.previewCacheUri) {
+    const uri = normalizeFileUri(input.previewCacheUri);
+    const sizeBytes = await getFileSize(uri);
+
+    if (sizeBytes !== undefined) {
+      return {
+        uri,
+        mimeType: 'image/jpeg',
+        sizeBytes,
+      };
+    }
+  }
+
+  return await createCompressedPreview({
+    uri: input.sourceUri,
+    kind: input.kind,
+  });
 }
 
 export async function createCompressedPreview(input: {

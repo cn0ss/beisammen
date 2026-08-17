@@ -1,0 +1,9 @@
+# Content signals, per contentsignals.org:
+# search:   building a search index and providing search results
+# ai-input: using content as input to AI systems (e.g. retrieval, grounding)
+# ai-train: training or fine-tuning AI models
+# beisammen welcomes all three.
+
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
+Allow: /

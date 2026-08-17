@@ -1,4 +1,8 @@
-/** Active provider for new uploads. Legacy data may still reference 'convex-files'. */
+/**
+ * The only supported storage provider. The legacy 'convex-files' code path has
+ * been removed; remaining legacy rows are moved to S3 via
+ * `convex/legacyStorage.ts` and only the schema unions still admit them.
+ */
 export type StorageProviderKind = 's3';
 
 export type AssetKind = 'image' | 'video';
@@ -15,8 +19,17 @@ export type PublicConfigValue = string | number | boolean | null;
 
 export const INSTANCE_DISCOVERY_PATH = '/.well-known/beisammen-instance.json';
 
-export const BETA_MAX_MEDIA_SELECTION_COUNT = 10;
-export const BETA_MAX_VIDEO_DURATION_SECONDS = 30;
+/**
+ * Hard per-file ceilings for uploads. The client declares exact byte sizes when
+ * requesting an upload target; the server validates them against these bounds
+ * and signs the declared `content-length` into the presigned PUT so storage
+ * enforces the exact size.
+ */
+export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 ** 3;
+/** Compressed preview JPEGs stay small; anything larger is rejected. */
+export const MAX_PREVIEW_SIZE_BYTES = 5 * 1024 * 1024;
+/** Avatar and circle images (single client-prepared images). */
+export const MAX_IMAGE_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024;
 export const COMMENT_MAX_BODY_LENGTH = 1000;
 export const REACTION_TOP_EMOJI_LIMIT = 3;
 
@@ -417,11 +430,6 @@ export function assertAppVersionSupported(
   );
 }
 
-export type ConvexFilesStorageReference = {
-  provider: 'convex-files';
-  storageId: string;
-};
-
 export type S3StorageReference = {
   provider: 's3';
   objectKey: string;
@@ -431,7 +439,7 @@ export type S3StorageReference = {
   basePath?: string;
 };
 
-export type StorageReference = ConvexFilesStorageReference | S3StorageReference;
+export type StorageReference = S3StorageReference;
 
 export type UploadTarget = {
   provider: 's3';
@@ -497,13 +505,15 @@ export interface CreateUploadTargetInput {
   mimeType: string;
   kind: AssetKind;
   fileName: string;
+  /** Exact byte size of the original file; signed into the presigned PUT. */
+  sizeBytes: number;
+  /** Exact byte size of the compressed preview JPEG; signed into its PUT. */
+  previewSizeBytes: number;
 }
 
 export interface CompleteUploadInput {
   uploadId: string;
-  storageId?: string;
   objectKey?: string;
-  previewStorageId?: string;
   previewObjectKey?: string;
   fileName?: string;
   sizeBytes?: number;

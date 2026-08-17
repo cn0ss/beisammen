@@ -17,7 +17,6 @@ export const httpSurface = [
   'billing.revenuecatWebhook',
   'healthz',
   'instance.discovery',
-  'publicShare.preview',
   'waitlist.join',
 ] as const;
 
@@ -150,36 +149,6 @@ async function readWaitlistPayload(
   };
 }
 
-async function readPublicSharePayload(
-  request: Request,
-): Promise<{
-  token: string | null;
-  cursor: string | null;
-}> {
-  const contentType = request.headers.get('content-type') ?? '';
-
-  if (!contentType.includes('application/json')) {
-    return {
-      token: null,
-      cursor: null,
-    };
-  }
-
-  const body: unknown = await request.json().catch(() => null);
-
-  if (!isRecord(body)) {
-    return {
-      token: null,
-      cursor: null,
-    };
-  }
-
-  return {
-    token: typeof body.token === 'string' ? body.token : null,
-    cursor: typeof body.cursor === 'string' || body.cursor === null ? body.cursor : null,
-  };
-}
-
 http.route({
   path: '/healthz',
   method: 'GET',
@@ -278,46 +247,6 @@ http.route({
 
       throw error;
     }
-  }),
-});
-
-http.route({
-  path: '/public/share/preview',
-  method: 'OPTIONS',
-  handler: httpAction(async () => {
-    return createPublicResponse({ status: 204 });
-  }),
-});
-
-http.route({
-  path: '/public/share/preview',
-  method: 'POST',
-  handler: httpAction(async (ctx, request) => {
-    const payload = await readPublicSharePayload(request);
-
-    if (!payload.token?.trim()) {
-      return createPublicJsonResponse(
-        { ok: false, error: 'token_required' },
-        { status: 400 },
-      );
-    }
-
-    const result = await ctx.runAction(internal.publicLinks.resolvePublicCirclePayload, {
-      token: payload.token,
-      cursor: payload.cursor,
-    });
-
-    if (!result) {
-      return createPublicJsonResponse(
-        { ok: false, error: 'not_found' },
-        { status: 404 },
-      );
-    }
-
-    return createPublicJsonResponse({
-      ok: true,
-      ...result,
-    });
   }),
 });
 

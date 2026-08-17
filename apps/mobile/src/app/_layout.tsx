@@ -15,6 +15,7 @@ import { ScreenTransitionProvider } from '@/components/transition/screen-transit
 import { Colors } from '@/constants/theme';
 import { SessionProvider } from '@/features/auth/session-provider';
 import { ConvexAppProvider } from '@/features/convex/provider';
+import { CryptoProvider } from '@/features/crypto/provider';
 import { SplashDoneProvider } from '@/features/observe/interactive';
 import { loadTranslations } from '@/i18n/load-translations';
 import { createLogger } from '@/lib/logger';
@@ -124,12 +125,14 @@ function RootLayout() {
           <ScreenTransitionProvider>
             <SessionProvider>
               <ConvexAppProvider>
-                <NavigationLogger />
-                <Stack screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="index" />
-                  <Stack.Screen name="(auth)" />
-                  <Stack.Screen name="(app)" />
-                </Stack>
+                <CryptoProvider>
+                  <NavigationLogger />
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="index" />
+                    <Stack.Screen name="(auth)" />
+                    <Stack.Screen name="(app)" />
+                  </Stack>
+                </CryptoProvider>
               </ConvexAppProvider>
             </SessionProvider>
           </ScreenTransitionProvider>

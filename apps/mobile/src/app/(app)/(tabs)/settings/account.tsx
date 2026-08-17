@@ -91,9 +91,15 @@ export default function AccountScreen() {
       }
 
       const processedAsset = await optimizeAvatarImageAsset(pickedAsset);
+
+      if (processedAsset.sizeBytes === undefined || processedAsset.sizeBytes <= 0) {
+        throw new Error(gt('Die Dateigröße konnte nicht ermittelt werden.'));
+      }
+
       const prepared = await createProfileImageTarget({
         mimeType: processedAsset.mimeType,
         fileName: processedAsset.fileName,
+        sizeBytes: processedAsset.sizeBytes,
       });
       const uploaded = await uploadPreparedFile({
         target: prepared.target,
@@ -103,7 +109,6 @@ export default function AccountScreen() {
       await completeProfileImageUpload({
         uploadId: prepared.uploadId,
         objectKey: uploaded.objectKey,
-        storageId: uploaded.storageId,
         sizeBytes: processedAsset.sizeBytes,
       });
       setFeedback(gt('Profilbild aktualisiert.'));

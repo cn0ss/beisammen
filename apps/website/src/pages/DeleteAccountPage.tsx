@@ -95,7 +95,7 @@ export function DeleteAccountPage({ locale }: { locale: Locale }) {
 
   usePageMeta({
     lang: locale,
-    title: de ? 'Konto löschen — beisammen' : 'Delete account — beisammen',
+    title: de ? 'Konto löschen · beisammen' : 'Delete account · beisammen',
     description: de
       ? 'So löschst du dein beisammen-Konto und die zugehörigen Daten dauerhaft.'
       : 'How to permanently delete your beisammen account and its data.',
@@ -106,8 +106,7 @@ export function DeleteAccountPage({ locale }: { locale: Locale }) {
       locale={locale}
       page="delete-account"
       eyebrow={de ? 'Konto löschen' : 'Delete account'}
-      titlePlain={de ? 'Deine Daten.' : 'Your data.'}
-      titleItalic={de ? 'Deine Entscheidung.' : 'Your decision.'}
+      title={de ? 'Deine Daten. Deine Entscheidung.' : 'Your data. Your decision.'}
       lede={
         de
           ? 'Du kannst dein beisammen-Konto und die damit verbundenen Daten jederzeit dauerhaft löschen.'

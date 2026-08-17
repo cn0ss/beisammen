@@ -20,8 +20,13 @@ import { BottomTabInset, Fonts, FontSize, Spacing } from '@/constants/theme';
 import { enterListItem, enterSection } from '@/lib/motion';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import { useCrypto } from '@/features/crypto/provider';
+import { useCircleKeys } from '@/features/crypto/use-circle-keys';
 import { buildShareDetailHref } from '@/features/engagement/navigation';
-import { uploadReadinessNotice } from '@/features/media/upload-readiness';
+import {
+  encryptionReadinessNotice,
+  uploadReadinessNotice,
+} from '@/features/media/upload-readiness';
 import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
 import { useShareUploadFlow } from '@/features/media/use-share-upload-flow';
 import { useMarkInteractive } from '@/features/observe/interactive';
@@ -69,6 +74,11 @@ export default function HomeScreen() {
         : (circles[0]?._id ?? null)
       : null;
   const selectedCircle = circles?.find((circle) => circle._id === resolvedCircleId) ?? null;
+  // Resolve the active circle's E2EE key while Home is visible: initializes
+  // the first epoch and tops up missing grants for other members, so keys are
+  // in place before the media pipeline starts encrypting (docs/e2ee.md).
+  const crypto = useCrypto();
+  const circleKeys = useCircleKeys(resolvedCircleId);
   const shareFeed = usePaginatedQuery(
     api.shares.listForCircle,
     hasViewer && resolvedCircleId ? { circleId: resolvedCircleId } : 'skip',
@@ -112,7 +122,7 @@ export default function HomeScreen() {
   } = useShareUploadFlow({
     selectedCircle,
     activeDraft,
-    existingDraftAssetCount: activeDraft?.assetCount ?? 0,
+    circleKeys,
     onFeedback: setFeedback,
   });
 
@@ -375,8 +385,19 @@ export default function HomeScreen() {
       return null;
     }
 
+    // Uploads encrypt with the circle key; block the picker until both the
+    // user keys and this circle's key are usable on this device.
+    const keysNotice = encryptionReadinessNotice({
+      cryptoStatus: crypto.status,
+      circleKeysStatus: circleKeys.status,
+    });
+    if (keysNotice) {
+      setFeedback(m(keysNotice.message));
+      return null;
+    }
+
     return uploadReadiness;
-  }, [gt, m, selectedCircle, uploadReadiness]);
+  }, [circleKeys.status, crypto.status, gt, m, selectedCircle, uploadReadiness]);
 
   const handlePickMediaWithReadiness = useCallback(async () => {
     const readiness = checkUploadReadiness();

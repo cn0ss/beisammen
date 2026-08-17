@@ -25,13 +25,10 @@ import {
   createMemoryItemsForPublishedShare,
   removeMemoryItemFromDiscoverySummaries,
 } from './memories';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { listShareAssetsForDisplay } from './lib/shareAssets';
-import {
-  deleteStorageReference,
-  formatFeedTimestamp,
-  storageReferenceKey,
-} from './lib/storage/shared';
+import { formatFeedTimestamp } from './lib/storage/shared';
 import {
   buildAssetEngagementSummaries,
   buildShareEngagementSummary,
@@ -74,6 +71,7 @@ function mapAsset(asset: Doc<'assets'>, engagement?: EngagementSummary) {
     durationSeconds: asset.durationSeconds,
     location: asset.location,
     capturedAt: asset.capturedAt,
+    encryption: asset.encryption,
     engagement: fallbackEngagementSummary(engagement),
   };
 }

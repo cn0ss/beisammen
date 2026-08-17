@@ -112,6 +112,33 @@ export async function cacheUploadRecoveryFile(input: {
   return targetUri;
 }
 
+/**
+ * Ciphertext target URIs next to the recovery source files: retries must
+ * re-upload the byte-identical ciphertext, so it has to survive app restarts
+ * just like the plaintext cache files. Only sealed (server-safe) material is
+ * ever written there — never raw file or circle keys.
+ */
+export async function prepareUploadEncryptionTargets(input: {
+  instanceUrl: string;
+  shareBatchId: string;
+  queueId: string;
+}): Promise<{ encryptedUri: string; encryptedPreviewUri: string } | null> {
+  if (!recoveryRootAvailable()) {
+    return null;
+  }
+
+  const directory = `${RECOVERY_ROOT}${encodeURIComponent(normalizeBaseUrl(input.instanceUrl))}/${input.shareBatchId}/files/`;
+
+  await FileSystem.makeDirectoryAsync(directory, {
+    intermediates: true,
+  });
+
+  return {
+    encryptedUri: `${directory}${safeFileName(input.queueId)}-encrypted.bin`,
+    encryptedPreviewUri: `${directory}${safeFileName(input.queueId)}-encrypted-preview.bin`,
+  };
+}
+
 export async function clearUploadRecoveryForInstance(instanceUrl: string): Promise<void> {
   await uploadRecoveryStore.clearInstance({ instanceUrl });
 }

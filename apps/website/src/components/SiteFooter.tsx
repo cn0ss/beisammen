@@ -8,7 +8,7 @@ export function SiteFooter({ locale }: { locale: Locale }) {
     <footer className="mt-12 overflow-hidden border-t border-ink/10 px-4 pt-10 sm:mt-20 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <div className="grid items-center gap-6 text-center lg:grid-cols-[1fr_auto_1fr] lg:text-left">
-          <p className="font-serif text-ink/70 italic">{t.footer.tagline}</p>
+          <p className="text-sm text-ink/70">{t.footer.tagline}</p>
           <nav aria-label="Secondary">
             <ul role="list" className="flex items-center justify-center gap-6 text-sm text-ink/70">
               <li>

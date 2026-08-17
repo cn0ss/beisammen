@@ -7,8 +7,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { MediaLocation } from '@beisammen/contracts';
 
 import { Radius } from '@/constants/theme';
+import type { AssetEncryptionEnvelope } from '@/features/crypto/asset-metadata';
 import { formatMediaLocation } from '@/features/media/client';
-import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
+import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
+import { useDecryptedAssetLocation } from '@/features/media/use-decrypted-asset-location';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
 
@@ -21,16 +23,23 @@ function formatMemoryDay(timestamp: number, format: Intl.DateTimeFormat): string
   return format.format(new Date(timestamp));
 }
 
-/** Structural subset a tile needs — satisfied by MemoryItemRecord and MemoryMapItem. */
+/** Structural subset a tile needs — satisfied by MemoryItemRecord and LocatedMemoryItem. */
 export interface MemoryTileData {
   _id: string;
   assetId: string;
+  circleId: string;
   kind: 'image' | 'video';
   circleName: string;
   capturedAt: number | null;
   timelineAt: number;
   placeLabel: string | null;
   location?: MediaLocation | null;
+  /** Carries the encryption envelope so encrypted media resolves to previews. */
+  asset?: {
+    mimeType?: string;
+    fileName?: string;
+    encryption?: AssetEncryptionEnvelope;
+  };
 }
 
 export const MemoryTile = memo(function MemoryTile({
@@ -45,8 +54,24 @@ export const MemoryTile = memo(function MemoryTile({
   const theme = useTheme();
   const gt = useGT();
   const memoryDayFormat = useDateFormat(MEMORY_DAY_FORMAT_OPTIONS);
-  const signedUrl = useSignedAssetUrl(item.assetId, 'preview');
-  const locationLabel = item.placeLabel ?? formatMediaLocation(item.location ?? undefined);
+  const signedUrl = useAssetMediaUri(
+    {
+      _id: item.assetId,
+      kind: item.kind,
+      mimeType: item.asset?.mimeType,
+      fileName: item.asset?.fileName,
+      encryption: item.asset?.encryption,
+    },
+    'preview',
+    item.circleId,
+  );
+  const decryptedLocation = useDecryptedAssetLocation({
+    assetId: item.assetId,
+    encryption: item.asset?.encryption,
+    circleId: item.circleId,
+  });
+  const locationLabel =
+    item.placeLabel ?? formatMediaLocation(item.location ?? decryptedLocation ?? undefined);
   const dateLabel = formatMemoryDay(item.capturedAt ?? item.timelineAt, memoryDayFormat);
 
   return (
@@ -68,7 +93,12 @@ export const MemoryTile = memo(function MemoryTile({
       ]}
     >
       {signedUrl ? (
-        <Image source={{ uri: signedUrl }} style={styles.tileImage} contentFit="cover" />
+        <Image
+          source={{ uri: signedUrl }}
+          style={styles.tileImage}
+          contentFit="cover"
+          recyclingKey={item.assetId}
+        />
       ) : (
         <View style={styles.tileFallback}>
           <Ionicons

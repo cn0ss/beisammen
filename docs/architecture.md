@@ -89,11 +89,11 @@ deployments with legacy memory rows should run
 `internal.memories.backfillDiscoveryBatch` after `internal.memories.backfillBatch`;
 use `dryRun=true` first to verify the bounded patch and summary counts.
 
-`publicCircleLinks` stores revocable, hashed tokens for no-install web access to
-a circle's published feed. The raw token is only returned when an owner or admin
-creates a new link; public viewers load `/share/#<token>`, and the web frontend
-exchanges that token through the Convex HTTP endpoint for a bounded, read-only
-page of signed media URLs.
+`publicCircleLinks` is currently dormant: the public share-link feature (link
+creation and revocation, the `/share` web viewer, and the `/public/share/preview`
+HTTP endpoint) has been removed and will be rebuilt in an E2EE-compatible form.
+The table definition stays in the schema so existing rows remain readable;
+account deletion and admin purge paths still clean up its rows.
 
 ## Billing model
 

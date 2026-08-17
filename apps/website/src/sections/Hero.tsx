@@ -35,9 +35,7 @@ export function Hero({ locale }: { locale: Locale }) {
               </h1>
 
               <p className="mx-auto mt-6 max-w-[40ch] animate-rise text-2xl font-semibold tracking-tight text-balance text-cream sm:text-3xl [animation-delay:180ms]">
-                {t.hero.titlePlain}{' '}
-                <em className="font-serif font-normal text-blush italic">{t.hero.titleItalic}</em>{' '}
-                {t.hero.titleEnd}
+                {t.hero.title}
               </p>
 
               <p className="mx-auto mt-4 max-w-[56ch] animate-rise text-lg/8 text-pretty text-cream/85 sm:text-base/7 [animation-delay:260ms]">
@@ -49,7 +47,7 @@ export function Hero({ locale }: { locale: Locale }) {
                   size="lg"
                   className="h-13 rounded-full bg-cream px-7 text-base text-ink hover:-translate-y-0.5 hover:bg-cream"
                   nativeButton={false}
-                  render={<Link to={`${home}#access`} />}
+                  render={<Link to={`${home}#download`} />}
                 >
                   {t.hero.primaryCta}
                   <span aria-hidden="true" className="transition-transform duration-250 ease-(--ease-quiet) group-hover/button:translate-x-0.5">

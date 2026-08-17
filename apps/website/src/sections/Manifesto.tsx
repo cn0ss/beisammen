@@ -11,8 +11,7 @@ export function Manifesto({ locale }: { locale: Locale }) {
         <Reveal>
           <Eyebrow>{t.manifesto.eyebrow}</Eyebrow>
           <h2 className="mt-6 max-w-[24ch] text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
-            {t.manifesto.titlePlain}{' '}
-            <em className="font-serif font-normal text-ember italic">{t.manifesto.titleItalic}</em>
+            {t.manifesto.title}
           </h2>
           <p className="mt-8 max-w-[48ch] text-xl/8 text-pretty text-ink/70 sm:text-lg/8">
             {t.manifesto.body}

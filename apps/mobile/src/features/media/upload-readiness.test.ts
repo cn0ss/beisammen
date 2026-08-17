@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { uploadReadinessNotice } from './upload-readiness';
+import { encryptionReadinessNotice, uploadReadinessNotice } from './upload-readiness';
 
 describe('upload readiness copy', () => {
   test('returns no notice when uploads are allowed', () => {
@@ -63,6 +63,64 @@ describe('upload readiness copy', () => {
     ).toEqual({
       title: 'Abrechnung nicht erreichbar',
       message: 'Die Upload-Berechtigung konnte gerade nicht geprüft werden. Versuche es gleich noch einmal.',
+      action: 'retry_later',
+    });
+  });
+
+  test('allows uploads when user and circle keys are ready', () => {
+    expect(
+      encryptionReadinessNotice({
+        cryptoStatus: 'ready',
+        circleKeysStatus: 'ready',
+      }),
+    ).toBeNull();
+  });
+
+  test('blocks uploads while encryption is still being set up', () => {
+    expect(
+      encryptionReadinessNotice({
+        cryptoStatus: 'loading',
+        circleKeysStatus: 'loading',
+      }),
+    ).toEqual({
+      title: 'Verschlüsselung wird eingerichtet',
+      message: 'Die Verschlüsselung wird gerade eingerichtet. Versuche es gleich noch einmal.',
+      action: 'retry_later',
+    });
+    expect(
+      encryptionReadinessNotice({
+        cryptoStatus: 'ready',
+        circleKeysStatus: 'loading',
+      }),
+    ).toEqual({
+      title: 'Verschlüsselung wird eingerichtet',
+      message: 'Der Schlüssel für diesen Circle wird noch geladen. Versuche es gleich noch einmal.',
+      action: 'retry_later',
+    });
+  });
+
+  test('tells the user that another member must grant the circle key', () => {
+    expect(
+      encryptionReadinessNotice({
+        cryptoStatus: 'ready',
+        circleKeysStatus: 'waiting-for-grant',
+      }),
+    ).toEqual({
+      title: 'Verschlüsselung wird eingerichtet',
+      message: 'Ein anderes Mitglied muss dir den Schlüssel für diesen Circle erst freigeben. Versuche es gleich noch einmal.',
+      action: 'retry_later',
+    });
+  });
+
+  test('asks for key recovery before uploads on an unrecovered device', () => {
+    expect(
+      encryptionReadinessNotice({
+        cryptoStatus: 'recovery-required',
+        circleKeysStatus: 'loading',
+      }),
+    ).toEqual({
+      title: 'Schlüssel wiederherstellen',
+      message: 'Stelle zuerst deine Verschlüsselung mit deinem Wiederherstellungscode auf diesem Gerät wieder her, bevor du Medien hochlädst.',
       action: 'retry_later',
     });
   });

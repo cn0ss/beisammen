@@ -8,6 +8,51 @@ export type UploadReadinessNotice = {
   action: 'choose_plan' | 'owner_required' | 'retry_later';
 };
 
+/**
+ * Blocks the picker while E2EE keys are not usable yet: uploads encrypt with
+ * the circle key, so without it no media can leave the device. Mirrors the
+ * status unions of `useCrypto` and `useCircleKeys` structurally so the pure
+ * module stays testable without the provider tree.
+ */
+export function encryptionReadinessNotice(input: {
+  cryptoStatus: 'loading' | 'ready' | 'recovery-required' | 'unavailable';
+  circleKeysStatus: 'loading' | 'waiting-for-grant' | 'ready';
+}): UploadReadinessNotice | null {
+  if (input.cryptoStatus === 'recovery-required') {
+    return {
+      title: msg('Schlüssel wiederherstellen'),
+      message: msg('Stelle zuerst deine Verschlüsselung mit deinem Wiederherstellungscode auf diesem Gerät wieder her, bevor du Medien hochlädst.'),
+      action: 'retry_later',
+    };
+  }
+
+  if (input.cryptoStatus !== 'ready') {
+    return {
+      title: msg('Verschlüsselung wird eingerichtet'),
+      message: msg('Die Verschlüsselung wird gerade eingerichtet. Versuche es gleich noch einmal.'),
+      action: 'retry_later',
+    };
+  }
+
+  if (input.circleKeysStatus === 'waiting-for-grant') {
+    return {
+      title: msg('Verschlüsselung wird eingerichtet'),
+      message: msg('Ein anderes Mitglied muss dir den Schlüssel für diesen Circle erst freigeben. Versuche es gleich noch einmal.'),
+      action: 'retry_later',
+    };
+  }
+
+  if (input.circleKeysStatus !== 'ready') {
+    return {
+      title: msg('Verschlüsselung wird eingerichtet'),
+      message: msg('Der Schlüssel für diesen Circle wird noch geladen. Versuche es gleich noch einmal.'),
+      action: 'retry_later',
+    };
+  }
+
+  return null;
+}
+
 export function uploadReadinessNotice(
   readiness: CircleUploadReadiness | null | undefined,
 ): UploadReadinessNotice | null {

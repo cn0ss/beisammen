@@ -16,8 +16,8 @@ Private and noncommercial self-hosting is allowed under the repository license.
   API enabled) and its publishable key
 - you bring your own S3-compatible storage credentials; new uploads require S3
 - you operate your own deployment and backups
-- billing is disabled; no RevenueCat, payment plans, upload-count limit, or
-  video duration limit is required for self-hosted instances
+- billing is disabled; no RevenueCat or payment plans are required for
+  self-hosted instances
 - support is best-effort only
 
 ## Supported self-hosted auth mode

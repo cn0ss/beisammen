@@ -5,7 +5,7 @@ import type { MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { internalAction, internalMutation } from './_generated/server';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
-import { deleteStorageReference, storageReferenceKey } from './lib/storage/shared';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 
 /**
  * Admin maintenance functions. Run from the CLI, e.g.:
@@ -17,6 +17,9 @@ import { deleteStorageReference, storageReferenceKey } from './lib/storage/share
  * clients querying a half-deleted graph.
  */
 
+// Mirrors the schema union: the purge reads rows written before the S3
+// migration, so the legacy member stays until legacyStorage.migrateBatch has
+// drained all 'convex-files' rows (see convex/legacyStorage.ts).
 const storageReferenceValidator = v.union(
   v.object({
     provider: v.literal('convex-files'),

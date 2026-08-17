@@ -6,6 +6,7 @@ import type { ActionCtx, MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import { adjustCircleStats, getCircleStatsOrFallback } from './circleStats';
+import { deleteCircleKeyGrantsForMember } from './keys';
 import {
   BILLING_FEATURE_IDS,
   type BillingOwner,
@@ -13,20 +14,25 @@ import {
   isBillingConfigured,
   requireCloudOwnerFeatureAccess,
   resolveCircleBillingOwner,
+  resolveOwnerStorageCap,
   trackCloudOwnerUsage,
 } from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { canManageCircle, isOwnerRole } from './lib/permissions';
-import { createS3ReadUrl, createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
+import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
+import {
+  createS3ReadUrl,
+  createS3UploadTarget,
+  deleteS3Object,
+  verifyS3ObjectExists,
+} from './lib/storage/s3';
 import {
   buildImageUploadObjectKey,
   buildS3StorageReference,
-  deleteStorageReference,
   getCurrentInstanceStorage,
   requireS3StorageProvider,
-  resolveConvexReadUrl,
-  storageReferenceKey,
 } from './lib/storage/shared';
+import { assertValidDeclaredImageSize } from './lib/uploadLimits';
 import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const circleFunctionSurface = [
@@ -52,6 +58,7 @@ interface PreparedCircleImageUpload {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
   mimeType: string;
+  sizeBytes: number;
 }
 
 interface CircleImageCompleteContext {
@@ -60,6 +67,8 @@ interface CircleImageCompleteContext {
   circleId: Id<'circles'>;
   billingOwner: BillingOwner;
   previousSizeBytes: number;
+  // Optional only for legacy rows created before size enforcement.
+  declaredSizeBytes?: number;
 }
 
 async function refundCloudCircleImageUsage(input: {
@@ -488,6 +497,7 @@ export const removeMember = mutation({
     }
 
     await ctx.db.delete(targetMembership._id);
+    await deleteCircleKeyGrantsForMember(ctx, args.circleId, targetMembership.userId);
     await adjustCircleStats(ctx, args.circleId, {
       memberCount: -1,
     });
@@ -568,6 +578,7 @@ export const leave = mutation({
     }
 
     await ctx.db.delete(membership._id);
+    await deleteCircleKeyGrantsForMember(ctx, args.circleId, viewer._id);
     await adjustCircleStats(ctx, args.circleId, {
       memberCount: -1,
     });
@@ -584,6 +595,7 @@ export const prepareImageUpload = internalMutation({
     circleId: v.id('circles'),
     mimeType: v.string(),
     fileName: v.string(),
+    sizeBytes: v.number(),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -596,6 +608,7 @@ export const prepareImageUpload = internalMutation({
     const storageMode = getCurrentInstanceStorage();
 
     requireS3StorageProvider(storageMode.providerKind);
+    assertValidDeclaredImageSize(args.sizeBytes);
 
     const uploadId = await ctx.db.insert('imageUploads', {
       targetKind: 'circle-image',
@@ -604,6 +617,9 @@ export const prepareImageUpload = internalMutation({
       providerKind: storageMode.providerKind,
       fileName: args.fileName.trim(),
       mimeType: args.mimeType.trim(),
+      // Declared byte size, enforced by signing content-length into the
+      // presigned PUT and re-checked against the S3 HEAD at completion.
+      sizeBytes: args.sizeBytes,
       status: 'uploading',
       createdAt: Date.now(),
     });
@@ -626,6 +642,7 @@ export const prepareImageUpload = internalMutation({
       uploadId,
       pendingStorage,
       mimeType: args.mimeType.trim(),
+      sizeBytes: args.sizeBytes,
     };
   },
 });
@@ -719,6 +736,7 @@ export const getImageCompleteContext = internalQuery({
       circleId: upload.circleId,
       billingOwner: await resolveCircleBillingOwner(ctx, upload.circleId),
       previousSizeBytes: circle.imageSizeBytes ?? 0,
+      declaredSizeBytes: upload.sizeBytes,
     };
   },
 });
@@ -726,20 +744,14 @@ export const getImageCompleteContext = internalQuery({
 export const finalizeImageUpload = internalMutation({
   args: {
     uploadId: v.id('imageUploads'),
-    storage: v.union(
-      v.object({
-        provider: v.literal('convex-files'),
-        storageId: v.id('_storage'),
-      }),
-      v.object({
-        provider: v.literal('s3'),
-        objectKey: v.string(),
-        bucket: v.string(),
-        region: v.optional(v.string()),
-        endpoint: v.optional(v.string()),
-        basePath: v.optional(v.string()),
-      }),
-    ),
+    storage: v.object({
+      provider: v.literal('s3'),
+      objectKey: v.string(),
+      bucket: v.string(),
+      region: v.optional(v.string()),
+      endpoint: v.optional(v.string()),
+      basePath: v.optional(v.string()),
+    }),
     sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -873,6 +885,7 @@ export const createImageTarget = action({
     circleId: v.id('circles'),
     mimeType: v.string(),
     fileName: v.string(),
+    sizeBytes: v.number(),
   },
   handler: async (ctx, args) => {
     const policy = getDeploymentPolicyFromEnv();
@@ -891,6 +904,7 @@ export const createImageTarget = action({
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
         featureId: BILLING_FEATURE_IDS.storageBytes,
+        requiredBalance: args.sizeBytes,
         properties: {
           circleId: args.circleId,
           targetKind: 'circle-image',
@@ -912,6 +926,7 @@ export const createImageTarget = action({
       target: await createS3UploadTarget({
         storage: prepared.pendingStorage,
         mimeType: prepared.mimeType,
+        sizeBytes: prepared.sizeBytes,
       }),
     };
   },
@@ -921,7 +936,6 @@ export const completeImageUpload = action({
   args: {
     uploadId: v.id('imageUploads'),
     objectKey: v.optional(v.string()),
-    storageId: v.optional(v.id('_storage')),
     sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -952,15 +966,27 @@ export const completeImageUpload = action({
         throw new Error('Completed circle image object key does not match the prepared target.');
       }
 
-      await verifyS3ObjectExists({
+      const verified = await verifyS3ObjectExists({
         storage: completeContext.pendingStorage,
       });
+
+      // Belt and suspenders: the signed content-length already pins the PUT
+      // to the declared size. On a mismatch, drop the object and fail.
+      if (
+        completeContext.declaredSizeBytes !== undefined &&
+        verified.sizeBytes !== completeContext.declaredSizeBytes
+      ) {
+        await deleteS3Object({ storage: completeContext.pendingStorage });
+        throw new Error('Uploaded circle image size does not match the declared size.');
+      }
 
       const billingProperties = {
         uploadId: args.uploadId,
         circleId: completeContext.circleId,
         targetKind: 'circle-image',
       };
+      // The server-observed size is authoritative for billing and metadata.
+      const completedSizeBytes = verified.sizeBytes;
 
       if (policy.isCloud) {
         await trackCloudOwnerUsage(ctx, {
@@ -972,15 +998,23 @@ export const completeImageUpload = action({
         });
         chargedUsage.mediaUploads = 1;
 
-        if (args.sizeBytes !== undefined && args.sizeBytes > 0) {
+        if (completedSizeBytes > 0) {
+          // Enforced atomically inside the usage mutation to close the
+          // parallel-completion race.
+          const storageCap = await resolveOwnerStorageCap(
+            ctx,
+            completeContext.billingOwner._id,
+          );
+
           await trackCloudOwnerUsage(ctx, {
             owner: completeContext.billingOwner,
             entityId: completeContext.circleId,
             featureId: BILLING_FEATURE_IDS.storageBytes,
-            value: args.sizeBytes,
+            value: completedSizeBytes,
+            ...(storageCap !== null ? { maxStorageBytes: storageCap } : {}),
             properties: billingProperties,
           });
-          chargedUsage.storageBytes = args.sizeBytes;
+          chargedUsage.storageBytes = completedSizeBytes;
         }
       }
 
@@ -991,7 +1025,7 @@ export const completeImageUpload = action({
       } = await ctx.runMutation(internal.circles.finalizeImageUpload, {
         uploadId: args.uploadId,
         storage: completeContext.pendingStorage,
-        ...(args.sizeBytes !== undefined ? { sizeBytes: args.sizeBytes } : {}),
+        sizeBytes: completedSizeBytes,
       });
       chargedUsage.mediaUploads = 0;
       chargedUsage.storageBytes = 0;
@@ -1139,8 +1173,10 @@ export const getImageReadUrl = action({
       };
     }
 
-    if (context.storage.provider === 'convex-files') {
-      return await resolveConvexReadUrl(ctx, context.storage.storageId);
+    // The convex-files read path is gone. Remaining legacy rows must be moved
+    // to S3 first via `npx convex run legacyStorage:migrateBatch`.
+    if (context.storage.provider !== 's3') {
+      throw new Error('Legacy media must be migrated to S3.');
     }
 
     return await createS3ReadUrl({

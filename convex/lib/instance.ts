@@ -1,11 +1,7 @@
 import {
-  BETA_MAX_MEDIA_SELECTION_COUNT,
-  BETA_MAX_VIDEO_DURATION_SECONDS,
   type BillingPlanSummary,
   type DeploymentKind,
 } from '@beisammen/contracts';
-
-export { BETA_MAX_MEDIA_SELECTION_COUNT, BETA_MAX_VIDEO_DURATION_SECONDS };
 
 type EnvSource = Record<string, string | undefined>;
 
@@ -21,10 +17,6 @@ export interface DeploymentPolicy {
     | {
         enabled: false;
       };
-  limits: {
-    mediaSelectionCount: number | null;
-    videoDurationSeconds: number | null;
-  };
 }
 
 export const CLOUD_BILLING_PROVIDER = 'revenuecat';
@@ -98,10 +90,6 @@ export function getDeploymentPolicyFromEnv(env: EnvSource = process.env): Deploy
       billing: {
         enabled: false,
       },
-      limits: {
-        mediaSelectionCount: null,
-        videoDurationSeconds: null,
-      },
     };
   }
 
@@ -113,23 +101,11 @@ export function getDeploymentPolicyFromEnv(env: EnvSource = process.env): Deploy
       enabled: true,
       provider: CLOUD_BILLING_PROVIDER,
     },
-    limits: {
-      mediaSelectionCount: BETA_MAX_MEDIA_SELECTION_COUNT,
-      videoDurationSeconds: BETA_MAX_VIDEO_DURATION_SECONDS,
-    },
   };
 }
 
 export function isSelfHostedDeployment(env: EnvSource = process.env): boolean {
   return getDeploymentPolicyFromEnv(env).isSelfHosted;
-}
-
-export function getCurrentMediaSelectionLimit(): number | null {
-  return getDeploymentPolicyFromEnv().limits.mediaSelectionCount;
-}
-
-export function getCurrentVideoDurationLimit(): number | null {
-  return getDeploymentPolicyFromEnv().limits.videoDurationSeconds;
 }
 
 export function readCloudBillingPlansFromEnv(

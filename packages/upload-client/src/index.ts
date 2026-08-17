@@ -1,16 +1,9 @@
 import {
-  BETA_MAX_MEDIA_SELECTION_COUNT,
-  BETA_MAX_VIDEO_DURATION_SECONDS,
   SUPPORTED_IMAGE_MIME_TYPES,
   SUPPORTED_VIDEO_MIME_TYPES,
   type AssetKind,
   type MediaLocation,
   type UploadStatus,
-} from '@beisammen/contracts';
-
-export {
-  BETA_MAX_MEDIA_SELECTION_COUNT,
-  BETA_MAX_VIDEO_DURATION_SECONDS,
 } from '@beisammen/contracts';
 
 const supportedImageMimeTypes: ReadonlySet<string> = new Set(SUPPORTED_IMAGE_MIME_TYPES);
@@ -30,40 +23,6 @@ export interface PreparedUploadQueueAsset {
   capturedAt?: number;
 }
 
-export function assertUploadBatchWithinBetaLimits(input: {
-  selectedCount: number;
-  existingDraftAssetCount?: number;
-  existingPendingCount?: number;
-  maxItems?: number;
-}): void {
-  const maxItems = input.maxItems ?? BETA_MAX_MEDIA_SELECTION_COUNT;
-  const totalCount =
-    input.selectedCount +
-    (input.existingDraftAssetCount ?? 0) +
-    (input.existingPendingCount ?? 0);
-
-  if (totalCount > maxItems) {
-    throw new Error(`In der Beta können höchstens ${maxItems} Medien pro Entwurf hochgeladen werden.`);
-  }
-}
-
-export function assertPreparedUploadAssetWithinBetaLimits(
-  asset: Pick<
-    PreparedUploadQueueAsset,
-    'kind' | 'mimeType' | 'fileName' | 'sizeBytes' | 'durationSeconds'
-  >,
-): void {
-  assertPreparedUploadAssetMimeTypeSupported(asset);
-
-  if (
-    asset.kind === 'video' &&
-    asset.durationSeconds !== undefined &&
-    asset.durationSeconds > BETA_MAX_VIDEO_DURATION_SECONDS
-  ) {
-    throw new Error(`Videos dürfen in der Beta maximal ${BETA_MAX_VIDEO_DURATION_SECONDS} Sekunden lang sein.`);
-  }
-}
-
 export function assertPreparedUploadAssetMimeTypeSupported(
   asset: Pick<PreparedUploadQueueAsset, 'kind' | 'mimeType' | 'fileName'>,
 ): void {
@@ -76,6 +35,18 @@ export function assertPreparedUploadAssetMimeTypeSupported(
   }
 }
 
+/**
+ * Server-safe E2EE envelope for an upload, mirroring `assets.encryption`.
+ * wrappedFileKey and encMetadata are ciphertext by definition, so persisting
+ * this for retries is safe — raw key material must never be stored here.
+ */
+export interface UploadEncryptionEnvelope {
+  v: 1;
+  circleEpoch: number;
+  wrappedFileKey: string;
+  encMetadata?: string;
+}
+
 export interface UploadQueueItem<SourceAsset = unknown> {
   id: string;
   circleId: string;
@@ -85,6 +56,14 @@ export interface UploadQueueItem<SourceAsset = unknown> {
   prepared?: boolean;
   cacheUri?: string;
   previewCacheUri?: string;
+  /**
+   * Ciphertext files and sealed envelope from the first attempt. Retries must
+   * reuse them byte-identically: presigned PUTs are re-signed for the exact
+   * originally declared sizes.
+   */
+  encryptedCacheUri?: string;
+  encryptedPreviewCacheUri?: string;
+  encryption?: UploadEncryptionEnvelope;
   recoveryKey?: string;
   recoverable?: boolean;
   createdAt?: number;
@@ -95,6 +74,8 @@ export interface UploadQueueItem<SourceAsset = unknown> {
   fileUri: string;
   previewUri?: string;
   sizeBytes?: number;
+  /** Byte size of the generated preview, declared to the server at createTarget. */
+  previewSizeBytes?: number;
   width?: number;
   height?: number;
   durationSeconds?: number;

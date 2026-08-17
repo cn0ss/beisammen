@@ -727,55 +727,7 @@
     "i": 1,
     "c": "Noch keine Kommentare in diesem Fokus."
   },
-  "8bb35279944e8230": "Hier kannst du die neuen Momente aus \"{circleName}\" ansehen:\n{shareUrl}",
-  "48135fc1caa3a4c4": "Web-Link erstellt.",
-  "7cfda5da40f32577": "Web-Link konnte nicht erstellt werden.",
-  "244331424dfc7423": "Web-Link konnte nicht geteilt werden.",
-  "2b11518d3284f067": "Web-Link zurückgezogen.",
-  "b6646cbc6a0cd0a0": "Web-Link konnte nicht zurückgezogen werden.",
-  "18e6782e3ec3f8c6": "Aktiv bis {date}",
-  "ad4b7ef1a7d8af0a": "Kein aktiver Web-Link",
-  "8b4be72e6ca864c4": "Erstellt von {name}",
-  "6bc9130025df3eaa": "Beim Erstellen werden ältere aktive Web-Links ersetzt.",
-  "4c2aa5611b23ce38": "Neuen Link erstellen",
-  "ba4d1854cc12cb9f": "Web-Link erstellen",
   "c15872aa1b923fd3": "Zurückziehen",
-  "bda5634b9ca02274": [
-    {
-      "t": "Text",
-      "i": 1,
-      "c": "Öffentliche Website"
-    },
-    {
-      "t": "Text",
-      "i": 2,
-      "c": "Link für Familie"
-    },
-    {
-      "t": "Text",
-      "i": 3,
-      "c": "Der Link zeigt veröffentlichte Beiträge ohne App-Installation. Nur Personen mit dem Link können ihn öffnen."
-    }
-  ],
-  "ebd9c11ec8977790": [
-    {
-      "t": "Text",
-      "i": 1,
-      "c": "letzter web-link"
-    },
-    {
-      "t": "Text",
-      "i": 2,
-      "c": [
-        "gültig bis ",
-        {
-          "i": 3,
-          "k": "_gt_value_3",
-          "v": "v"
-        }
-      ]
-    }
-  ],
   "c91117939a923aeb": "Aktuelles Medium",
   "b19100f7c4e50f8e": "Offener Einmal-Link",
   "62ca70a806ebab11": "Persönlicher E-Mail-Link",
@@ -862,7 +814,6 @@
   "baa0c1475b9eedba": "Beschreibung",
   "3d09da9ba02a58dc": "Details speichern",
   "62968035b2645633": "Keine Beschreibung hinterlegt.",
-  "ffb45fec4fd67dbd": "privat",
   "98beaece66ed4bb3": "read only",
   "6b0df79992c02997": "aktiv",
   "b7943c5d8fb7dcf2": "Circle verlassen",
@@ -915,16 +866,6 @@
         "t": "p"
       }
     }
-  },
-  "4ddf288565acb8cd": {
-    "t": "Text",
-    "i": 1,
-    "c": "Web-Link"
-  },
-  "4314a73b0ab79432": {
-    "t": "Text",
-    "i": 1,
-    "c": "Nur Owner und Admins dürfen öffentliche Web-Links verwalten."
   },
   "f396be422acc8cef": {
     "t": "Text",

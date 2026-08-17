@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import {
-  assertPreparedUploadAssetWithinBetaLimits,
-  assertUploadBatchWithinBetaLimits,
+  assertPreparedUploadAssetMimeTypeSupported,
   enqueue,
   clearCompleted,
   initialUploadQueueState,
@@ -177,23 +176,9 @@ test('clears completed uploads while preserving in-flight and failed items', () 
   expect(clearCompleted(state).items.map((item) => item.id)).toEqual(['item-2', 'item-3']);
 });
 
-test('rejects media selections beyond the beta batch limit', () => {
-  expect(() => assertUploadBatchWithinBetaLimits({ selectedCount: 11 })).toThrow(/10 Medien/);
+test('rejects unsupported mime types but allows long videos and large originals', () => {
   expect(() =>
-    assertUploadBatchWithinBetaLimits({ selectedCount: 6, existingPendingCount: 5 }),
-  ).toThrow(/10 Medien/);
-  expect(() =>
-    assertUploadBatchWithinBetaLimits({
-      selectedCount: 1,
-      existingPendingCount: 1,
-      existingDraftAssetCount: 9,
-    }),
-  ).toThrow(/10 Medien/);
-});
-
-test('rejects unsupported prepared upload assets but allows large originals', () => {
-  expect(() =>
-    assertPreparedUploadAssetWithinBetaLimits({
+    assertPreparedUploadAssetMimeTypeSupported({
       kind: 'image',
       mimeType: 'image/gif',
       fileName: 'animated.gif',
@@ -201,20 +186,18 @@ test('rejects unsupported prepared upload assets but allows large originals', ()
   ).toThrow(/Dateityp/);
 
   expect(() =>
-    assertPreparedUploadAssetWithinBetaLimits({
+    assertPreparedUploadAssetMimeTypeSupported({
       kind: 'video',
       mimeType: 'video/mp4',
       fileName: 'long.mp4',
-      durationSeconds: 31,
     }),
-  ).toThrow(/30 Sekunden/);
+  ).not.toThrow();
 
   expect(() =>
-    assertPreparedUploadAssetWithinBetaLimits({
+    assertPreparedUploadAssetMimeTypeSupported({
       kind: 'image',
       mimeType: 'image/jpeg',
       fileName: 'huge.jpg',
-      sizeBytes: 51 * 1024 * 1024,
     }),
   ).not.toThrow();
 });
