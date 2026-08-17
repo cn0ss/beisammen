@@ -1,6 +1,4 @@
-import { AppleIcon, PlayIcon } from 'lucide-react';
 import { Reveal } from '@/components/Reveal';
-import { Button } from '@/components/ui/button';
 import { appStoreUrl, dict, playStoreUrl, type Locale } from '@/i18n/ui';
 
 export function Download({ locale }: { locale: Locale }) {
@@ -26,26 +24,35 @@ export function Download({ locale }: { locale: Locale }) {
             {t.download.body}
           </p>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-            <Button
-              size="lg"
-              className="h-14 rounded-full bg-cream py-0 pr-7 pl-5 text-base text-ink hover:-translate-y-0.5 hover:bg-cream sm:h-13"
-              nativeButton={false}
-              render={<a href={appStoreUrl} rel="noopener noreferrer" />}
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+            <a
+              href={appStoreUrl}
+              rel="noopener noreferrer"
+              className="transition-transform duration-250 ease-(--ease-quiet) hover:-translate-y-0.5"
             >
-              <AppleIcon aria-hidden="true" className="size-5 shrink-0 fill-ink" />
-              {t.download.appStore}
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="h-14 rounded-full border-cream/50 bg-cream/10 py-0 pr-7 pl-5 text-base text-cream backdrop-blur-sm hover:-translate-y-0.5 hover:bg-cream/20 hover:text-cream sm:h-13"
-              nativeButton={false}
-              render={<a href={playStoreUrl} rel="noopener noreferrer" />}
+              <img
+                src={`/badges/app-store-${locale}.svg`}
+                alt={t.download.appStore}
+                width={120}
+                height={40}
+                loading="lazy"
+                className="h-13 w-auto sm:h-14"
+              />
+            </a>
+            <a
+              href={playStoreUrl}
+              rel="noopener noreferrer"
+              className="transition-transform duration-250 ease-(--ease-quiet) hover:-translate-y-0.5"
             >
-              <PlayIcon aria-hidden="true" className="size-5 shrink-0 fill-cream stroke-cream" />
-              {t.download.playStore}
-            </Button>
+              <img
+                src={`/badges/google-play-${locale}.svg`}
+                alt={t.download.playStore}
+                width={135}
+                height={40}
+                loading="lazy"
+                className="h-13 w-auto sm:h-14"
+              />
+            </a>
           </div>
 
           <p className="mt-6 font-mono text-xs tracking-wide text-cream/45">{t.download.note}</p>

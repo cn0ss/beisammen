@@ -337,8 +337,8 @@ export const dict: Record<Locale, Dictionary> = {
       title: 'Hol dir beisammen.',
       body:
         'beisammen ist jetzt für alle da. Lade die App, erstelle deinen ersten Kreis und teile den heutigen Abend mit deinen Menschen.',
-      appStore: 'Im App Store laden',
-      playStore: 'Bei Google Play laden',
+      appStore: 'Laden im App Store',
+      playStore: 'Jetzt bei Google Play',
       note: 'Kostenlos für iPhone und Android.',
     },
     footer: {
