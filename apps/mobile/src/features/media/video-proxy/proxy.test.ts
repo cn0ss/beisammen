@@ -265,12 +265,14 @@ describe('encrypted video proxy', () => {
     expect(store.fetchCalls).toContain('https://r2.example/media?sig=new');
   });
 
-  // 17 MiB of JS-libsodium work; generous timeout for CI machines.
+  // Several MiB of JS-libsodium work; generous timeout for CI machines.
+  // Kept small enough not to get the vitest fork OOM-killed on 2-vCPU CI
+  // runners, while still spanning 12 chunks.
   // AVPlayer rejects a 206 shorter than the requested range (CoreMedia
   // -12939), so an open-ended request must serve the full remainder.
   test('serves open-ended range requests in full', { timeout: 60_000 }, async () => {
-    const plaintext = randomPlaintext(9 * 1024 * 1024);
-    const store = makeCiphertextStore(plaintext, 1024 * 1024);
+    const plaintext = randomPlaintext(3 * 1024 * 1024);
+    const store = makeCiphertextStore(plaintext, 256 * 1024);
     const session = makeSession({ store });
 
     const response = await performRequest(
@@ -282,6 +284,6 @@ describe('encrypted video proxy', () => {
       `Content-Range: bytes 0-${plaintext.length - 1}/${plaintext.length}`,
     );
     expect(response.body.length).toBe(plaintext.length);
-    expect(response.body).toEqual(plaintext);
+    expect(Buffer.compare(Buffer.from(response.body), Buffer.from(plaintext))).toBe(0);
   });
 });
