@@ -7,7 +7,7 @@ Contributions are welcome through pull requests.
 - Keep the project source-available and noncommercial in spirit.
 - Do not open pull requests that add secrets, live credentials, or production
   identifiers.
-- Do not commit Expo owner metadata, EAS project IDs, WorkOS secrets, storage
+- Do not commit Expo owner metadata, EAS project IDs, Clerk secrets, storage
   credentials, or mobile signing material.
 - Keep public-vs-secret environment boundaries intact.
 

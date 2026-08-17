@@ -5,7 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { mutation, query } from './_generated/server';
 import { formatFeedTimestamp } from './lib/storage/shared';
-import { requireViewer } from './lib/viewer';
+import { findViewer, requireViewer } from './lib/viewer';
 
 export const activityFunctionSurface = [
   'activity.listForViewer',
@@ -234,7 +234,28 @@ export const listForViewer = query({
 export const summaryForViewer = query({
   args: {},
   handler: async (ctx) => {
-    const viewer = await requireViewer(ctx);
+    // This badge query stays subscribed across auth transitions. Tolerate
+    // both edges: sign-out (identity already gone before the client
+    // unsubscribes) and first sign-in (identity exists but the users row has
+    // not been upserted yet). The subscription re-runs reactively.
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
+      return {
+        unreadCount: 0,
+        hasUnread: false,
+      };
+    }
+
+    const viewer = await findViewer(ctx);
+
+    if (!viewer) {
+      return {
+        unreadCount: 0,
+        hasUnread: false,
+      };
+    }
+
     const unreadRows = await ctx.db
       .query('activityInboxItems')
       .withIndex('by_user_and_status_and_created_at', (q) =>

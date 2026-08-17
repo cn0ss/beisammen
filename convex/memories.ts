@@ -9,6 +9,7 @@ import { requireCircleMembership, requireViewer } from './lib/viewer';
 export const memoryFunctionSurface = [
   'memories.listForViewer',
   'memories.discoveryForViewer',
+  'memories.locatedForViewer',
   'memories.backfillBatch',
   'memories.backfillDiscoveryBatch',
 ] as const;
@@ -20,6 +21,8 @@ const MEMORY_BACKFILL_BATCH_LIMIT = 50;
 const MEMORY_ASSET_BATCH_LIMIT = 100;
 const MEMORY_DISCOVERY_SUMMARY_LIMIT = 120;
 const MEMORY_PLACE_COORDINATE_PRECISION = 3;
+const MEMORY_MAP_ITEMS_PER_CIRCLE_LIMIT = 250;
+const MEMORY_MAP_TOTAL_LIMIT = 750;
 
 type MemoryItem = Doc<'memoryItems'>;
 type MemoryMonth = Doc<'memoryMonths'>;
@@ -792,5 +795,91 @@ export const listForViewer = query({
       isDone: nextOffset >= candidates.length,
       continueCursor: String(nextOffset),
     };
+  },
+});
+
+/**
+ * Every recent memory item that carries coordinates, for the full-screen map.
+ * Lightweight on purpose: no asset/share lookups — coordinates and labels are
+ * denormalized onto the memory item at publish time.
+ */
+export const locatedForViewer = query({
+  args: {
+    circleId: v.optional(v.id('circles')),
+  },
+  returns: v.array(
+    v.object({
+      _id: v.id('memoryItems'),
+      circleId: v.id('circles'),
+      circleName: v.string(),
+      assetId: v.id('assets'),
+      kind: v.union(v.literal('image'), v.literal('video')),
+      timelineAt: v.number(),
+      capturedAt: v.union(v.number(), v.null()),
+      latitude: v.number(),
+      longitude: v.number(),
+      placeLabel: v.union(v.string(), v.null()),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const viewer = await requireViewer(ctx);
+    let circleIds: Id<'circles'>[];
+
+    if (args.circleId) {
+      await requireCircleMembership(ctx, viewer._id, args.circleId);
+      circleIds = [args.circleId];
+    } else {
+      circleIds = await listViewerCircleIds(ctx, viewer._id);
+    }
+
+    const located: Array<{
+      _id: Id<'memoryItems'>;
+      circleId: Id<'circles'>;
+      circleName: string;
+      assetId: Id<'assets'>;
+      kind: 'image' | 'video';
+      timelineAt: number;
+      capturedAt: number | null;
+      latitude: number;
+      longitude: number;
+      placeLabel: string | null;
+    }> = [];
+
+    for (const circleId of circleIds) {
+      const circle = await ctx.db.get(circleId);
+
+      if (!circle) {
+        continue;
+      }
+
+      const items = await ctx.db
+        .query('memoryItems')
+        .withIndex('by_circle_and_timeline_at', (q) => q.eq('circleId', circleId))
+        .order('desc')
+        .take(MEMORY_MAP_ITEMS_PER_CIRCLE_LIMIT);
+
+      for (const item of items) {
+        if (item.placeLatitude === undefined || item.placeLongitude === undefined) {
+          continue;
+        }
+
+        located.push({
+          _id: item._id,
+          circleId: item.circleId,
+          circleName: circle.name,
+          assetId: item.assetId,
+          kind: item.kind,
+          timelineAt: item.timelineAt,
+          capturedAt: item.capturedAt ?? null,
+          latitude: item.placeLatitude,
+          longitude: item.placeLongitude,
+          placeLabel: item.placeLabel ?? null,
+        });
+      }
+    }
+
+    located.sort((left, right) => right.timelineAt - left.timelineAt);
+
+    return located.slice(0, MEMORY_MAP_TOTAL_LIMIT);
   },
 });

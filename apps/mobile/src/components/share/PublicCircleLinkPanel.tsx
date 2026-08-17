@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { T, useGT, Var } from 'gt-react-native';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { Share, StyleSheet, Text, View } from 'react-native';
 
@@ -9,6 +10,7 @@ import type {
   PublicCircleLinkRecord,
 } from '@/features/convex/api';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
 interface PublicCircleLinkPanelProps {
   circleName: string;
@@ -24,19 +26,12 @@ interface LastPublicLink {
   expiresAt: number;
 }
 
-const DATE_FORMAT = new Intl.DateTimeFormat('de-DE', {
+const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   dateStyle: 'medium',
-});
+};
 
-function formatDate(timestamp: number) {
-  return DATE_FORMAT.format(new Date(timestamp));
-}
-
-function buildPublicLinkShareMessage(input: {
-  circleName: string;
-  shareUrl: string;
-}) {
-  return `Hier kannst du die neuen Momente aus "${input.circleName}" ansehen:\n${input.shareUrl}`;
+function formatDate(timestamp: number, format: Intl.DateTimeFormat) {
+  return format.format(new Date(timestamp));
 }
 
 export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
@@ -48,6 +43,8 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
   onFeedback,
 }: PublicCircleLinkPanelProps) {
   const theme = useTheme();
+  const gt = useGT();
+  const dateFormat = useDateFormat(DATE_FORMAT_OPTIONS);
   const [lastLink, setLastLink] = useState<LastPublicLink | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
@@ -59,13 +56,13 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
   const sharePublicLink = useCallback(
     async (link: LastPublicLink) => {
       await Share.share({
-        message: buildPublicLinkShareMessage({
+        message: gt('Hier kannst du die neuen Momente aus "{circleName}" ansehen:\n{shareUrl}', {
           circleName,
           shareUrl: link.shareUrl,
         }),
       });
     },
-    [circleName],
+    [circleName, gt],
   );
 
   const handleCreate = useCallback(async () => {
@@ -80,14 +77,16 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
       };
 
       setLastLink(nextLink);
-      onFeedback('Web-Link erstellt.');
+      onFeedback(gt('Web-Link erstellt.'));
       await sharePublicLink(nextLink);
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Web-Link konnte nicht erstellt werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Web-Link konnte nicht erstellt werden.'),
+      );
     } finally {
       setIsCreating(false);
     }
-  }, [onCreatePublicLink, onFeedback, sharePublicLink]);
+  }, [gt, onCreatePublicLink, onFeedback, sharePublicLink]);
 
   const handleShareLast = useCallback(async () => {
     if (!lastLink) {
@@ -97,9 +96,11 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
     try {
       await sharePublicLink(lastLink);
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Web-Link konnte nicht geteilt werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Web-Link konnte nicht geteilt werden.'),
+      );
     }
-  }, [lastLink, onFeedback, sharePublicLink]);
+  }, [gt, lastLink, onFeedback, sharePublicLink]);
 
   const handleRevoke = useCallback(async () => {
     if (!activeLink) {
@@ -112,23 +113,27 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
     try {
       await onRevokePublicLink(activeLink._id);
       setLastLink(null);
-      onFeedback('Web-Link zurückgezogen.');
+      onFeedback(gt('Web-Link zurückgezogen.'));
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Web-Link konnte nicht zurückgezogen werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Web-Link konnte nicht zurückgezogen werden.'),
+      );
     } finally {
       setRevokingId(null);
     }
-  }, [activeLink, onFeedback, onRevokePublicLink]);
+  }, [activeLink, gt, onFeedback, onRevokePublicLink]);
 
   return (
     <View style={styles.container}>
       <View style={styles.copy}>
-        <Text style={[styles.kicker, { color: theme.textTertiary }]}>Öffentliche Website</Text>
-        <Text style={[styles.title, { color: theme.text }]}>Link für Familie</Text>
-        <Text style={[styles.body, { color: theme.textSecondary }]}>
-          Der Link zeigt veröffentlichte Beiträge ohne App-Installation. Nur Personen mit dem Link
-          können ihn öffnen.
-        </Text>
+        <T>
+          <Text style={[styles.kicker, { color: theme.textTertiary }]}>Öffentliche Website</Text>
+          <Text style={[styles.title, { color: theme.text }]}>Link für Familie</Text>
+          <Text style={[styles.body, { color: theme.textSecondary }]}>
+            Der Link zeigt veröffentlichte Beiträge ohne App-Installation. Nur Personen mit dem Link
+            können ihn öffnen.
+          </Text>
+        </T>
       </View>
 
       <View style={[styles.statusBox, { backgroundColor: theme.background, borderColor: theme.border }]}>
@@ -141,12 +146,14 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
         </View>
         <View style={styles.statusCopy}>
           <Text style={[styles.statusTitle, { color: theme.text }]}>
-            {activeLink ? `Aktiv bis ${formatDate(activeLink.expiresAt)}` : 'Kein aktiver Web-Link'}
+            {activeLink
+              ? gt('Aktiv bis {date}', { date: formatDate(activeLink.expiresAt, dateFormat) })
+              : gt('Kein aktiver Web-Link')}
           </Text>
           <Text style={[styles.statusMeta, { color: theme.textSecondary }]}>
             {activeLink
-              ? `Erstellt von ${activeLink.createdByName}`
-              : 'Beim Erstellen werden ältere aktive Web-Links ersetzt.'}
+              ? gt('Erstellt von {name}', { name: activeLink.createdByName })
+              : gt('Beim Erstellen werden ältere aktive Web-Links ersetzt.')}
           </Text>
         </View>
       </View>
@@ -154,7 +161,7 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
       <View style={styles.buttonRow}>
         <View style={styles.buttonCol}>
           <Button
-            label={activeLink ? 'Neuen Link erstellen' : 'Web-Link erstellen'}
+            label={activeLink ? gt('Neuen Link erstellen') : gt('Web-Link erstellen')}
             icon="link-outline"
             loading={isCreating}
             disabled={disabled || revokingId !== null}
@@ -166,7 +173,7 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
         {activeLink ? (
           <View style={styles.buttonCol}>
             <Button
-              label="Zurückziehen"
+              label={gt('Zurückziehen')}
               icon="close-circle-outline"
               variant="danger"
               loading={revokingId === activeLink._id}
@@ -182,16 +189,18 @@ export const PublicCircleLinkPanel = memo(function PublicCircleLinkPanel({
       {lastLink ? (
         <View style={[styles.linkPreview, { backgroundColor: theme.background }]}>
           <View style={styles.previewHeader}>
-            <Text style={[styles.kicker, { color: theme.textTertiary }]}>letzter web-link</Text>
-            <Text style={[styles.previewMeta, { color: theme.textSecondary }]}>
-              gültig bis {formatDate(lastLink.expiresAt)}
-            </Text>
+            <T>
+              <Text style={[styles.kicker, { color: theme.textTertiary }]}>letzter web-link</Text>
+              <Text style={[styles.previewMeta, { color: theme.textSecondary }]}>
+                gültig bis <Var>{formatDate(lastLink.expiresAt, dateFormat)}</Var>
+              </Text>
+            </T>
           </View>
           <Text selectable style={[styles.linkText, { color: theme.primary }]}>
             {lastLink.shareUrl}
           </Text>
           <Button
-            label="Erneut teilen"
+            label={gt('Erneut teilen')}
             icon="share-social-outline"
             variant="outline"
             onPress={() => {

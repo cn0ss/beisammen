@@ -25,7 +25,7 @@ docker compose up
 - Mobile custom-instance support expects your deployed Beisammen Convex
   functions to serve `/.well-known/beisammen-instance.json` from the site URL.
 - Configure the manifest with `PUBLIC_INSTANCE_ID`, `PUBLIC_INSTANCE_NAME`,
-  `PUBLIC_CONVEX_URL`, `PUBLIC_AUTH_MODE`, `PUBLIC_AUTH_CLIENT_ID`,
-  `PUBLIC_AUTH_SIGN_IN_URL`, `PUBLIC_DEPLOYMENT_KIND=self-hosted`, and
-  `PUBLIC_MINIMUM_APP_VERSION`.
-- This scaffold does not yet provision your WorkOS tenant, client, or redirect setup for you.
+  `PUBLIC_CONVEX_URL`, `PUBLIC_AUTH_PUBLISHABLE_KEY`,
+  `PUBLIC_DEPLOYMENT_KIND=self-hosted`, and `PUBLIC_MINIMUM_APP_VERSION`.
+- This scaffold does not yet provision your Clerk application (JWT template,
+  Native API, publishable key) for you.

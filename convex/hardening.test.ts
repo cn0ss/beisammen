@@ -4,43 +4,36 @@ import { convexTest, type TestConvex } from 'convex-test';
 import { makeFunctionReference, type UserIdentity } from 'convex/server';
 import { describe, expect, test, vi } from 'vitest';
 
-const autumnMocks = vi.hoisted(() => ({
-  check: vi.fn(),
-  checkout: vi.fn(),
-  track: vi.fn(),
-  customersGet: vi.fn(),
-  billingPortal: vi.fn(),
+const rcMocks = vi.hoisted(() => ({
+  hasEntitlement: vi.fn(),
+  getActiveSubscriptions: vi.fn(),
+  getCustomer: vi.fn(),
 }));
 
-vi.mock('@useautumn/convex', () => ({
-  Autumn: vi.fn(function AutumnConvexMock(_component: unknown, options: { identify: (ctx: unknown) => Promise<{ customerId: string }> }) {
-    return {
-      check: autumnMocks.check,
-      track: autumnMocks.track,
-      checkout: autumnMocks.checkout,
-      customers: {
-        get: async (ctx: unknown, args?: { expand?: unknown[] }) => {
-          const identifier = await options.identify(ctx);
-          return await autumnMocks.customersGet(
-            identifier.customerId,
-            args?.expand === undefined ? undefined : { expand: args.expand },
-          );
-        },
-        billingPortal: autumnMocks.billingPortal,
-      },
-    };
-  }),
+vi.mock('convex-revenuecat', async () => {
+  const { httpActionGeneric } = await import('convex/server');
+
+  return {
+    RevenueCat: vi.fn(function RevenueCatMock() {
+      return {
+        hasEntitlement: rcMocks.hasEntitlement,
+        getActiveSubscriptions: rcMocks.getActiveSubscriptions,
+        getCustomer: rcMocks.getCustomer,
+        httpHandler: () =>
+          httpActionGeneric(async () => new Response(null, { status: 501 })),
+      };
+    }),
+  };
+});
+
+const resendMocks = vi.hoisted(() => ({
+  sendEmail: vi.fn(),
 }));
 
-vi.mock('autumn-js', () => ({
-  Autumn: vi.fn(function AutumnMock() {
+vi.mock('@convex-dev/resend', () => ({
+  Resend: vi.fn(function ResendMock() {
     return {
-      check: autumnMocks.check,
-      track: autumnMocks.track,
-      customers: {
-        get: autumnMocks.customersGet,
-        billingPortal: autumnMocks.billingPortal,
-      },
+      sendEmail: resendMocks.sendEmail,
     };
   }),
 }));
@@ -49,18 +42,17 @@ import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { activityFunctionSurface } from './activity';
 import { assetFunctionSurface } from './assets';
-import { autumnFunctionSurface } from './autumn';
 import { billingFunctionSurface } from './billing';
+import {
+  RETENTION_GRACE_MS,
+  RETENTION_MAX_WARNINGS,
+  RETENTION_WARNING_INTERVAL_MS,
+} from './billingRetention';
 import { commentFunctionSurface } from './comments';
 import { httpSurface } from './http';
-import { billingBackendKind } from './lib/billing/autumn';
-import {
-  buildBillingReturnAppUrl,
-  appendParamsToUrl,
-  buildCallbackUrlFromEnv,
-  buildPublicInstanceConfigFromEnv,
-  normalizeWorkOSHttpSessionPayload,
-} from './lib/httpHelpers';
+import { billingBackendKind } from './lib/billing/quota';
+import { CLOUD_PLAN_QUOTAS, currentPeriodKey } from './lib/billing/plans';
+import { buildPublicInstanceConfigFromEnv } from './lib/httpHelpers';
 import {
   BETA_MAX_VIDEO_DURATION_SECONDS,
   DEFAULT_CLOUD_BILLING_PLANS,
@@ -463,17 +455,32 @@ async function withS3SigningEnv<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function withAutumnSecret<T>(run: () => Promise<T>): Promise<T> {
-  const originalSecret = process.env.AUTUMN_SECRET_KEY;
-  process.env.AUTUMN_SECRET_KEY = 'am_sk_test';
+async function withResendKey<T>(run: () => Promise<T>): Promise<T> {
+  const originalKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 're_test_key';
+
+  try {
+    return await run();
+  } finally {
+    if (originalKey === undefined) {
+      delete process.env.RESEND_API_KEY;
+    } else {
+      process.env.RESEND_API_KEY = originalKey;
+    }
+  }
+}
+
+async function withRevenueCatSecret<T>(run: () => Promise<T>): Promise<T> {
+  const originalSecret = process.env.REVENUECAT_WEBHOOK_AUTH;
+  process.env.REVENUECAT_WEBHOOK_AUTH = 'rc_webhook_test_secret';
 
   try {
     return await run();
   } finally {
     if (originalSecret === undefined) {
-      delete process.env.AUTUMN_SECRET_KEY;
+      delete process.env.REVENUECAT_WEBHOOK_AUTH;
     } else {
-      process.env.AUTUMN_SECRET_KEY = originalSecret;
+      process.env.REVENUECAT_WEBHOOK_AUTH = originalSecret;
     }
   }
 }
@@ -508,11 +515,23 @@ async function withExpoPushAccessToken<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-function workosIdentity(email: string, name = email): Partial<UserIdentity> {
+function mockEntitledTier(tier: 'cloud_plus' | 'cloud_max' | null): void {
+  rcMocks.hasEntitlement.mockReset();
+  rcMocks.hasEntitlement.mockImplementation(
+    async (_ctx: unknown, args: { entitlementId: string }) =>
+      tier !== null && args.entitlementId === tier,
+  );
+}
+
+const CLERK_TEST_ISSUER = 'https://test.clerk.accounts.dev';
+
+function clerkIdentity(email: string, name = email): Partial<UserIdentity> {
+  const subject = `user_${email.replace(/[^a-z0-9]+/gi, '_')}`;
+
   return {
-    issuer: 'https://api.workos.com/user_management/client_test',
-    subject: `user_${email.replace(/[^a-z0-9]+/gi, '_')}`,
-    tokenIdentifier: `workos|${email.toLowerCase()}`,
+    issuer: CLERK_TEST_ISSUER,
+    subject,
+    tokenIdentifier: `${CLERK_TEST_ISSUER}|${subject}`,
     email,
     name,
   };
@@ -526,7 +545,7 @@ async function upsertViewer(
   user: TestUser;
   viewer: Doc<'users'>;
 }> {
-  const user = t.withIdentity(workosIdentity(email, displayName));
+  const user = t.withIdentity(clerkIdentity(email, displayName));
   const result = await user.mutation(api.users.upsertFromIdentity, {
     email,
     displayName,
@@ -936,13 +955,9 @@ describe('http surface', () => {
     expect(httpSurface).toContain('instance.discovery');
   });
 
-  test('exposes billing return and builds the mobile deep link from env', () => {
-    expect(httpSurface).toContain('billing.return');
-    expect(
-      buildBillingReturnAppUrl({
-        PUBLIC_APP_SCHEME: 'beisammen-beta',
-      }, 'portal'),
-    ).toBe('beisammen-beta://settings?billing=return&source=portal');
+  test('exposes the RevenueCat webhook route', () => {
+    expect(httpSurface).toContain('billing.revenuecatWebhook');
+    expect(httpSurface).not.toContain('billing.return');
   });
 
   test('builds cloud and self-hosted public instance manifests from env', () => {
@@ -950,8 +965,7 @@ describe('http surface', () => {
       buildPublicInstanceConfigFromEnv({
         PUBLIC_INSTANCE_BASE_URL: 'https://cloud.example.com/',
         PUBLIC_CONVEX_URL: 'https://cloud.convex.cloud/',
-        PUBLIC_AUTH_MODE: 'native-client',
-        PUBLIC_AUTH_CLIENT_ID: 'client_123',
+        PUBLIC_AUTH_PUBLISHABLE_KEY: 'pk_test_123',
         PUBLIC_DEPLOYMENT_KIND: 'cloud',
         PUBLIC_MINIMUM_APP_VERSION: '0.2.0',
       }),
@@ -963,9 +977,10 @@ describe('http surface', () => {
         convexUrl: 'https://cloud.convex.cloud',
       },
       auth: {
-        mode: 'native-client',
+        provider: 'clerk',
+        mode: 'native',
         publicConfig: {
-          clientId: 'client_123',
+          publishableKey: 'pk_test_123',
         },
       },
       deployment: {
@@ -973,7 +988,7 @@ describe('http surface', () => {
       },
       billing: {
         enabled: true,
-        provider: 'autumn',
+        provider: 'revenuecat',
       },
       client: {
         minimumAppVersion: '0.2.0',
@@ -984,15 +999,14 @@ describe('http surface', () => {
       buildPublicInstanceConfigFromEnv({
         PUBLIC_INSTANCE_BASE_URL: 'https://home.example.com',
         PUBLIC_CONVEX_URL: 'https://home.convex.cloud',
-        PUBLIC_AUTH_MODE: 'hosted-browser',
-        PUBLIC_AUTH_SIGN_IN_URL: 'https://home.example.com/auth/sign-in',
+        PUBLIC_AUTH_PUBLISHABLE_KEY: 'pk_test_home',
         PUBLIC_DEPLOYMENT_KIND: 'self-hosted',
       }),
     ).toMatchObject({
       auth: {
-        mode: 'hosted-browser',
+        provider: 'clerk',
         publicConfig: {
-          signInUrl: 'https://home.example.com/auth/sign-in',
+          publishableKey: 'pk_test_home',
         },
       },
       deployment: {
@@ -1004,50 +1018,26 @@ describe('http surface', () => {
     });
   });
 
-  test('normalizes WorkOS HTTP responses and callback redirect parameters', () => {
-    expect(buildCallbackUrlFromEnv({ PUBLIC_INSTANCE_BASE_URL: 'https://cloud.example.com/' })).toBe(
-      'https://cloud.example.com/auth/callback',
-    );
-    expect(
-      appendParamsToUrl('beisammen://auth/callback?existing=1', {
-        state: 'abc',
-        access_token: 'token',
+  test('instance manifests require a Clerk publishable key', () => {
+    expect(() =>
+      buildPublicInstanceConfigFromEnv({
+        PUBLIC_INSTANCE_BASE_URL: 'https://cloud.example.com/',
+        PUBLIC_CONVEX_URL: 'https://cloud.convex.cloud/',
+        PUBLIC_DEPLOYMENT_KIND: 'cloud',
       }),
-    ).toBe('beisammen://auth/callback?existing=1&state=abc&access_token=token');
-    expect(
-      normalizeWorkOSHttpSessionPayload({
-        access_token: 'access',
-        refresh_token: 'refresh',
-        user: {
-          id: 'user_123',
-          email: 'ada@example.com',
-          first_name: 'Ada',
-          last_name: 'Lovelace',
-          profile_picture_url: 'https://example.com/avatar.jpg',
-        },
-      }),
-    ).toEqual({
-      accessToken: 'access',
-      refreshToken: 'refresh',
-      subject: 'user_123',
-      email: 'ada@example.com',
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-      displayName: 'Ada Lovelace',
-      avatarUrl: 'https://example.com/avatar.jpg',
-    });
+    ).toThrow(/PUBLIC_AUTH_PUBLISHABLE_KEY/i);
   });
 });
 
 describe('deployment billing policy', () => {
-  test('defaults to a cloud deployment with Autumn billing and finite cloud limits', () => {
+  test('defaults to a cloud deployment with RevenueCat billing and finite cloud limits', () => {
     expect(getDeploymentPolicyFromEnv({})).toEqual({
       kind: 'cloud',
       isCloud: true,
       isSelfHosted: false,
       billing: {
         enabled: true,
-        provider: 'autumn',
+        provider: 'revenuecat',
       },
       limits: {
         mediaSelectionCount: BETA_MAX_MEDIA_SELECTION_COUNT,
@@ -1071,13 +1061,12 @@ describe('deployment billing policy', () => {
     });
   });
 
-  test('exposes billing functions for cloud plan and portal flows', () => {
+  test('exposes billing functions for cloud plan status and readiness', () => {
     expect(billingFunctionSurface).toEqual([
       'billing.status',
       'billing.statusForCircle',
       'billing.uploadReadinessForCircle',
-      'billing.createCheckout',
-      'billing.createPortalSession',
+      'billing.circleCreationReadiness',
     ]);
   });
 
@@ -1117,8 +1106,8 @@ describe('deployment billing policy', () => {
 
   test('default cloud billing plans are paid-only', () => {
     expect(DEFAULT_CLOUD_BILLING_PLANS.map((plan) => plan.id)).toEqual([
-      'cloud_family',
-      'cloud_archive',
+      'cloud_plus',
+      'cloud_max',
     ]);
     expect(
       DEFAULT_CLOUD_BILLING_PLANS.some((plan) =>
@@ -1129,22 +1118,25 @@ describe('deployment billing policy', () => {
     ).toBe(false);
   });
 
-  test('uses the official Autumn Convex component facade', () => {
-    expect(autumnFunctionSurface).toEqual([
-      'autumn.track',
-      'autumn.check',
-      'autumn.checkout',
-      'autumn.billingPortal',
-      'autumn.query',
-    ]);
+  test('billing state is mirrored through the RevenueCat Convex component', () => {
     expect(billingBackendKind).toBe('convex-component');
+  });
+
+  test('plan tiers define hard storage and circle quotas without upload count limits', () => {
+    expect(CLOUD_PLAN_QUOTAS.cloud_plus.storageBytes).toBe(100 * 1024 ** 3);
+    expect(CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles).toBe(3);
+    expect(CLOUD_PLAN_QUOTAS.cloud_max.storageBytes).toBe(250 * 1024 ** 3);
+    expect(CLOUD_PLAN_QUOTAS.cloud_max.maxCircles).toBe(10);
+    expect(CLOUD_PLAN_QUOTAS.cloud_plus).not.toHaveProperty('monthlyUploads');
+    expect(currentPeriodKey(Date.UTC(2026, 7, 16))).toBe('2026-08');
+    expect(currentPeriodKey(Date.UTC(2026, 11, 31, 23, 59))).toBe('2026-12');
   });
 });
 
 describe('viewer bootstrap', () => {
   test('upsertFromIdentity returns a serialized viewer record for new and existing users', async () => {
     const t = createTestDb();
-    const user = t.withIdentity(workosIdentity('ada@example.com', 'Ada'));
+    const user = t.withIdentity(clerkIdentity('ada@example.com', 'Ada'));
 
     const created = await user.mutation(api.users.upsertFromIdentity, {
       email: 'ada@example.com',
@@ -1154,7 +1146,7 @@ describe('viewer bootstrap', () => {
     expect(created).toMatchObject({
       email: 'ada@example.com',
       displayName: 'Ada',
-      authProvider: 'workos',
+      authProvider: 'clerk',
       hasProfileImage: false,
     });
     expect(typeof created).toBe('object');
@@ -1490,12 +1482,12 @@ describe('circle authorization and stats', () => {
       });
 
       await expect(
-        member.user.action(api.billing.statusForCircle, {
+        member.user.query(api.billing.statusForCircle, {
           circleId: owner.circleId,
         }),
       ).rejects.toThrow(/billing owner/i);
       await expect(
-        owner.user.action(api.billing.statusForCircle, {
+        owner.user.query(api.billing.statusForCircle, {
           circleId: owner.circleId,
         }),
       ).resolves.toMatchObject({
@@ -1507,72 +1499,66 @@ describe('circle authorization and stats', () => {
     });
   });
 
-  test('cloud billing status exposes an active Autumn product for the viewer', async () => {
+  test('cloud billing status exposes the active RevenueCat entitlement for the viewer', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.customersGet.mockReset();
-        autumnMocks.customersGet.mockResolvedValueOnce({
-          data: {
-            id: 'customer_123',
-            products: [
-              {
-                id: 'cloud_family',
-                status: 'active',
-                current_period_end: 1_750_000_000_000,
-              },
-            ],
-            features: {},
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
+        rcMocks.getActiveSubscriptions.mockResolvedValue([
+          {
+            productId: 'cloud_plus_monthly',
+            entitlementIds: ['cloud_plus'],
+            expirationAtMs: 1_750_000_000_000,
           },
-          error: null,
-          statusCode: 200,
+        ]);
+        rcMocks.getCustomer.mockResolvedValue({
+          appUserId: 'ignored',
+          managementUrl: 'https://apps.apple.com/account/subscriptions',
         });
 
         const t = createTestDb();
         const { user, viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
 
-        await expect(user.action(api.billing.status, {})).resolves.toMatchObject({
+        await expect(user.query(api.billing.status, {})).resolves.toMatchObject({
           deployment: 'cloud',
           billing: {
+            provider: 'revenuecat',
             customerId: viewer._id,
           },
-          activePlanIds: ['cloud_family'],
+          activePlanIds: ['cloud_plus'],
           subscriptions: [
             {
-              planId: 'cloud_family',
+              planId: 'cloud_plus',
               status: 'active',
               currentPeriodEnd: 1_750_000_000_000,
             },
           ],
+          managementUrl: 'https://apps.apple.com/account/subscriptions',
         });
-        expect(autumnMocks.customersGet).toHaveBeenLastCalledWith(viewer._id, undefined);
+        expect(rcMocks.hasEntitlement).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ appUserId: viewer._id }),
+        );
       });
     });
   });
 
-  test('circle billing status exposes an active Autumn product for the owner', async () => {
+  test('circle billing status exposes the active RevenueCat entitlement for the owner', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.customersGet.mockReset();
-        autumnMocks.customersGet.mockResolvedValueOnce({
-          data: {
-            id: 'customer_123',
-            products: [
-              {
-                id: 'cloud_family',
-                status: 'active',
-              },
-            ],
-            features: {},
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
+        rcMocks.getActiveSubscriptions.mockResolvedValue([
+          {
+            productId: 'cloud_plus_monthly',
+            entitlementIds: ['cloud_plus'],
           },
-          error: null,
-          statusCode: 200,
-        });
+        ]);
+        rcMocks.getCustomer.mockResolvedValue(null);
 
         const t = createTestDb();
         const owner = await createCircleFor(t, 'owner@example.com');
 
         await expect(
-          owner.user.action(api.billing.statusForCircle, {
+          owner.user.query(api.billing.statusForCircle, {
             circleId: owner.circleId,
           }),
         ).resolves.toMatchObject({
@@ -1580,75 +1566,102 @@ describe('circle authorization and stats', () => {
           billing: {
             customerId: owner.viewer._id,
           },
-          activePlanIds: ['cloud_family'],
+          activePlanIds: ['cloud_plus'],
         });
-
-        expect(autumnMocks.customersGet).toHaveBeenLastCalledWith(owner.viewer._id);
       });
     });
   });
 
-  test('cloud billing status treats a missing Autumn customer as no active plan', async () => {
+  test('cloud billing status treats a missing RevenueCat customer as no active plan', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.customersGet.mockReset();
-        autumnMocks.customersGet.mockResolvedValueOnce({
-          data: null,
-          error: {
-            message: 'Customer not found',
-            code: 'not_found',
-          },
-          statusCode: 404,
-        });
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier(null);
+        rcMocks.getActiveSubscriptions.mockResolvedValue([]);
+        rcMocks.getCustomer.mockResolvedValue(null);
 
         const t = createTestDb();
         const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
 
-        await expect(user.action(api.billing.status, {})).resolves.toMatchObject({
+        await expect(user.query(api.billing.status, {})).resolves.toMatchObject({
           deployment: 'cloud',
           activePlanIds: [],
           subscriptions: [],
+          balances: [],
         });
       });
     });
   });
 
-  test('cloud billing status surfaces non-not-found Autumn errors', async () => {
+  test('cloud billing status reports plan quotas and current usage', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.customersGet.mockReset();
-        autumnMocks.customersGet.mockResolvedValueOnce({
-          data: null,
-          error: {
-            message: 'Autumn API unavailable',
-            code: 'service_unavailable',
-          },
-          statusCode: 503,
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
+        rcMocks.getActiveSubscriptions.mockResolvedValue([]);
+        rcMocks.getCustomer.mockResolvedValue(null);
+
+        const t = createTestDb();
+        const { user, viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await t.run(async (ctx) => {
+          await ctx.db.insert('billingUsage', {
+            ownerId: viewer._id,
+            periodKey: currentPeriodKey(),
+            uploadCount: 12,
+          });
+          await ctx.db.insert('billingStorage', {
+            ownerId: viewer._id,
+            totalBytes: 4096,
+          });
         });
+
+        const status = await user.query(api.billing.status, {});
+
+        expect(status.balances).toEqual([
+          expect.objectContaining({
+            featureId: 'storage_bytes',
+            granted: CLOUD_PLAN_QUOTAS.cloud_plus.storageBytes,
+            usage: 4096,
+            overageAllowed: false,
+          }),
+          expect.objectContaining({
+            featureId: 'circles',
+            granted: CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles,
+            usage: 0,
+            remaining: CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles,
+            overageAllowed: false,
+          }),
+        ]);
+      });
+    });
+  });
+
+  test('cloud billing status surfaces RevenueCat component errors', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        rcMocks.hasEntitlement.mockReset();
+        rcMocks.hasEntitlement.mockRejectedValue(new Error('RevenueCat sync unavailable'));
+        rcMocks.getActiveSubscriptions.mockResolvedValue([]);
+        rcMocks.getCustomer.mockResolvedValue(null);
 
         const t = createTestDb();
         const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
 
-        await expect(user.action(api.billing.status, {})).rejects.toThrow(
-          /Autumn API unavailable/i,
+        await expect(user.query(api.billing.status, {})).rejects.toThrow(
+          /RevenueCat sync unavailable/i,
         );
       });
     });
   });
 
-  test('cloud upload readiness allows owner uploads when Autumn allows media access', async () => {
+  test('cloud upload readiness allows owner uploads with an active entitlement under quota', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.check.mockResolvedValueOnce({
-          data: {
-            allowed: true,
-          },
-        });
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
         const t = createTestDb();
         const owner = await createCircleFor(t, 'owner@example.com');
 
         await expect(
-          owner.user.action(api.billing.uploadReadinessForCircle, {
+          owner.user.query(api.billing.uploadReadinessForCircle, {
             circleId: owner.circleId,
           }),
         ).resolves.toMatchObject({
@@ -1658,36 +1671,27 @@ describe('circle authorization and stats', () => {
           billingRequired: true,
           reason: 'ready',
         });
-        expect(autumnMocks.check).toHaveBeenCalledWith(
+        expect(rcMocks.hasEntitlement).toHaveBeenCalledWith(
+          expect.anything(),
           expect.objectContaining({
-            customer_id: owner.viewer._id,
-            entity_id: owner.circleId,
-            feature_id: 'media_uploads',
-            entity_data: {
-              feature_id: 'media_uploads',
-            },
+            appUserId: owner.viewer._id,
           }),
         );
       });
     });
   });
 
-  test('cloud upload readiness blocks owner uploads without active billing access', async () => {
+  test('cloud upload readiness blocks owner uploads without an active entitlement', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.check.mockResolvedValueOnce({
-          data: {
-            allowed: false,
-          },
-          error: {
-            message: 'plan required',
-          },
-        });
+      await withRevenueCatSecret(async () => {
+        // Create while entitled, then let the entitlement lapse.
+        mockEntitledTier('cloud_plus');
         const t = createTestDb();
         const owner = await createCircleFor(t, 'owner@example.com');
+        mockEntitledTier(null);
 
         await expect(
-          owner.user.action(api.billing.uploadReadinessForCircle, {
+          owner.user.query(api.billing.uploadReadinessForCircle, {
             circleId: owner.circleId,
           }),
         ).resolves.toMatchObject({
@@ -1701,19 +1705,74 @@ describe('circle authorization and stats', () => {
     });
   });
 
-  test('cloud upload readiness distinguishes provider failures from missing plans', async () => {
+  test('cloud upload readiness blocks uploads once the storage quota is exhausted', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
-        autumnMocks.check.mockResolvedValueOnce({
-          error: {
-            message: 'service unavailable',
-          },
-        });
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
         const t = createTestDb();
         const owner = await createCircleFor(t, 'owner@example.com');
 
+        await t.run(async (ctx) => {
+          await ctx.db.insert('billingStorage', {
+            ownerId: owner.viewer._id,
+            totalBytes: CLOUD_PLAN_QUOTAS.cloud_plus.storageBytes,
+          });
+        });
+
         await expect(
-          owner.user.action(api.billing.uploadReadinessForCircle, {
+          owner.user.query(api.billing.uploadReadinessForCircle, {
+            circleId: owner.circleId,
+          }),
+        ).resolves.toMatchObject({
+          deployment: 'cloud',
+          canUpload: false,
+          viewerIsBillingOwner: true,
+          billingRequired: true,
+          reason: 'quota_exceeded',
+        });
+      });
+    });
+  });
+
+  test('cloud upload readiness ignores upload counts — only storage limits apply', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+
+        await t.run(async (ctx) => {
+          await ctx.db.insert('billingUsage', {
+            ownerId: owner.viewer._id,
+            periodKey: currentPeriodKey(),
+            uploadCount: 1_000_000,
+          });
+        });
+
+        await expect(
+          owner.user.query(api.billing.uploadReadinessForCircle, {
+            circleId: owner.circleId,
+          }),
+        ).resolves.toMatchObject({
+          reason: 'ready',
+          canUpload: true,
+        });
+      });
+    });
+  });
+
+  test('cloud upload readiness distinguishes provider failures from missing plans', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        // Create while entitled; the provider outage starts afterwards.
+        mockEntitledTier('cloud_plus');
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+        rcMocks.hasEntitlement.mockReset();
+        rcMocks.hasEntitlement.mockRejectedValue(new Error('service unavailable'));
+
+        await expect(
+          owner.user.query(api.billing.uploadReadinessForCircle, {
             circleId: owner.circleId,
           }),
         ).resolves.toMatchObject({
@@ -1743,7 +1802,7 @@ describe('circle authorization and stats', () => {
       });
 
       await expect(
-        member.user.action(api.billing.uploadReadinessForCircle, {
+        member.user.query(api.billing.uploadReadinessForCircle, {
           circleId: owner.circleId,
         }),
       ).resolves.toMatchObject({
@@ -1772,7 +1831,7 @@ describe('circle authorization and stats', () => {
       });
 
       await expect(
-        member.user.action(api.billing.uploadReadinessForCircle, {
+        member.user.query(api.billing.uploadReadinessForCircle, {
           circleId: owner.circleId,
         }),
       ).resolves.toMatchObject({
@@ -1781,6 +1840,324 @@ describe('circle authorization and stats', () => {
         viewerIsBillingOwner: false,
         billingRequired: false,
         reason: 'self_hosted',
+      });
+    });
+  });
+
+  test('circle creation requires an active plan when billing is configured', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier(null);
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await expect(
+          user.mutation(api.circles.create, { name: 'Family' }),
+        ).rejects.toThrow(/active cloud plan is required to create a circle/i);
+      });
+    });
+  });
+
+  test('circle creation stops at the plan circle limit', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        for (let index = 0; index < CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles; index += 1) {
+          await user.mutation(api.circles.create, { name: `Circle ${index + 1}` });
+        }
+
+        await expect(
+          user.mutation(api.circles.create, { name: 'One too many' }),
+        ).rejects.toThrow(/circle limit is reached/i);
+      });
+    });
+  });
+
+  test('circle creation stays open while cloud billing is not configured', async () => {
+    await withDeploymentKind('cloud', async () => {
+      const t = createTestDb();
+      const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+      await expect(
+        user.mutation(api.circles.create, { name: 'Family' }),
+      ).resolves.toMatchObject({ circleId: expect.any(String) });
+    });
+  });
+
+  test('a downgrade keeps existing circles but blocks creating new ones', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_max');
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        for (let index = 0; index < CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles + 1; index += 1) {
+          await user.mutation(api.circles.create, { name: `Circle ${index + 1}` });
+        }
+
+        mockEntitledTier('cloud_plus');
+
+        await expect(
+          user.mutation(api.circles.create, { name: 'After downgrade' }),
+        ).rejects.toThrow(/circle limit is reached/i);
+        // Existing circles stay usable: upload readiness only meters uploads.
+        const readiness = await user.query(api.billing.circleCreationReadiness, {});
+        expect(readiness).toMatchObject({
+          reason: 'limit_reached',
+          canCreate: false,
+          usedCircles: CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles + 1,
+          maxCircles: CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles,
+        });
+      });
+    });
+  });
+
+  test('ownership transfer requires the new owner to have a free circle slot', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
+        const t = createTestDb();
+        const owner = await createCircleFor(t, 'owner@example.com');
+        const member = await upsertViewer(t, 'member@example.com', 'Member');
+
+        const memberMembershipId = await t.run(async (ctx) => {
+          return await ctx.db.insert('circleMembers', {
+            circleId: owner.circleId,
+            userId: member.viewer._id,
+            role: 'member',
+            joinedAt: Date.now(),
+          });
+        });
+
+        // Only the current owner is entitled; the member has no plan.
+        rcMocks.hasEntitlement.mockReset();
+        rcMocks.hasEntitlement.mockImplementation(
+          async (_ctx: unknown, args: { appUserId: string; entitlementId: string }) =>
+            args.appUserId === owner.viewer._id && args.entitlementId === 'cloud_plus',
+        );
+
+        await expect(
+          owner.user.mutation(api.circles.transferOwnership, {
+            circleId: owner.circleId,
+            targetMemberId: memberMembershipId,
+          }),
+        ).rejects.toThrow(/new owner needs an active cloud plan/i);
+
+        // Once the member subscribes, the transfer moves billing to them.
+        mockEntitledTier('cloud_plus');
+        await owner.user.mutation(api.circles.transferOwnership, {
+          circleId: owner.circleId,
+          targetMemberId: memberMembershipId,
+        });
+
+        const stored = await t.run(async (ctx) => await ctx.db.get(owner.circleId));
+        expect(stored?.billingOwnerId).toBe(member.viewer._id);
+      });
+    });
+  });
+
+  test('circle creation readiness reports plan, slot, and limit state', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier(null);
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await expect(user.query(api.billing.circleCreationReadiness, {})).resolves.toMatchObject({
+          deployment: 'cloud',
+          canCreate: false,
+          reason: 'plan_required',
+          usedCircles: 0,
+          maxCircles: null,
+        });
+
+        mockEntitledTier('cloud_plus');
+        await user.mutation(api.circles.create, { name: 'Family' });
+
+        await expect(user.query(api.billing.circleCreationReadiness, {})).resolves.toMatchObject({
+          deployment: 'cloud',
+          canCreate: true,
+          reason: 'ready',
+          usedCircles: 1,
+          maxCircles: CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles,
+        });
+      });
+    });
+  });
+
+  test('self-hosted circle creation readiness is unrestricted', async () => {
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+      await expect(user.query(api.billing.circleCreationReadiness, {})).resolves.toMatchObject({
+        deployment: 'self-hosted',
+        canCreate: true,
+        billingRequired: false,
+        reason: 'self_hosted',
+      });
+    });
+  });
+
+  test('retention sweep tracks lapsed owners with storage and clears on win-back', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier(null);
+        const t = createTestDb();
+        const { viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        await t.run(async (ctx) => {
+          await ctx.db.insert('billingStorage', { ownerId: viewer._id, totalBytes: 4096 });
+        });
+
+        await t.mutation(internal.billingRetention.sweep, {});
+
+        const lapsedRow = await t.run(async (ctx) =>
+          await ctx.db
+            .query('billingRetention')
+            .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+            .unique(),
+        );
+        expect(lapsedRow).toMatchObject({ warningCount: 0 });
+        expect(lapsedRow?.lapsedAt).toBeGreaterThan(0);
+
+        // Re-subscribing clears the retention state entirely.
+        mockEntitledTier('cloud_plus');
+        await t.mutation(internal.billingRetention.sweep, {});
+
+        const cleared = await t.run(async (ctx) =>
+          await ctx.db
+            .query('billingRetention')
+            .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+            .unique(),
+        );
+        expect(cleared).toBeNull();
+      });
+    });
+  });
+
+  test('retention sweep emails warnings after grace and marks deletable after the final one', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        await withResendKey(async () => {
+          mockEntitledTier(null);
+          resendMocks.sendEmail.mockReset();
+          resendMocks.sendEmail.mockResolvedValue('email_id');
+
+          const t = createTestDb();
+          const { viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
+          const longAgo = Date.now() - RETENTION_GRACE_MS - 1000;
+
+          await t.run(async (ctx) => {
+            await ctx.db.insert('billingStorage', { ownerId: viewer._id, totalBytes: 4096 });
+            await ctx.db.insert('billingRetention', {
+              ownerId: viewer._id,
+              lapsedAt: longAgo,
+              warningCount: 0,
+              updatedAt: longAgo,
+            });
+          });
+
+          await t.mutation(internal.billingRetention.sweep, {});
+
+          expect(resendMocks.sendEmail).toHaveBeenCalledTimes(1);
+          expect(resendMocks.sendEmail).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ to: 'owner@example.com' }),
+          );
+
+          let row = await t.run(async (ctx) =>
+            await ctx.db
+              .query('billingRetention')
+              .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+              .unique(),
+          );
+          expect(row).toMatchObject({ warningCount: 1 });
+          expect(row?.deletableAt).toBeUndefined();
+
+          // A sweep inside the 30-day warning interval sends nothing new.
+          await t.mutation(internal.billingRetention.sweep, {});
+          expect(resendMocks.sendEmail).toHaveBeenCalledTimes(1);
+
+          // Fast-forward to the final warning: it sets the deletable marker.
+          await t.run(async (ctx) => {
+            const current = await ctx.db
+              .query('billingRetention')
+              .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+              .unique();
+            if (current) {
+              await ctx.db.patch(current._id, {
+                warningCount: RETENTION_MAX_WARNINGS - 1,
+                lastWarnedAt: Date.now() - RETENTION_WARNING_INTERVAL_MS - 1000,
+              });
+            }
+          });
+          await t.mutation(internal.billingRetention.sweep, {});
+
+          row = await t.run(async (ctx) =>
+            await ctx.db
+              .query('billingRetention')
+              .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+              .unique(),
+          );
+          expect(row).toMatchObject({ warningCount: RETENTION_MAX_WARNINGS });
+          expect(row?.deletableAt).toBeGreaterThan(Date.now());
+
+          // Once deletableAt passes, the owner shows up for manual cleanup.
+          await t.run(async (ctx) => {
+            const current = await ctx.db
+              .query('billingRetention')
+              .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+              .unique();
+            if (current) {
+              await ctx.db.patch(current._id, { deletableAt: Date.now() - 1000 });
+            }
+          });
+          const deletable = await t.query(internal.billingRetention.listDeletable, {});
+          expect(deletable).toHaveLength(1);
+          expect(deletable[0]).toMatchObject({
+            ownerId: viewer._id,
+            email: 'owner@example.com',
+            totalBytes: 4096,
+          });
+        });
+      });
+    });
+  });
+
+  test('retention warnings are not counted while Resend is unconfigured', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier(null);
+        resendMocks.sendEmail.mockReset();
+
+        const t = createTestDb();
+        const { viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
+        const longAgo = Date.now() - RETENTION_GRACE_MS - 1000;
+
+        await t.run(async (ctx) => {
+          await ctx.db.insert('billingStorage', { ownerId: viewer._id, totalBytes: 4096 });
+          await ctx.db.insert('billingRetention', {
+            ownerId: viewer._id,
+            lapsedAt: longAgo,
+            warningCount: 0,
+            updatedAt: longAgo,
+          });
+        });
+
+        await t.mutation(internal.billingRetention.sweep, {});
+
+        expect(resendMocks.sendEmail).not.toHaveBeenCalled();
+        const row = await t.run(async (ctx) =>
+          await ctx.db
+            .query('billingRetention')
+            .withIndex('by_owner', (q) => q.eq('ownerId', viewer._id))
+            .unique(),
+        );
+        expect(row).toMatchObject({ warningCount: 0 });
       });
     });
   });
@@ -1846,9 +2223,9 @@ describe('circle authorization and stats', () => {
     await t.run(async (ctx) => {
       for (let index = 0; index < extraMembers; index++) {
         const userId = await ctx.db.insert('users', {
-          tokenIdentifier: `workos|member-${index}@example.com`,
-          authProvider: 'workos',
-          authSubject: `member-${index}`,
+          tokenIdentifier: `${CLERK_TEST_ISSUER}|user_member_${index}`,
+          authProvider: 'clerk',
+          authSubject: `user_member_${index}`,
           email: `member-${index}@example.com`,
           displayName: `Member ${String(index).padStart(3, '0')}`,
           createdAt: now + index,
@@ -2035,9 +2412,10 @@ describe('shares, uploads, and feed', () => {
     expect(context.shareBatchId).toBe(draft.shareBatchId);
   });
 
-  test('cloud share deletion credits Autumn storage with entity metadata', async () => {
+  test('cloud share deletion credits the storage gauge of the billing owner', async () => {
     await withDeploymentKind('cloud', async () => {
-      await withAutumnSecret(async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier('cloud_plus');
         const t = createTestDb();
         const owner = await createCircleFor(t, 'owner@example.com');
         const published = await createPublishedShare({
@@ -2048,30 +2426,25 @@ describe('shares, uploads, and feed', () => {
           fileName: 'cloud-delete.jpg',
         });
 
-        autumnMocks.track.mockResolvedValueOnce({
-          data: {
-            id: 'evt_storage_credit',
-            code: 'ok',
-            customer_id: owner.viewer._id,
-            feature_id: 'storage_bytes',
-          },
+        await t.run(async (ctx) => {
+          await ctx.db.insert('billingStorage', {
+            ownerId: owner.viewer._id,
+            totalBytes: 5000,
+          });
         });
 
         await owner.user.action(api.shares.deleteShare, {
           shareBatchId: published.shareBatchId,
         });
 
-        expect(autumnMocks.track).toHaveBeenCalledWith(
-          expect.objectContaining({
-            customer_id: owner.viewer._id,
-            entity_id: owner.circleId,
-            feature_id: 'storage_bytes',
-            value: -2048,
-            entity_data: {
-              feature_id: 'storage_bytes',
-            },
-          }),
+        const storageRow = await t.run(async (ctx) =>
+          await ctx.db
+            .query('billingStorage')
+            .withIndex('by_owner', (q) => q.eq('ownerId', owner.viewer._id))
+            .unique(),
         );
+
+        expect(storageRow?.totalBytes).toBe(5000 - 2048);
       });
     });
   });
@@ -4491,6 +4864,53 @@ describe('shares, uploads, and feed', () => {
     await expect(
       owner.user.mutation(api.shares.publish, { shareBatchId: uploaded.shareBatchId }),
     ).resolves.toMatchObject({ shareBatchId: uploaded.shareBatchId, assetCount: 1 });
+  });
+
+  test('discard is idempotent for completed and already-discarded uploads', async () => {
+    const t = createTestDb();
+    const owner = await createCircleFor(t, 'owner@example.com');
+    const uploaded = await createUploadedDraftAsset({
+      t,
+      user: owner.user,
+      viewerId: owner.viewer._id,
+      circleId: owner.circleId,
+      fileName: 'ready.jpg',
+      sizeBytes: 1024,
+    });
+
+    // A stale client queue item may reference an upload that already completed
+    // into an asset. Discard must report that instead of throwing, and must not
+    // touch the upload row, the asset, or its storage.
+    await expect(
+      owner.user.action(api.uploads.discard, { uploadId: uploaded.uploadId }),
+    ).resolves.toMatchObject({ outcome: 'completed' });
+
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(uploaded.uploadId)).not.toBeNull();
+      expect(await ctx.db.get(uploaded.assetId)).not.toBeNull();
+    });
+
+    const failedUploadId = await t.run(async (ctx) => {
+      return await ctx.db.insert('uploads', {
+        shareBatchId: uploaded.shareBatchId,
+        circleId: owner.circleId,
+        createdBy: owner.viewer._id,
+        providerKind: 'convex-files',
+        kind: 'image',
+        fileName: 'interrupted.jpg',
+        mimeType: 'image/jpeg',
+        status: 'failed',
+        failureReason: 'Network dropped.',
+        createdAt: Date.now(),
+      });
+    });
+
+    await expect(
+      owner.user.action(api.uploads.discard, { uploadId: failedUploadId }),
+    ).resolves.toMatchObject({ outcome: 'discarded' });
+    await expect(
+      owner.user.action(api.uploads.discard, { uploadId: failedUploadId }),
+    ).resolves.toMatchObject({ outcome: 'missing' });
   });
 
   test('storage counters track upload completion, draft asset deletion, and share deletion', async () => {

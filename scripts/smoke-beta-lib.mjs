@@ -145,8 +145,8 @@ function validateBilling(manifest, deploymentKind) {
   const enabled = requireBoolean(billing.enabled, 'billing.enabled');
 
   if (deploymentKind === 'cloud') {
-    if (!enabled || billing.provider !== 'autumn') {
-      throw new Error('cloud deployments must advertise Autumn billing.');
+    if (!enabled || billing.provider !== 'revenuecat') {
+      throw new Error('cloud deployments must advertise RevenueCat billing.');
     }
 
     const plans = requireArray(billing.plans, 'billing.plans');
@@ -215,26 +215,23 @@ export function validateManifest(payload, inputBaseUrl, expectKind, appVersion =
     throw new Error(`deployment.kind is ${deploymentKind}, expected ${expectKind}.`);
   }
 
-  if (auth.provider !== 'workos') {
-    throw new Error('auth.provider must be workos.');
+  if (auth.provider !== 'clerk') {
+    throw new Error('auth.provider must be clerk.');
   }
 
-  if (auth.mode !== 'native-client' && auth.mode !== 'hosted-browser') {
-    throw new Error('auth.mode must be native-client or hosted-browser.');
+  if (auth.mode !== 'native') {
+    throw new Error('auth.mode must be native.');
   }
 
   requireArray(auth.capabilities, 'auth.capabilities');
   const publicConfig = requireRecord(auth.publicConfig, 'auth.publicConfig');
+  const publishableKey = requireString(
+    publicConfig.publishableKey,
+    'auth.publicConfig.publishableKey',
+  );
 
-  if (auth.mode === 'native-client') {
-    requireString(publicConfig.clientId, 'auth.publicConfig.clientId');
-  }
-
-  if (auth.mode === 'hosted-browser') {
-    normalizeBaseUrl(
-      requireString(publicConfig.signInUrl, 'auth.publicConfig.signInUrl'),
-      'auth.publicConfig.signInUrl',
-    );
+  if (!publishableKey.startsWith('pk_')) {
+    throw new Error('auth.publicConfig.publishableKey must be a Clerk publishable key.');
   }
 
   const storageProviders = requireArray(features.storageProviders, 'features.storageProviders');

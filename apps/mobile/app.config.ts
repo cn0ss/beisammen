@@ -7,14 +7,18 @@ const publicEnv = {
   EXPO_PUBLIC_DEFAULT_INSTANCE_NAME: process.env.EXPO_PUBLIC_DEFAULT_INSTANCE_NAME ?? '',
   EXPO_PUBLIC_DEFAULT_INSTANCE_URL: process.env.EXPO_PUBLIC_DEFAULT_INSTANCE_URL ?? '',
   EXPO_PUBLIC_DEFAULT_CONVEX_URL: process.env.EXPO_PUBLIC_DEFAULT_CONVEX_URL ?? '',
-  EXPO_PUBLIC_DEFAULT_AUTH_MODE: process.env.EXPO_PUBLIC_DEFAULT_AUTH_MODE ?? '',
   EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND:
     process.env.EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND ?? '',
-  EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID:
-    process.env.EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID ?? '',
-  EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL:
-    process.env.EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL ?? '',
-  EXPO_PUBLIC_EAS_PROJECT_ID: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? '',
+  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY:
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '',
+  EXPO_PUBLIC_REVENUECAT_TEST_API_KEY:
+    process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY ?? '',
+  EXPO_PUBLIC_REVENUECAT_IOS_API_KEY:
+    process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? '',
+  EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY:
+    process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ?? '',
+  EXPO_PUBLIC_EAS_PROJECT_ID:
+    process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? process.env.EAS_BUILD_PROJECT_ID ?? '',
   EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL ?? '',
 } as const;
 
@@ -32,24 +36,40 @@ const mapsPluginConfig = {
 const config: ExpoConfig = {
   name: 'beisammen',
   slug: 'beisammen-mobile',
-  version: '0.1.0',
+  version: '1.0',
+  // Fingerprint of the native project decides OTA compatibility: JS-only
+  // changes ship via `eas update`, native changes force a new store build.
+  runtimeVersion: { policy: 'fingerprint' },
+  ...(easProjectId
+    ? { updates: { url: `https://u.expo.dev/${easProjectId}` } }
+    : {}),
   scheme,
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
+  // Native window color behind all React views (e.g. visible during stack
+  // swipe-back overscroll). Static light default; the root layout re-paints
+  // it per color scheme at runtime via expo-system-ui.
+  backgroundColor: '#F7F5F0',
   icon: './assets/images/icon.png',
   ios: {
-    supportsTablet: true,
+    supportsTablet: false,
     bundleIdentifier: 'app.beisammen.app',
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
+      CFBundleDevelopmentRegion: 'de',
+      CFBundleLocalizations: ['de', 'en'],
     },
+  },
+  locales: {
+    de: './locales/de.json',
+    en: './locales/en.json',
   },
   android: {
     package: 'app.beisammen.app',
+    googleServicesFile: './google-services.json',
     adaptiveIcon: {
-      backgroundColor: '#f4f1ea',
+      backgroundColor: '#F7F4EE',
       foregroundImage: './assets/images/android-icon-foreground.png',
-      backgroundImage: './assets/images/android-icon-background.png',
       monochromeImage: './assets/images/android-icon-monochrome.png',
     },
   },
@@ -58,8 +78,28 @@ const config: ExpoConfig = {
     favicon: './assets/images/favicon.png',
   },
   plugins: [
+    '@clerk/expo',
     'expo-dev-client',
     'expo-image',
+    [
+      // Native splash: brand background only. The mark is drawn in by the
+      // animated JS splash (components/splash/AnimatedSplash) for a seamless
+      // color-matched handoff — iOS launch screens cannot animate natively.
+      'expo-splash-screen',
+      {
+        backgroundColor: '#F7F5F0',
+        android: {
+          // Android 12+ requires an animated-icon drawable even when the
+          // native splash intentionally shows only the background color.
+          drawable: {
+            icon: './assets/brand/android-splash-transparent.xml',
+          },
+        },
+        dark: {
+          backgroundColor: '#0C0C0E',
+        },
+      },
+    ],
     'expo-notifications',
     'expo-router',
     'expo-secure-store',

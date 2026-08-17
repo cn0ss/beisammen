@@ -1,54 +1,17 @@
-import * as Linking from 'expo-linking';
-import * as WebBrowser from 'expo-web-browser';
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useRef,
-  useState,
-  type PropsWithChildren,
-} from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
+import { createContext, useContext, useEffectEvent, useMemo, type PropsWithChildren } from 'react';
 
 import type { AppSession, InstanceConfig } from '@beisammen/contracts';
 
-import { createAuthAdapter } from '@/features/auth/adapters';
-import {
-  clearStoredAuthState,
-  clearStoredInviteToken,
-  loadStoredInstanceConfig,
-  loadStoredAuthState,
-  loadStoredInviteToken,
-  saveStoredInstanceConfig,
-  saveStoredInviteToken,
-  saveStoredAuthState,
-} from '@/features/auth/session-store';
-import { defaultInstanceConfig } from '@/features/instances/catalog';
-import { recordClientDiagnostic } from '@/features/diagnostics/buffer';
+import { logOutPurchases } from '@/features/billing/purchases';
+import { InstanceProvider, useInstance } from '@/features/instances/instance-provider';
 import { clearUploadRecoveryForInstance } from '@/features/media/upload-recovery-runtime';
-import { unregisterCurrentPushDevice } from '@/features/notifications/registration-runtime';
 import { createLogger } from '@/lib/logger';
 
-WebBrowser.maybeCompleteAuthSession();
-
 const logger = createLogger('auth.session');
-const TOKEN_REFRESH_LEEWAY_MS = 60_000;
-
-interface AuthTokens {
-  accessToken: string;
-  refreshToken?: string;
-}
-
-interface ConvexAuthState {
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  fetchAccessToken: (args: { forceRefreshToken: boolean }) => Promise<string | null>;
-}
 
 interface SessionContextValue {
-  isBusy: boolean;
   isReady: boolean;
   session: AppSession | null;
   instance: InstanceConfig;
@@ -62,551 +25,127 @@ interface SessionContextValue {
   ) => Promise<void>;
   setPendingInviteToken: (token: string) => Promise<void>;
   clearPendingInviteToken: () => Promise<void>;
-  signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
-  convexAuth: ConvexAuthState;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
-function isTokenExpiringSoon(session: AppSession | null, leewayMs = TOKEN_REFRESH_LEEWAY_MS): boolean {
-  if (!session?.expiresAt) {
-    return false;
-  }
+function SessionBridge({ children }: PropsWithChildren) {
+  const instanceContext = useInstance();
+  const { instance } = instanceContext;
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { user } = useUser();
+  const clerk = useClerk();
 
-  return session.expiresAt - Date.now() <= leewayMs;
-}
-
-export function SessionProvider({ children }: PropsWithChildren) {
-  const [instance, setInstanceState] = useState(defaultInstanceConfig);
-  const [session, setSession] = useState<AppSession | null>(null);
-  const [tokens, setTokens] = useState<AuthTokens | null>(null);
-  const [instanceError, setInstanceError] = useState<string | null>(null);
-  const [activeCircleId, setActiveCircleId] = useState<string | null>(null);
-  const [pendingInviteToken, setPendingInviteTokenState] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-  const [isInstanceReady, setIsInstanceReady] = useState(false);
-  const adapter = useMemo(() => createAuthAdapter(instance), [instance]);
-  const refreshInFlightRef = useRef<Promise<string | null> | null>(null);
-  const appStateRef = useRef(AppState.currentState);
-  const restoredInstanceUrlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function loadActiveInstance() {
-      try {
-        const storedInstance = await loadStoredInstanceConfig();
-
-        if (!isCancelled && storedInstance) {
-          setInstanceState(storedInstance);
-        }
-      } catch (error) {
-        logger.warn('Failed to load stored instance config', { error });
-      } finally {
-        if (!isCancelled) {
-          setIsInstanceReady(true);
-        }
-      }
-    }
-
-    void loadActiveInstance();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  const persistAuthState = useEffectEvent(async (
-    nextSession: AppSession,
-    nextTokens: AuthTokens | null,
-  ) => {
-    setSession(nextSession);
-    setTokens(nextTokens);
-
-    if (!nextTokens?.accessToken) {
-      await clearStoredAuthState(instance.instance.baseUrl);
-      return;
-    }
-
-    await saveStoredAuthState(instance.instance.baseUrl, {
-      session: nextSession,
-      accessToken: nextTokens.accessToken,
-      refreshToken: nextTokens.refreshToken,
-    });
-  });
-
-  const unregisterPushDevice = useEffectEvent(async (reason: string) => {
-    try {
-      await unregisterCurrentPushDevice();
-    } catch (error) {
-      logger.warn('Failed to unregister push device', {
-        reason,
-        instanceUrl: instance.instance.baseUrl,
-        error,
-      });
-      recordClientDiagnostic('notification_registration', 'Failed to unregister push device', {
-        reason,
-        instanceUrl: instance.instance.baseUrl,
-        error,
-      });
-    }
-  });
-
-  const clearLocalSession = useEffectEvent(async (reason: string) => {
-    logger.warn('Clearing local auth session', {
-      reason,
-      instanceUrl: instance.instance.baseUrl,
-    });
-    if (reason !== 'sign_out') {
-      await unregisterPushDevice(reason);
-    }
-    await clearStoredAuthState(instance.instance.baseUrl);
-    setSession(null);
-    setTokens(null);
-    setActiveCircleId(null);
-  });
-
-  const setPendingInviteToken = useEffectEvent(async (token: string) => {
-    const normalized = token.trim();
-
-    if (!normalized) {
-      return;
-    }
-
-    setPendingInviteTokenState(normalized);
-    await saveStoredInviteToken(instance.instance.baseUrl, normalized);
-  });
-
-  const clearPendingInviteToken = useEffectEvent(async () => {
-    setPendingInviteTokenState(null);
-    await clearStoredInviteToken(instance.instance.baseUrl);
-  });
-
-  const setActiveInstance = useEffectEvent(async (
-    nextInstance: InstanceConfig,
-    options?: { pendingInviteToken?: string },
-  ) => {
-    const nextInstanceUrl = nextInstance.instance.baseUrl;
-    const normalizedInviteToken = options?.pendingInviteToken?.trim() ?? '';
-
-    await saveStoredInstanceConfig(nextInstance);
-
-    if (normalizedInviteToken) {
-      await saveStoredInviteToken(nextInstanceUrl, normalizedInviteToken);
-    } else if (nextInstanceUrl !== instance.instance.baseUrl) {
-      await clearStoredInviteToken(nextInstanceUrl);
-    }
-
-    if (nextInstanceUrl === instance.instance.baseUrl) {
-      setInstanceState(nextInstance);
-
-      if (normalizedInviteToken) {
-        setPendingInviteTokenState(normalizedInviteToken);
-      }
-
-      return;
-    }
-
-    logger.info('Switching active instance', {
-      previousInstanceUrl: instance.instance.baseUrl,
-      nextInstanceUrl,
-      nextInstanceName: nextInstance.instance.name,
-    });
-
-    await unregisterPushDevice('instance_switch');
-    await clearUploadRecoveryForInstance(instance.instance.baseUrl).catch((error) => {
-      logger.warn('Failed to clear upload recovery cache while switching instance', {
-        instanceUrl: instance.instance.baseUrl,
-        error,
-      });
-      recordClientDiagnostic('instance_switch', 'Failed to clear upload recovery cache while switching instance', {
-        instanceUrl: instance.instance.baseUrl,
-        error,
-      });
-    });
-
-    refreshInFlightRef.current = null;
-    restoredInstanceUrlRef.current = null;
-    setInstanceError(null);
-    setSession(null);
-    setTokens(null);
-    setActiveCircleId(null);
-    setPendingInviteTokenState(normalizedInviteToken || null);
-    setIsReady(false);
-    setInstanceState(nextInstance);
-  });
-
-  const refreshAccessToken = useEffectEvent(
-    async (
-      reason: string,
-      input?: {
-        session?: AppSession | null;
-        refreshToken?: string;
-      },
-    ): Promise<string | null> => {
-      const currentSession = input?.session ?? session;
-      const refreshToken = input?.refreshToken ?? tokens?.refreshToken;
-
-      if (!refreshToken) {
-        logger.debug('Skipping refresh because no refresh token is available', { reason });
-        return tokens?.accessToken ?? null;
-      }
-
-      if (refreshInFlightRef.current) {
-        return await refreshInFlightRef.current;
-      }
-
-      const refreshPromise = (async () => {
-        logger.info('Refreshing WorkOS session token', {
-          reason,
-          hasCurrentSession: Boolean(currentSession),
-        });
-
-        try {
-          const next = await adapter.refreshSession({
-            instance,
-            currentSession,
-            refreshToken,
-          });
-
-          if (!next?.accessToken) {
-            throw new Error('Refresh response did not include an access token.');
-          }
-
-          const nextTokens: AuthTokens = {
-            accessToken: next.accessToken,
-            refreshToken: next.refreshToken ?? refreshToken,
-          };
-
-          await persistAuthState(next.session, nextTokens);
-          setInstanceError(null);
-
-          return nextTokens.accessToken;
-        } catch (error) {
-          logger.error('Failed to refresh WorkOS session token', {
-            reason,
-            error,
-          });
-          recordClientDiagnostic('auth_refresh', 'Failed to refresh WorkOS session token', {
-            reason,
-            error,
-          });
-          await clearLocalSession('refresh_failed');
-          setInstanceError('Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.');
-          return null;
-        } finally {
-          refreshInFlightRef.current = null;
-        }
-      })();
-
-      refreshInFlightRef.current = refreshPromise;
-      return await refreshPromise;
-    },
-  );
-
-  const ensureFreshAccessToken = useEffectEvent(async (reason: string): Promise<string | null> => {
-    if (!tokens?.accessToken) {
+  const session = useMemo<AppSession | null>(() => {
+    if (!isSignedIn || !user) {
       return null;
     }
 
-    if (!isTokenExpiringSoon(session)) {
-      return tokens.accessToken;
-    }
+    const email = user.primaryEmailAddress?.emailAddress;
+    const displayName = user.fullName ?? undefined;
+    const avatarUrl = user.imageUrl || undefined;
 
-    if (!tokens.refreshToken) {
-      if (session?.expiresAt && session.expiresAt <= Date.now()) {
-        await clearLocalSession('expired_without_refresh_token');
-        setInstanceError('Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.');
-        return null;
-      }
-
-      return tokens.accessToken;
-    }
-
-    return await refreshAccessToken(reason);
-  });
-
-  useEffect(() => {
-    if (!isInstanceReady) {
-      return;
-    }
-
-    const instanceUrl = instance.instance.baseUrl;
-
-    if (restoredInstanceUrlRef.current === instanceUrl) {
-      return;
-    }
-
-    restoredInstanceUrlRef.current = instanceUrl;
-    let isCancelled = false;
-
-    async function restore() {
-      logger.info('Restoring auth session from storage', {
-        instanceUrl,
-        provider: instance.auth.provider,
-        convexUrl: instance.backend.convexUrl,
-      });
-
-      try {
-        const storedInvite = await loadStoredInviteToken(instanceUrl);
-
-        if (!isCancelled) {
-          setPendingInviteTokenState(storedInvite);
-        }
-
-        const stored = await loadStoredAuthState(instanceUrl);
-
-        if (!stored || isCancelled) {
-          return;
-        }
-
-        const restoredSession = await adapter.restoreSession({
-          instance,
-          currentSession: stored.session,
-        });
-
-        if (!restoredSession || isCancelled) {
-          await clearStoredAuthState(instance.instance.baseUrl);
-          return;
-        }
-
-        const restoredTokens: AuthTokens = {
-          accessToken: stored.accessToken,
-          refreshToken: stored.refreshToken,
-        };
-
-        setSession(restoredSession);
-        setTokens(restoredTokens);
-
-        if (stored.refreshToken) {
-          const refreshedAccessToken = await refreshAccessToken('restore', {
-            session: restoredSession,
-            refreshToken: stored.refreshToken,
-          });
-
-          if (!refreshedAccessToken || isCancelled) {
-            return;
-          }
-        } else {
-          await persistAuthState(restoredSession, restoredTokens);
-        }
-
-        logger.info('Restored stored auth session', {
-          subject: restoredSession.subject,
-          hasRefreshToken: Boolean(stored.refreshToken),
-        });
-      } catch (error) {
-        logger.error('Failed to restore stored auth session', { error });
-        await clearStoredAuthState(instanceUrl);
-      } finally {
-        if (!isCancelled) {
-          setIsReady(true);
-        }
-      }
-    }
-
-    void restore();
-
-    return () => {
-      isCancelled = true;
+    return {
+      instanceUrl: instance.instance.baseUrl,
+      provider: 'clerk',
+      subject: user.id,
+      ...(email ? { email } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(avatarUrl ? { avatarUrl } : {}),
+      capabilities: instance.auth.capabilities,
     };
-  }, [adapter, instance, isInstanceReady]);
-
-  useEffect(() => {
-    if (!tokens?.refreshToken || !session?.expiresAt) {
-      return;
-    }
-
-    const refreshDelay = Math.max(session.expiresAt - Date.now() - TOKEN_REFRESH_LEEWAY_MS, 0);
-    const timeout = setTimeout(() => {
-      void refreshAccessToken('scheduled');
-    }, refreshDelay);
-
-    return () => clearTimeout(timeout);
-  }, [session?.expiresAt, tokens?.refreshToken]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      const previousAppState = appStateRef.current;
-      appStateRef.current = nextAppState;
-
-      if (
-        previousAppState.match(/inactive|background/) &&
-        nextAppState === 'active'
-      ) {
-        void ensureFreshAccessToken('resume');
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
-  const refreshSession = useEffectEvent(async () => {
-    const nextAccessToken = await refreshAccessToken('manual');
-
-    if (!nextAccessToken) {
-      throw new Error('Refresh response did not include an access token.');
-    }
-  });
-
-  const signIn = useEffectEvent(async () => {
-    const redirectPath =
-      typeof instance.auth.publicConfig.redirectPath === 'string'
-        ? instance.auth.publicConfig.redirectPath
-        : 'auth/callback';
-
-    setIsBusy(true);
-    setInstanceError(null);
-
-    try {
-      const redirectUrl = Linking.createURL(redirectPath);
-      const begin = await adapter.beginSignIn({
-        instance,
-        redirectUrl,
-      });
-
-      if (begin.type === 'session') {
-        const nextTokens = begin.result.accessToken
-          ? {
-              accessToken: begin.result.accessToken,
-              refreshToken: begin.result.refreshToken,
-            }
-          : null;
-
-        await persistAuthState(begin.result.session, nextTokens);
-        return;
-      }
-
-      logger.info('Opening browser auth session', {
-        provider: instance.auth.provider,
-        redirectUrl,
-      });
-
-      const result = await WebBrowser.openAuthSessionAsync(begin.authUrl, redirectUrl);
-
-      if (result.type !== 'success') {
-        logger.warn('Auth session did not complete successfully', {
-          resultType: result.type,
-        });
-        return;
-      }
-
-      const next = await adapter.handleCallback({
-        instance,
-        callbackUrl: result.url,
-        currentSession: session,
-      });
-
-      if (!next) {
-        throw new Error('Auth callback did not return a valid session.');
-      }
-
-      const nextTokens = next.accessToken
-        ? {
-            accessToken: next.accessToken,
-            refreshToken: next.refreshToken,
-          }
-        : null;
-
-      await persistAuthState(next.session, nextTokens);
-      logger.info('User session established', {
-        subject: next.session.subject,
-        provider: next.session.provider,
-      });
-    } catch (error) {
-      logger.error('Sign-in failed', { error });
-      setInstanceError(error instanceof Error ? error.message : 'Sign-in failed.');
-    } finally {
-      setIsBusy(false);
-    }
-  });
+  }, [instance, isSignedIn, user]);
 
   const signOut = useEffectEvent(async () => {
-    logger.info('Signing out locally');
-    await unregisterPushDevice('sign_out');
-    await adapter.signOut({
-      instance,
-      currentSession: session,
-    });
+    logger.info('Signing out');
+    await instanceContext.unregisterPushDevice('sign_out');
     await clearUploadRecoveryForInstance(instance.instance.baseUrl).catch((error) => {
       logger.warn('Failed to clear upload recovery cache during sign-out', {
         instanceUrl: instance.instance.baseUrl,
         error,
       });
     });
-    await clearLocalSession('sign_out');
-    setInstanceError(null);
+    await logOutPurchases();
+    await clerk.signOut();
+    instanceContext.setActiveCircleId(null);
+    instanceContext.setInstanceError(null);
   });
 
-  // Keep a ref so the stable fetchAccessToken wrapper always sees latest state.
-  const fetchConvexTokenRef = useRef<(args: { forceRefreshToken: boolean }) => Promise<string | null>>(
-    async () => null,
-  );
-  fetchConvexTokenRef.current = async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
-    if (forceRefreshToken) {
-      return await refreshAccessToken('convex', {
-        session,
-        refreshToken: tokens?.refreshToken,
+  const refreshSession = useEffectEvent(async () => {
+    const token = await getToken({ skipCache: true });
+
+    if (!token) {
+      throw new Error('Refresh response did not include an access token.');
+    }
+  });
+
+  const setActiveInstance = useEffectEvent(async (
+    nextInstance: InstanceConfig,
+    options?: { pendingInviteToken?: string },
+  ) => {
+    const isSwitching =
+      nextInstance.instance.baseUrl !== instance.instance.baseUrl;
+
+    if (isSwitching && isSignedIn) {
+      await logOutPurchases();
+      await clerk.signOut().catch((error) => {
+        logger.warn('Failed to sign out of Clerk while switching instance', { error });
       });
     }
 
-    return await ensureFreshAccessToken('convex');
-  };
-
-  // Stable function reference — never changes identity across renders.
-  const stableFetchAccessToken = useRef(
-    async (args: { forceRefreshToken: boolean }) => fetchConvexTokenRef.current(args),
-  ).current;
-
-  // Only transition isAuthenticated when the token truly appears or disappears,
-  // NOT on every refresh that swaps one valid JWT for another.
-  const isAuthenticated = Boolean(tokens?.accessToken);
-
-  const convexAuth = useMemo<ConvexAuthState>(
-    () => ({
-      isLoading: !isReady,
-      isAuthenticated,
-      fetchAccessToken: stableFetchAccessToken,
-    }),
-    [isReady, isAuthenticated, stableFetchAccessToken],
-  );
+    await instanceContext.setActiveInstance(nextInstance, options);
+  });
 
   const value: SessionContextValue = {
-    isBusy,
-    isReady: isInstanceReady && isReady,
+    isReady: instanceContext.isInstanceReady && isLoaded,
     session,
     instance,
-    instanceError,
-    activeCircleId,
-    pendingInviteToken,
-    setActiveCircleId,
+    instanceError: instanceContext.instanceError,
+    activeCircleId: instanceContext.activeCircleId,
+    pendingInviteToken: instanceContext.pendingInviteToken,
+    setActiveCircleId: instanceContext.setActiveCircleId,
     async setActiveInstance(nextInstance, options) {
       await setActiveInstance(nextInstance, options);
     },
-    async setPendingInviteToken(token: string) {
-      await setPendingInviteToken(token);
-    },
-    async clearPendingInviteToken() {
-      await clearPendingInviteToken();
-    },
-    async signIn() {
-      await signIn();
-    },
+    setPendingInviteToken: instanceContext.setPendingInviteToken,
+    clearPendingInviteToken: instanceContext.clearPendingInviteToken,
     async signOut() {
       await signOut();
     },
     async refreshSession() {
       await refreshSession();
     },
-    convexAuth,
   };
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+function InstanceClerkProvider({ children }: PropsWithChildren) {
+  const { instance } = useInstance();
+  const publishableKey =
+    typeof instance.auth.publicConfig.publishableKey === 'string'
+      ? instance.auth.publicConfig.publishableKey
+      : '';
+
+  return (
+    <ClerkProvider
+      key={instance.instance.baseUrl}
+      publishableKey={publishableKey}
+      tokenCache={tokenCache}
+    >
+      <SessionBridge>{children}</SessionBridge>
+    </ClerkProvider>
+  );
+}
+
+export function SessionProvider({ children }: PropsWithChildren) {
+  return (
+    <InstanceProvider>
+      <InstanceClerkProvider>{children}</InstanceClerkProvider>
+    </InstanceProvider>
+  );
 }
 
 export function useSession(): SessionContextValue {
@@ -617,8 +156,4 @@ export function useSession(): SessionContextValue {
   }
 
   return context;
-}
-
-export function useConvexSessionAuth(): ConvexAuthState {
-  return useSession().convexAuth;
 }

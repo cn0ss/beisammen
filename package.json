@@ -21,7 +21,6 @@
   "devDependencies": {
     "@edge-runtime/vm": "^5.0.0",
     "@types/node": "^26.2.0",
-    "@workos-inc/node": "^10.10.0",
     "convex": "^1.44.0",
     "convex-test": "^0.0.55",
     "turbo": "^2.10.10",
@@ -31,7 +30,7 @@
   },
   "dependencies": {
     "@convex-dev/rate-limiter": "^0.3.2",
-    "@useautumn/convex": "^0.0.23",
-    "autumn-js": "^0.1.85"
+    "@convex-dev/resend": "^0.2.6",
+    "convex-revenuecat": "0.3.2"
   }
 }

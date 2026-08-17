@@ -2,10 +2,10 @@ import { makeFunctionReference } from 'convex/server';
 
 import type {
   AuthProvider,
-  BillingCheckoutResult,
-  BillingPortalSessionResult,
   BillingStatus,
+  CircleCreationReadiness,
   CircleUploadReadiness,
+  CircleUsageBreakdown,
   ConnectionCheck,
   EngagementSummary,
   MediaLocation,
@@ -18,7 +18,7 @@ import type {
   UploadTarget,
 } from '@beisammen/contracts';
 
-type StoredAuthProvider = AuthProvider | 'convex-auth';
+type StoredAuthProvider = AuthProvider;
 
 export interface ViewerRecord {
   _id: string;
@@ -31,6 +31,8 @@ export interface ViewerRecord {
   avatarUrl?: string;
   createdAt: number;
   hasProfileImage: boolean;
+  deletionRequestedAt?: number;
+  deletionCompletedAt?: number;
 }
 
 export interface ViewerState {
@@ -54,7 +56,11 @@ export interface CircleListItem {
   isOwner: boolean;
 }
 
-export interface CircleDetail extends CircleListItem {}
+export interface CircleDetail extends CircleListItem {
+  imageCount: number;
+  videoCount: number;
+  totalSizeBytes: number;
+}
 
 export interface CircleMemberRecord {
   _id: string;
@@ -315,6 +321,19 @@ export interface MemoryDiscoveryRecord {
   places: MemoryPlaceFacet[];
 }
 
+export interface MemoryMapItem {
+  _id: string;
+  circleId: string;
+  circleName: string;
+  assetId: string;
+  kind: 'image' | 'video';
+  timelineAt: number;
+  capturedAt: number | null;
+  latitude: number;
+  longitude: number;
+  placeLabel: string | null;
+}
+
 export interface DraftUploadRecord {
   _id: string;
   _creationTime: number;
@@ -453,7 +472,19 @@ export type CompleteUploadArgs = {
   capturedAt?: number;
 };
 
+export type AppClientConfig = {
+  minSupportedAppVersion: string | null;
+  forceUpdateMessage: string | null;
+  maintenanceMode: boolean;
+  maintenanceMessage: string | null;
+};
+
 export const api = {
+  appConfig: {
+    get: makeFunctionReference<'query', Record<string, never>, AppClientConfig | null>(
+      'appConfig:get',
+    ),
+  },
   users: {
     viewer: makeFunctionReference<'query', Record<string, never>, ViewerRecord | null>(
       'users:viewer',
@@ -481,9 +512,16 @@ export const api = {
     ),
     getProfileImageReadUrl: makeFunctionReference<
       'action',
-      Record<string, never>,
+      { userId?: string },
       SignedReadUrl
     >('users:getProfileImageReadUrl'),
+  },
+  accountDeletion: {
+    deleteMyAccountData: makeFunctionReference<
+      'action',
+      Record<string, never>,
+      { deleted: boolean }
+    >('accountDeletion:deleteMyAccountData'),
   },
   invites: {
     create: makeFunctionReference<
@@ -536,7 +574,7 @@ export const api = {
     >(
       'circles:listForViewer',
     ),
-    getById: makeFunctionReference<'query', { circleId: string }, CircleDetail>(
+    getById: makeFunctionReference<'query', { circleId: string }, CircleDetail | null>(
       'circles:getById',
     ),
     update: makeFunctionReference<'mutation', UpdateCircleArgs, { circleId: string }>(
@@ -562,6 +600,9 @@ export const api = {
     >('circles:transferOwnership'),
     leave: makeFunctionReference<'mutation', { circleId: string }, { circleId: string }>(
       'circles:leave',
+    ),
+    deleteOwn: makeFunctionReference<'action', { circleId: string }, { circleId: string }>(
+      'circles:deleteOwn',
     ),
     createImageTarget: makeFunctionReference<
       'action',
@@ -623,7 +664,12 @@ export const api = {
     complete: makeFunctionReference<'action', CompleteUploadArgs, { assetId: string }>(
       'uploads:complete',
     ),
-    discard: makeFunctionReference<'action', { uploadId: string }, { uploadId: string }>(
+    discard: makeFunctionReference<
+      'action',
+      { uploadId: string },
+      // `outcome` is absent on older self-hosted instances that predate idempotent discard.
+      { uploadId: string; outcome?: 'discarded' | 'completed' | 'missing' }
+    >(
       'uploads:discard',
     ),
   },
@@ -708,6 +754,11 @@ export const api = {
       { circleId?: string },
       MemoryDiscoveryRecord
     >('memories:discoveryForViewer'),
+    locatedForViewer: makeFunctionReference<
+      'query',
+      { circleId?: string },
+      MemoryMapItem[]
+    >('memories:locatedForViewer'),
   },
   notifications: {
     registerDevice: makeFunctionReference<
@@ -735,31 +786,31 @@ export const api = {
     forViewer: makeFunctionReference<'query', Record<string, never>, StorageUsageStats>(
       'storageStats:forViewer',
     ),
+    perCircleForViewer: makeFunctionReference<
+      'query',
+      Record<string, never>,
+      CircleUsageBreakdown
+    >('storageStats:perCircleForViewer'),
     checkConnection: makeFunctionReference<'action', Record<string, never>, ConnectionCheck>(
       'storageStats:checkConnection',
     ),
   },
   billing: {
-    status: makeFunctionReference<'action', Record<string, never>, BillingStatus>(
+    status: makeFunctionReference<'query', Record<string, never>, BillingStatus>(
       'billing:status',
     ),
-    statusForCircle: makeFunctionReference<'action', { circleId: string }, BillingStatus>(
+    statusForCircle: makeFunctionReference<'query', { circleId: string }, BillingStatus>(
       'billing:statusForCircle',
     ),
     uploadReadinessForCircle: makeFunctionReference<
-      'action',
+      'query',
       { circleId: string },
-      CircleUploadReadiness
+      CircleUploadReadiness | null
     >('billing:uploadReadinessForCircle'),
-    createCheckout: makeFunctionReference<
-      'action',
-      { planId: string; successUrl?: string },
-      BillingCheckoutResult
-    >('billing:createCheckout'),
-    createPortalSession: makeFunctionReference<
-      'action',
-      { returnUrl?: string },
-      BillingPortalSessionResult
-    >('billing:createPortalSession'),
+    circleCreationReadiness: makeFunctionReference<
+      'query',
+      Record<string, never>,
+      CircleCreationReadiness | null
+    >('billing:circleCreationReadiness'),
   },
 } as const;

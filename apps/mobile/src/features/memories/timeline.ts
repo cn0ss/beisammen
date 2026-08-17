@@ -1,7 +1,7 @@
-const MEMORY_MONTH_FORMAT = new Intl.DateTimeFormat('de-DE', {
+const MEMORY_MONTH_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   month: 'long',
   year: 'numeric',
-});
+};
 
 export type MemoryFilter =
   | {
@@ -32,7 +32,7 @@ function monthKey(timestamp: number): string {
   return `${year}-${month}`;
 }
 
-export function formatMemoryMonthFacetTitle(key: string): string {
+export function formatMemoryMonthFacetTitle(key: string, locale = 'de-DE'): string {
   const match = key.match(/^(\d{4})-(\d{2})$/);
 
   if (!match) {
@@ -46,7 +46,9 @@ export function formatMemoryMonthFacetTitle(key: string): string {
     return key;
   }
 
-  return MEMORY_MONTH_FORMAT.format(new Date(Date.UTC(year, monthIndex, 1)));
+  return new Intl.DateTimeFormat(locale, MEMORY_MONTH_FORMAT_OPTIONS).format(
+    new Date(Date.UTC(year, monthIndex, 1)),
+  );
 }
 
 export function normalizeMemoryFilter(filter?: MemoryFilter | null): MemoryFilter | null {
@@ -88,8 +90,10 @@ export function buildMemoryViewerHref(input: {
 
 export function buildMemoryMonthSections<T extends MemoryTimelineItem>(
   items: T[],
+  locale = 'de-DE',
 ): Array<MemoryMonthSection<T>> {
   const sections: Array<MemoryMonthSection<T>> = [];
+  const monthFormat = new Intl.DateTimeFormat(locale, MEMORY_MONTH_FORMAT_OPTIONS);
 
   for (const item of items) {
     const key = monthKey(item.timelineAt);
@@ -98,7 +102,7 @@ export function buildMemoryMonthSections<T extends MemoryTimelineItem>(
     if (!section || section.key !== key) {
       section = {
         key,
-        title: MEMORY_MONTH_FORMAT.format(new Date(item.timelineAt)),
+        title: monthFormat.format(new Date(item.timelineAt)),
         items: [],
       };
       sections.push(section);

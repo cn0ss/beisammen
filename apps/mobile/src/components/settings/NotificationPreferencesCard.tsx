@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { T, useMessages } from 'gt-react-native';
 import { memo } from 'react';
 import { ActivityIndicator, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -24,6 +25,7 @@ export const NotificationPreferencesCard = memo(function NotificationPreferences
   onToggle,
 }: NotificationPreferencesCardProps) {
   const theme = useTheme();
+  const m = useMessages();
   const isLoading = preferences === undefined;
 
   return (
@@ -33,10 +35,12 @@ export const NotificationPreferencesCard = memo(function NotificationPreferences
           <Ionicons name="notifications-outline" size={18} color={theme.primary} />
         </View>
         <View style={styles.headerCopy}>
-          <Text style={[styles.title, { color: theme.text }]}>Push-Mitteilungen</Text>
-          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-            Wähle, welche Aktivität dich außerhalb der App erreichen darf.
-          </Text>
+          <T>
+            <Text style={[styles.title, { color: theme.text }]}>Push-Mitteilungen</Text>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+              Wähle, welche Aktivität dich außerhalb der App erreichen darf.
+            </Text>
+          </T>
         </View>
         {isLoading ? <ActivityIndicator size="small" color={theme.primary} /> : null}
       </View>
@@ -58,9 +62,9 @@ export const NotificationPreferencesCard = memo(function NotificationPreferences
               ]}
             >
               <View style={styles.rowCopy}>
-                <Text style={[styles.rowTitle, { color: theme.text }]}>{row.label}</Text>
+                <Text style={[styles.rowTitle, { color: theme.text }]}>{m(row.label)}</Text>
                 <Text style={[styles.rowDescription, { color: theme.textSecondary }]}>
-                  {row.description}
+                  {m(row.description)}
                 </Text>
               </View>
               {isBusy ? (

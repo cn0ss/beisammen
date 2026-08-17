@@ -1,21 +1,36 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
+import { useGT } from 'gt-react-native';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { MediaLocation } from '@beisammen/contracts';
+
 import { Radius } from '@/constants/theme';
-import type { MemoryItemRecord } from '@/features/convex/api';
 import { formatMediaLocation } from '@/features/media/client';
 import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
-const MEMORY_DAY_FORMAT = new Intl.DateTimeFormat('de-DE', {
+const MEMORY_DAY_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   day: '2-digit',
   month: 'short',
-});
+};
 
-function formatMemoryDay(timestamp: number): string {
-  return MEMORY_DAY_FORMAT.format(new Date(timestamp));
+function formatMemoryDay(timestamp: number, format: Intl.DateTimeFormat): string {
+  return format.format(new Date(timestamp));
+}
+
+/** Structural subset a tile needs — satisfied by MemoryItemRecord and MemoryMapItem. */
+export interface MemoryTileData {
+  _id: string;
+  assetId: string;
+  kind: 'image' | 'video';
+  circleName: string;
+  capturedAt: number | null;
+  timelineAt: number;
+  placeLabel: string | null;
+  location?: MediaLocation | null;
 }
 
 export const MemoryTile = memo(function MemoryTile({
@@ -23,19 +38,24 @@ export const MemoryTile = memo(function MemoryTile({
   onOpen,
   size,
 }: {
-  item: MemoryItemRecord;
-  onOpen: (item: MemoryItemRecord) => void;
+  item: MemoryTileData;
+  onOpen: (item: MemoryTileData) => void;
   size: number;
 }) {
   const theme = useTheme();
+  const gt = useGT();
+  const memoryDayFormat = useDateFormat(MEMORY_DAY_FORMAT_OPTIONS);
   const signedUrl = useSignedAssetUrl(item.assetId, 'preview');
   const locationLabel = item.placeLabel ?? formatMediaLocation(item.location ?? undefined);
-  const dateLabel = formatMemoryDay(item.capturedAt ?? item.timelineAt);
+  const dateLabel = formatMemoryDay(item.capturedAt ?? item.timelineAt, memoryDayFormat);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${dateLabel} aus ${item.circleName} öffnen`}
+      accessibilityLabel={gt('{dateLabel} aus {circleName} öffnen', {
+        dateLabel,
+        circleName: item.circleName,
+      })}
       onPress={() => onOpen(item)}
       style={({ pressed }) => [
         styles.tile,

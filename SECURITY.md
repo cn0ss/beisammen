@@ -12,7 +12,7 @@ Please do not file public issues for security vulnerabilities.
 
 Security-sensitive areas for this project include:
 
-- WorkOS authentication and token handling
+- Clerk authentication and token handling
 - Convex auth configuration
 - provider credential storage
 - signed upload and read URL generation

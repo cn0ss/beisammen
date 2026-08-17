@@ -1,10 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { T, useGT } from 'gt-react-native';
 import { memo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Avatar, Button } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ActivityEventRecord } from '@/features/convex/api';
+import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 type ActivityStatus = 'LoadingFirstPage' | 'CanLoadMore' | 'LoadingMore' | 'Exhausted';
@@ -39,11 +41,16 @@ const ActivityRow = memo(function ActivityRow({
   onOpenShare: (shareBatchId: string, assetId?: string | null) => void;
 }) {
   const theme = useTheme();
+  const gt = useGT();
+  const customProfileImageUrl = useUserProfileImageUrl(
+    activity.actorId,
+    activity.actorHasProfileImage,
+  );
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${activity.displayText} Beitrag öffnen`}
+      accessibilityLabel={gt('{text} Beitrag öffnen', { text: activity.displayText })}
       onPress={() => onOpenShare(activity.shareBatchId, activity.assetId)}
       style={({ pressed }) => [
         styles.row,
@@ -56,7 +63,7 @@ const ActivityRow = memo(function ActivityRow({
     >
       <Avatar
         name={activity.actorName}
-        imageUrl={activity.actorAvatarUrl ?? null}
+        imageUrl={customProfileImageUrl ?? activity.actorAvatarUrl ?? null}
         size="sm"
       />
       <View style={styles.rowCopy}>
@@ -64,7 +71,11 @@ const ActivityRow = memo(function ActivityRow({
           {activity.displayText}
         </Text>
         <Text style={[styles.rowMeta, { color: theme.textTertiary }]} numberOfLines={1}>
-          {activity.circleName} · {activity.createdAtLabel}
+          <Text style={[styles.rowMetaCircle, { color: theme.primary }]}>
+            {activity.circleName}
+          </Text>
+          {' · '}
+          {activity.createdAtLabel}
         </Text>
       </View>
       <View style={[styles.iconBubble, { backgroundColor: theme.primaryMuted }]}>
@@ -81,6 +92,7 @@ export const ActivityStrip = memo(function ActivityStrip({
   status,
 }: ActivityStripProps) {
   const theme = useTheme();
+  const gt = useGT();
   const isLoadingFirstPage = status === 'LoadingFirstPage';
   const isLoadingMore = status === 'LoadingMore';
   const canLoadMore = status !== 'Exhausted';
@@ -88,7 +100,9 @@ export const ActivityStrip = memo(function ActivityStrip({
   return (
     <View style={styles.wrapper}>
       <View style={styles.headerRow}>
-        <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>Aktivität</Text>
+        <T>
+          <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>Aktivität</Text>
+        </T>
         <Text style={[styles.count, { color: theme.textTertiary }]}>
           {activities.length.toString().padStart(2, '0')}
         </Text>
@@ -111,16 +125,18 @@ export const ActivityStrip = memo(function ActivityStrip({
         ) : (
           <View style={styles.emptyRow}>
             <Ionicons name="sparkles-outline" size={16} color={theme.textTertiary} />
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-              Noch keine neuen Aktivitäten.
-            </Text>
+            <T>
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                Noch keine neuen Aktivitäten.
+              </Text>
+            </T>
           </View>
         )}
       </View>
 
       {activities.length > 0 && canLoadMore ? (
         <Button
-          label={isLoadingMore ? 'Lädt...' : 'Mehr Aktivität'}
+          label={isLoadingMore ? gt('Lädt...') : gt('Mehr Aktivität')}
           icon="chevron-down-outline"
           variant="outline"
           loading={isLoadingMore}
@@ -178,6 +194,10 @@ const styles = StyleSheet.create({
   rowMeta: {
     fontSize: FontSize.xs,
     fontWeight: '600',
+  },
+  rowMetaCircle: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
   },
   iconBubble: {
     width: 32,

@@ -9,7 +9,7 @@ Current policy:
 
 - application code authored in this repository is licensed under PolyForm
   Noncommercial 1.0.0
-- third-party npm packages, Expo SDK packages, Convex packages, and WorkOS SDKs
+- third-party npm packages, Expo SDK packages, Convex packages, and Clerk SDKs
   remain under their own upstream licenses
 - generated platform files must not remove or alter upstream license headers
 

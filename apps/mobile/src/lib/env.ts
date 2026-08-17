@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-import type { AuthMode, DeploymentKind } from '@beisammen/contracts';
+import type { DeploymentKind } from '@beisammen/contracts';
 
 function readExpoExtra(name: string): string | undefined {
   const maybePublicEnv = Constants.expoConfig?.extra?.publicEnv;
@@ -36,18 +36,6 @@ function requirePublicEnv(name: string): string {
   );
 }
 
-function readAuthMode(): AuthMode {
-  const mode = requirePublicEnv('EXPO_PUBLIC_DEFAULT_AUTH_MODE');
-
-  if (mode === 'hosted-browser' || mode === 'native-client') {
-    return mode;
-  }
-
-  throw new Error(
-    `Invalid EXPO_PUBLIC_DEFAULT_AUTH_MODE "${mode}". Expected "hosted-browser" or "native-client".`,
-  );
-}
-
 function readDeploymentKind(): DeploymentKind {
   const deploymentKind = readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_DEPLOYMENT_KIND', 'cloud');
 
@@ -71,10 +59,11 @@ export const appEnv = {
   defaultInstanceName: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_INSTANCE_NAME', 'beisammen'),
   defaultInstanceUrl,
   defaultConvexUrl,
-  defaultAuthProvider: 'workos' as const,
-  defaultAuthMode: readAuthMode(),
+  defaultAuthProvider: 'clerk' as const,
   defaultDeploymentKind: readDeploymentKind(),
-  defaultAuthClientId: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_AUTH_CLIENT_ID'),
-  defaultAuthSignInUrl: readOptionalPublicEnv('EXPO_PUBLIC_DEFAULT_AUTH_SIGN_IN_URL'),
+  clerkPublishableKey: requirePublicEnv('EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY'),
+  revenueCatTestApiKey: readOptionalPublicEnv('EXPO_PUBLIC_REVENUECAT_TEST_API_KEY'),
+  revenueCatIosApiKey: readOptionalPublicEnv('EXPO_PUBLIC_REVENUECAT_IOS_API_KEY'),
+  revenueCatAndroidApiKey: readOptionalPublicEnv('EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY'),
   logLevel: readOptionalPublicEnv('EXPO_PUBLIC_LOG_LEVEL'),
 };

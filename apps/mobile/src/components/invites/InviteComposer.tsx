@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { T, useGT, useMessages, Var } from 'gt-react-native';
 import { memo, useCallback, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -44,6 +45,8 @@ export const InviteComposer = memo(function InviteComposer({
   onFeedback,
 }: InviteComposerProps) {
   const theme = useTheme();
+  const gt = useGT();
+  const m = useMessages();
   const [mode, setMode] = useState<InviteMode>('email');
   const [invitedEmail, setInvitedEmail] = useState('');
   const [role, setRole] = useState<InviteRole>('member');
@@ -53,21 +56,23 @@ export const InviteComposer = memo(function InviteComposer({
   const shareInvite = useCallback(
     async (invite: LastInvite) => {
       await Share.share({
-        message: buildInviteShareMessage({
-          circleName,
-          inviteLink: invite.inviteLink,
-          mode: invite.mode,
-        }),
+        message: m(
+          buildInviteShareMessage({
+            circleName,
+            inviteLink: invite.inviteLink,
+            mode: invite.mode,
+          }),
+        ),
       });
     },
-    [circleName],
+    [circleName, m],
   );
 
   const handleCreateInvite = useCallback(async () => {
     const normalizedEmail = invitedEmail.trim().toLowerCase();
 
     if (mode === 'email' && !normalizedEmail) {
-      onFeedback('Gib eine E-Mail-Adresse ein oder wähle einen offenen Einmal-Link.');
+      onFeedback(gt('Gib eine E-Mail-Adresse ein oder wähle einen offenen Einmal-Link.'));
       return;
     }
 
@@ -89,14 +94,16 @@ export const InviteComposer = memo(function InviteComposer({
 
       setLastInvite(nextInvite);
       setInvitedEmail('');
-      onFeedback('Einladung erstellt.');
+      onFeedback(gt('Einladung erstellt.'));
       await shareInvite(nextInvite);
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Einladung konnte nicht erstellt werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Einladung konnte nicht erstellt werden.'),
+      );
     } finally {
       setIsSubmitting(false);
     }
-  }, [invitedEmail, mode, onCreateInvite, onFeedback, role, shareInvite]);
+  }, [gt, invitedEmail, mode, onCreateInvite, onFeedback, role, shareInvite]);
 
   const handleShareLastInvite = useCallback(async () => {
     if (!lastInvite) {
@@ -106,33 +113,37 @@ export const InviteComposer = memo(function InviteComposer({
     try {
       await shareInvite(lastInvite);
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Invite-Link konnte nicht geteilt werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Invite-Link konnte nicht geteilt werden.'),
+      );
     }
-  }, [lastInvite, onFeedback, shareInvite]);
+  }, [gt, lastInvite, onFeedback, shareInvite]);
 
   const canSubmit = !disabled && !isSubmitting && (mode === 'open' || invitedEmail.trim().length > 0);
 
   return (
     <View style={styles.container}>
       <View style={styles.copy}>
-        <Text style={[styles.kicker, { color: theme.textTertiary }]}>Einladen</Text>
-        <Text style={[styles.title, { color: theme.text }]}>Link erstellen</Text>
-        <Text style={[styles.body, { color: theme.textSecondary }]}>
-          Persönliche Links bleiben an eine E-Mail gebunden. Offene Links sind einmalig nutzbar.
-        </Text>
+        <T>
+          <Text style={[styles.kicker, { color: theme.textTertiary }]}>Einladen</Text>
+          <Text style={[styles.title, { color: theme.text }]}>Link erstellen</Text>
+          <Text style={[styles.body, { color: theme.textSecondary }]}>
+            Persönliche Links bleiben an eine E-Mail gebunden. Offene Links sind einmalig nutzbar.
+          </Text>
+        </T>
       </View>
 
       <View style={styles.segmented}>
         <InviteSegment
           active={mode === 'email'}
           icon="mail-outline"
-          label="E-Mail"
+          label={gt('E-Mail')}
           onPress={() => setMode('email')}
         />
         <InviteSegment
           active={mode === 'open'}
           icon="link-outline"
-          label="Offen"
+          label={gt('Offen')}
           onPress={() => setMode('open')}
         />
       </View>
@@ -159,12 +170,16 @@ export const InviteComposer = memo(function InviteComposer({
       ) : null}
 
       <View style={styles.roleSwitch}>
-        <RoleButton label="Mitglied" active={role === 'member'} onPress={() => setRole('member')} />
-        <RoleButton label="Admin" active={role === 'admin'} onPress={() => setRole('admin')} />
+        <RoleButton
+          label={gt('Mitglied')}
+          active={role === 'member'}
+          onPress={() => setRole('member')}
+        />
+        <RoleButton label={gt('Admin')} active={role === 'admin'} onPress={() => setRole('admin')} />
       </View>
 
       <Button
-        label={isSubmitting ? 'Erstellt...' : 'Invite-Link erstellen'}
+        label={isSubmitting ? gt('Erstellt...') : gt('Invite-Link erstellen')}
         icon="person-add-outline"
         loading={isSubmitting}
         disabled={!canSubmit}
@@ -176,10 +191,13 @@ export const InviteComposer = memo(function InviteComposer({
       {lastInvite ? (
         <View style={[styles.invitePreview, { backgroundColor: theme.background }]}>
           <View style={styles.previewHeader}>
-            <Text style={[styles.kicker, { color: theme.textTertiary }]}>letzter link</Text>
-            <Text style={[styles.previewMeta, { color: theme.textSecondary }]}>
-              {inviteModeLabel(lastInvite.mode)} · {inviteRoleLabel(lastInvite.role)}
-            </Text>
+            <T>
+              <Text style={[styles.kicker, { color: theme.textTertiary }]}>letzter link</Text>
+              <Text style={[styles.previewMeta, { color: theme.textSecondary }]}>
+                <Var>{m(inviteModeLabel(lastInvite.mode))}</Var> ·{' '}
+                <Var>{m(inviteRoleLabel(lastInvite.role))}</Var>
+              </Text>
+            </T>
           </View>
           {lastInvite.invitedEmail ? (
             <Text style={[styles.previewMeta, { color: theme.textSecondary }]} numberOfLines={1}>
@@ -190,7 +208,7 @@ export const InviteComposer = memo(function InviteComposer({
             {lastInvite.inviteLink}
           </Text>
           <Button
-            label="Erneut teilen"
+            label={gt('Erneut teilen')}
             icon="share-social-outline"
             variant="outline"
             onPress={() => {

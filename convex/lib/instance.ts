@@ -16,7 +16,7 @@ export interface DeploymentPolicy {
   billing:
     | {
         enabled: true;
-        provider: 'autumn';
+        provider: 'revenuecat';
       }
     | {
         enabled: false;
@@ -27,20 +27,23 @@ export interface DeploymentPolicy {
   };
 }
 
-export const CLOUD_BILLING_PROVIDER = 'autumn';
+export const CLOUD_BILLING_PROVIDER = 'revenuecat';
 
+// Display names only — entitlement/product ids stay cloud_plus/cloud_max.
 export const DEFAULT_CLOUD_BILLING_PLANS: BillingPlanSummary[] = [
   {
-    id: 'cloud_family',
-    name: 'Family',
-    description: 'Shared family storage with monthly included usage',
-    monthlyPriceLabel: '$9/month + usage',
+    id: 'cloud_plus',
+    name: 'Plus',
+    description: 'Bis zu 3 Circles, 100 GB gemeinsamer Speicher.',
+    monthlyPriceLabel: '$5.99/month',
+    yearlyPriceLabel: '$49.99/year',
   },
   {
-    id: 'cloud_archive',
-    name: 'Archive',
-    description: 'Larger included storage with usage-based overage',
-    monthlyPriceLabel: '$19/month + storage',
+    id: 'cloud_max',
+    name: 'Max',
+    description: 'Bis zu 10 Circles, 250 GB und größeres Upload-Kontingent.',
+    monthlyPriceLabel: '$11.99/month',
+    yearlyPriceLabel: '$99.99/year',
   },
 ];
 
@@ -174,6 +177,10 @@ export function readCloudBillingPlansFromEnv(
       ...(typeof record.monthlyPriceLabel === 'string' &&
       record.monthlyPriceLabel.trim().length > 0
         ? { monthlyPriceLabel: record.monthlyPriceLabel.trim() }
+        : {}),
+      ...(typeof record.yearlyPriceLabel === 'string' &&
+      record.yearlyPriceLabel.trim().length > 0
+        ? { yearlyPriceLabel: record.yearlyPriceLabel.trim() }
         : {}),
     };
   });

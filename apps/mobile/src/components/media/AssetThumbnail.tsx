@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
+import { useGT } from 'gt-react-native';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -23,11 +24,12 @@ export const AssetThumbnail = memo(function AssetThumbnail({
   onRemove,
 }: AssetThumbnailProps) {
   const theme = useTheme();
+  const gt = useGT();
   const signedUrl = useSignedAssetUrl(
     asset.kind === 'image' || asset.previewStorage ? asset._id : null,
     'preview',
   );
-  const metaLabel = asset.kind === 'video' ? 'Video' : formatBytes(asset.sizeBytes);
+  const metaLabel = asset.kind === 'video' ? gt('Video') : formatBytes(asset.sizeBytes);
   const Container = onPress ? Pressable : View;
 
   return (
@@ -64,7 +66,7 @@ export const AssetThumbnail = memo(function AssetThumbnail({
 
       <View style={[styles.meta, { backgroundColor: 'rgba(0,0,0,0.55)' }]}>
         <Text style={styles.metaText} numberOfLines={1}>
-          {metaLabel ?? asset.fileName ?? (asset.kind === 'video' ? 'Video' : 'Bild')}
+          {metaLabel ?? asset.fileName ?? (asset.kind === 'video' ? gt('Video') : gt('Bild'))}
         </Text>
       </View>
 

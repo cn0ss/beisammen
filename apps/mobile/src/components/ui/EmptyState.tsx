@@ -1,8 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
+import { enterSection } from '@/lib/motion';
 import { useTheme } from '@/hooks/use-theme';
 
 interface EmptyStateProps {
@@ -15,7 +17,10 @@ export const EmptyState = memo(function EmptyState({ icon, title, message }: Emp
   const theme = useTheme();
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.surface }]}>
+    <Animated.View
+      entering={enterSection()}
+      style={[styles.container, { backgroundColor: theme.surface }]}
+    >
       <View style={[styles.iconCircle, { backgroundColor: theme.primaryMuted }]}>
         <Ionicons name={icon} size={28} color={theme.primary} />
       </View>
@@ -23,7 +28,7 @@ export const EmptyState = memo(function EmptyState({ icon, title, message }: Emp
         <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
       ) : null}
       <Text style={[styles.message, { color: theme.textSecondary }]}>{message}</Text>
-    </View>
+    </Animated.View>
   );
 });
 

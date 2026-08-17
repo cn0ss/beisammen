@@ -15,9 +15,9 @@ Read [docs/licensing.md](docs/licensing.md) and [NOTICE](NOTICE) before using or
 
 - Expo React Native app in `apps/mobile`
 - Convex-first backend in `convex/`
-- WorkOS authentication for official and self-hosted deployments
-- Cloud billing and usage metering through Autumn
-- Official Autumn Convex component integration for cloud billing
+- Clerk authentication for official and self-hosted deployments
+- Cloud subscriptions through RevenueCat with Convex-enforced usage quotas
+- Official `convex-revenuecat` component integration for entitlement sync
 - BYO storage architecture with S3-compatible storage first
 - Central app distribution with official and self-hosted instances
 - Web-ready package boundaries without a web app yet
@@ -58,14 +58,14 @@ services/              Reserved for future Go services
   defaults to `cloud`
 - custom/self-hosted instances are discovered at
   `/.well-known/beisammen-instance.json`
-- discovered instance manifests provide the public Convex URL, auth mode, and
-  public WorkOS client settings plus deployment and billing mode
+- discovered instance manifests provide the public Convex URL and Clerk
+  publishable key plus deployment and billing mode
 - discovered instance manifests include `client.minimumAppVersion`; custom
   instance links are rejected by older app builds before switching instances
-- every deployment uses WorkOS as the auth provider
+- every deployment uses Clerk as the auth provider
 - self-hosted deployments can point the same app binary at their own instance URL
-- cloud deployments advertise paid Autumn plans only and use server-side
-  usage gates before storage-generating uploads; self-hosted deployments set
+- cloud deployments advertise paid RevenueCat plans only and use server-side
+  quota gates before storage-generating uploads; self-hosted deployments set
   `billing.enabled=false` and do not enforce app-level media limits
 - operators can check deployment compatibility with
   `pnpm smoke:beta -- <instance-url> --app-version=<current-mobile-version>`

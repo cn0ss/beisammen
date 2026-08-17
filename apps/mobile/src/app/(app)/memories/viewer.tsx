@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,7 +12,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
+
+import { T, useGT } from 'gt-react-native';
 
 import { useAction, useConvexAuth, usePaginatedQuery, useQuery } from 'convex/react';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -32,10 +33,11 @@ import {
 import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
 import { normalizeMemoryFilter } from '@/features/memories/timeline';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
-const VIEWER_DATE_FORMAT = new Intl.DateTimeFormat('de-DE', {
+const VIEWER_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   dateStyle: 'medium',
-});
+};
 
 function firstParam(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
@@ -49,8 +51,8 @@ function parseFilter(kind?: string, key?: string): MemoryFilterArgs | null {
   return normalizeMemoryFilter({ kind, key });
 }
 
-function formatDate(timestamp: number) {
-  return VIEWER_DATE_FORMAT.format(new Date(timestamp));
+function formatDate(timestamp: number, format: Intl.DateTimeFormat) {
+  return format.format(new Date(timestamp));
 }
 
 function MemoryViewerSlide({
@@ -67,6 +69,7 @@ function MemoryViewerSlide({
   width: number;
 }) {
   const theme = useTheme();
+  const viewerDateFormat = useDateFormat(VIEWER_DATE_FORMAT_OPTIONS);
   const signedUrl = useSignedAssetUrl(item.assetId, 'original');
   const player = useVideoPlayer(item.kind === 'video' ? signedUrl : null, (instance) => {
     instance.pause();
@@ -115,7 +118,7 @@ function MemoryViewerSlide({
       )}
 
       <View style={styles.captionOverlay}>
-        <Text style={styles.dateLine}>{formatDate(item.capturedAt ?? item.timelineAt)}</Text>
+        <Text style={styles.dateLine}>{formatDate(item.capturedAt ?? item.timelineAt, viewerDateFormat)}</Text>
         {locationLabel ? (
           <Text style={styles.placeLine} numberOfLines={1}>
             {locationLabel}
@@ -140,7 +143,9 @@ export default function MemoryViewerScreen() {
     filterKey?: string | string[];
   }>();
   const theme = useTheme();
-  const isFocused = useIsFocused();
+  const gt = useGT();
+  const pathname = usePathname();
+  const isFocused = pathname === '/memories/viewer';
   const convexAuth = useConvexAuth();
   const { height, width } = useWindowDimensions();
   const listRef = useRef<FlatList<MemoryItemRecord>>(null);
@@ -175,11 +180,11 @@ export default function MemoryViewerScreen() {
     return [
       activeItem.circleName,
       formatBytes(activeItem.asset.sizeBytes),
-      activeItem.kind === 'video' ? 'Video' : 'Foto',
+      activeItem.kind === 'video' ? gt('Video') : gt('Foto'),
     ]
       .filter(Boolean)
       .join(' · ');
-  }, [activeItem]);
+  }, [activeItem, gt]);
 
   useEffect(() => {
     if (!memoryId || memories.length === 0) {
@@ -198,7 +203,7 @@ export default function MemoryViewerScreen() {
 
   const downloadActiveItem = useCallback(async () => {
     if (!activeItem) {
-      throw new Error('Erinnerung ist noch nicht geladen.');
+      throw new Error(gt('Erinnerung ist noch nicht geladen.'));
     }
 
     const signed =
@@ -207,7 +212,7 @@ export default function MemoryViewerScreen() {
         : await getReadUrl({ assetId: activeItem.assetId, variant: 'original' });
 
     if (!signed.url) {
-      throw new Error('Datei ist nicht mehr im Speicher vorhanden.');
+      throw new Error(gt('Datei ist nicht mehr im Speicher vorhanden.'));
     }
 
     return await downloadAssetToCache({
@@ -219,7 +224,7 @@ export default function MemoryViewerScreen() {
       } as ShareAssetRecord,
       url: signed.url,
     });
-  }, [activeItem, activeUrl, getReadUrl]);
+  }, [activeItem, activeUrl, getReadUrl, gt]);
 
   const handleSave = useCallback(async () => {
     setIsSaving(true);
@@ -227,13 +232,15 @@ export default function MemoryViewerScreen() {
 
     try {
       await saveAssetToDeviceLibrary(await downloadActiveItem());
-      setFeedback('Medium wurde auf dem Gerät gespeichert.');
+      setFeedback(gt('Medium wurde auf dem Gerät gespeichert.'));
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Medium konnte nicht gespeichert werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Medium konnte nicht gespeichert werden.'),
+      );
     } finally {
       setIsSaving(false);
     }
-  }, [downloadActiveItem]);
+  }, [downloadActiveItem, gt]);
 
   const handleShare = useCallback(async () => {
     setIsSharing(true);
@@ -242,11 +249,13 @@ export default function MemoryViewerScreen() {
     try {
       await shareLocalFile(await downloadActiveItem());
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Medium konnte nicht geteilt werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Medium konnte nicht geteilt werden.'),
+      );
     } finally {
       setIsSharing(false);
     }
-  }, [downloadActiveItem]);
+  }, [downloadActiveItem, gt]);
 
   const handleOpenConversation = useCallback(() => {
     if (!activeItem) {
@@ -270,16 +279,19 @@ export default function MemoryViewerScreen() {
       <View style={styles.topBar}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Zurück"
+          accessibilityLabel={gt('Zurück')}
+          hitSlop={12}
           onPress={() => router.back()}
-          style={({ pressed }) => [styles.iconButton, { opacity: pressed ? 0.72 : 1 }]}
+          style={({ pressed }) => [styles.backChevron, { opacity: pressed ? 0.5 : 1 }]}
         >
-          <Ionicons name="arrow-back-outline" size={22} color="#FFFFFF" />
+          <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
         </Pressable>
         <View style={styles.topCopy}>
-          <Text style={styles.topTitle} numberOfLines={1}>
-            Erinnerungen
-          </Text>
+          <T>
+            <Text style={styles.topTitle} numberOfLines={1}>
+              Erinnerungen
+            </Text>
+          </T>
           {activeMeta ? (
             <Text style={styles.topMeta} numberOfLines={1}>
               {activeMeta}
@@ -291,7 +303,9 @@ export default function MemoryViewerScreen() {
       {memories.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="images-outline" size={42} color={theme.textTertiary} />
-          <Text style={styles.emptyTitle}>Keine Medien</Text>
+          <T>
+            <Text style={styles.emptyTitle}>Keine Medien</Text>
+          </T>
         </View>
       ) : (
         <FlatList
@@ -331,7 +345,7 @@ export default function MemoryViewerScreen() {
           <ActivityIndicator color="#FFFFFF" />
         ) : null}
         <Button
-          label={isSaving ? 'Speichert...' : 'Speichern'}
+          label={isSaving ? gt('Speichert...') : gt('Speichern')}
           icon="download-outline"
           loading={isSaving}
           onPress={() => {
@@ -339,7 +353,7 @@ export default function MemoryViewerScreen() {
           }}
         />
         <Button
-          label={isSharing ? 'Teilt...' : 'Teilen'}
+          label={isSharing ? gt('Teilt...') : gt('Teilen')}
           icon="share-social-outline"
           variant="outline"
           loading={isSharing}
@@ -348,7 +362,7 @@ export default function MemoryViewerScreen() {
           }}
         />
         <Button
-          label="Gespräch öffnen"
+          label={gt('Gespräch öffnen')}
           icon="chatbubble-ellipses-outline"
           variant="outline"
           onPress={handleOpenConversation}
@@ -381,6 +395,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  backChevron: {
+    height: 42,
+    justifyContent: 'center',
   },
   topCopy: {
     flex: 1,

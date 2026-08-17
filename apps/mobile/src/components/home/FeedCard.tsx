@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
+import { T, useGT } from 'gt-react-native';
 import { memo, useCallback, useMemo } from 'react';
 import {
   Platform,
@@ -12,17 +13,22 @@ import {
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ShareFeedItem } from '@/features/convex/api';
 import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
+import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 import { Avatar } from '@/components/ui';
 
 const IMAGE_HEIGHT = 340;
 
-const MONTH_SHORT = new Intl.DateTimeFormat('de-DE', { month: 'short' });
+const MONTH_SHORT_OPTIONS: Intl.DateTimeFormatOptions = { month: 'short' };
 
-function formatDayMonth(timestamp: number): { day: string; month: string } {
+function formatDayMonth(
+  timestamp: number,
+  monthFormat: Intl.DateTimeFormat,
+): { day: string; month: string } {
   const date = new Date(timestamp);
   const day = String(date.getDate()).padStart(2, '0');
-  const month = MONTH_SHORT.format(date).replace('.', '').toUpperCase();
+  const month = monthFormat.format(date).replace('.', '').toUpperCase();
   return { day, month };
 }
 
@@ -133,24 +139,31 @@ export const FeedCard = memo(function FeedCard({
   onDeleteShare,
 }: FeedCardProps) {
   const theme = useTheme();
+  const gt = useGT();
   const heroAsset = share.heroAsset;
   const heroUrl = useSignedAssetUrl(
     heroAsset && (heroAsset.kind === 'image' || heroAsset.previewStorage) ? heroAsset._id : null,
     'preview',
   );
   const hasMultipleAssets = share.assetCount > 1;
+  const monthShortFormat = useDateFormat(MONTH_SHORT_OPTIONS);
   const { day, month } = useMemo(
-    () => formatDayMonth(share.publishedAt ?? share._creationTime),
-    [share.publishedAt, share._creationTime],
+    () => formatDayMonth(share.publishedAt ?? share._creationTime, monthShortFormat),
+    [share.publishedAt, share._creationTime, monthShortFormat],
   );
 
   const handlePress = useCallback(() => onOpenShare(share._id), [onOpenShare, share._id]);
   const handleDelete = useCallback(() => onDeleteShare(share._id), [onDeleteShare, share._id]);
 
+  const customAuthorImageUrl = useUserProfileImageUrl(
+    share.authorId,
+    share.authorHasProfileImage,
+  );
   const authorImageUrl =
-    currentUserId && share.authorId === currentUserId
-      ? currentProfileImageUrl ?? share.authorAvatarUrl ?? null
-      : share.authorAvatarUrl ?? null;
+    (currentUserId && share.authorId === currentUserId ? currentProfileImageUrl : null) ??
+    customAuthorImageUrl ??
+    share.authorAvatarUrl ??
+    null;
 
   return (
     <View style={styles.card}>
@@ -209,9 +222,11 @@ export const FeedCard = memo(function FeedCard({
         {heroAsset?.kind === 'video' ? (
           <View style={styles.topLeftChip}>
             <Ionicons name="play" size={12} color="#FFFFFF" />
-            <Text allowFontScaling={false} style={styles.topLeftChipText}>
-              Video
-            </Text>
+            <T>
+              <Text allowFontScaling={false} style={styles.topLeftChipText}>
+                Video
+              </Text>
+            </T>
           </View>
         ) : hasMultipleAssets ? (
           <View style={styles.topLeftChip}>
@@ -247,7 +262,7 @@ export const FeedCard = memo(function FeedCard({
             disabled={isDeleting}
             onPress={handleDelete}
             accessibilityRole="button"
-            accessibilityLabel="Beitrag löschen"
+            accessibilityLabel={gt('Beitrag löschen')}
             style={({ pressed }) => [
               styles.moreButton,
               {

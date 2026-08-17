@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { useGT } from 'gt-react-native';
 import { memo, useCallback, useMemo } from 'react';
 import {
   Platform,
@@ -76,6 +77,7 @@ interface CircleTileProps {
 
 const CircleTile = memo(function CircleTile({ circle, isActive, onSelect }: CircleTileProps) {
   const theme = useTheme();
+  const gt = useGT();
   const imageUrl = useCircleImageUrl(circle._id, circle.hasImage);
   const handlePress = useCallback(() => onSelect(circle._id), [onSelect, circle._id]);
 
@@ -96,7 +98,7 @@ const CircleTile = memo(function CircleTile({ circle, isActive, onSelect }: Circ
     <Pressable
       onPress={handlePress}
       accessibilityRole="button"
-      accessibilityLabel={`Circle ${circle.name}`}
+      accessibilityLabel={gt('Circle {name}', { name: circle.name })}
       accessibilityState={{ selected: isActive }}
       style={({ pressed }) => [
         styles.wrapper,

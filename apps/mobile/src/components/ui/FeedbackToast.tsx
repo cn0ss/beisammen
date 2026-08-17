@@ -1,8 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { memo, useCallback, useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text } from 'react-native';
+import { memo, useEffect, useRef } from 'react';
+import { Pressable, StyleSheet, Text } from 'react-native';
+import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 
 import { FontSize, Radius, Spacing } from '@/constants/theme';
+import { MotionDuration, motionEasing } from '@/lib/motion';
 import { useTheme } from '@/hooks/use-theme';
 
 interface FeedbackToastProps {
@@ -19,59 +21,25 @@ export const FeedbackToast = memo(function FeedbackToast({
   onDismiss,
 }: FeedbackToastProps) {
   const theme = useTheme();
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(8)).current;
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isDismissingRef = useRef(false);
 
-  const clearDismissTimeout = useCallback(() => {
+  useEffect(() => {
     if (dismissTimeoutRef.current) {
       clearTimeout(dismissTimeoutRef.current);
       dismissTimeoutRef.current = null;
     }
-  }, []);
 
-  const handleDismiss = useCallback(() => {
-    if (!message || isDismissingRef.current) {
-      return;
-    }
-
-    isDismissingRef.current = true;
-    clearDismissTimeout();
-
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 0, duration: 180, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: 8, duration: 180, useNativeDriver: true }),
-    ]).start(({ finished }) => {
-      isDismissingRef.current = false;
-      if (finished) {
-        onDismiss();
-      }
-    });
-  }, [clearDismissTimeout, message, onDismiss, opacity, translateY]);
-
-  useEffect(() => {
     if (message) {
-      isDismissingRef.current = false;
-      clearDismissTimeout();
-      opacity.setValue(0);
-      translateY.setValue(8);
-      Animated.parallel([
-        Animated.timing(opacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.timing(translateY, { toValue: 0, duration: 250, useNativeDriver: true }),
-      ]).start();
-
-      dismissTimeoutRef.current = setTimeout(() => {
-        handleDismiss();
-      }, autoDismissMs);
-    } else {
-      clearDismissTimeout();
-      isDismissingRef.current = false;
-      opacity.setValue(0);
-      translateY.setValue(8);
+      dismissTimeoutRef.current = setTimeout(onDismiss, autoDismissMs);
     }
-    return clearDismissTimeout;
-  }, [autoDismissMs, clearDismissTimeout, handleDismiss, message, opacity, translateY]);
+
+    return () => {
+      if (dismissTimeoutRef.current) {
+        clearTimeout(dismissTimeoutRef.current);
+        dismissTimeoutRef.current = null;
+      }
+    };
+  }, [autoDismissMs, message, onDismiss]);
 
   if (!message) return null;
 
@@ -83,9 +51,12 @@ export const FeedbackToast = memo(function FeedbackToast({
   const colors = colorMap[type];
 
   return (
-    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+    <Animated.View
+      entering={FadeInDown.duration(MotionDuration.base).easing(motionEasing)}
+      exiting={FadeOutDown.duration(MotionDuration.fast)}
+    >
       <Pressable
-        onPress={handleDismiss}
+        onPress={onDismiss}
         style={[styles.container, { backgroundColor: colors.bg }]}
       >
         <Ionicons name={colors.icon} size={18} color={colors.fg} />

@@ -1,0 +1,9 @@
+{
+  "ios": {
+    "NSLocationWhenInUseUsageDescription": "beisammen kann optional deinen aktuellen Standort nutzen, um Medien ohne eingebettete GPS-Daten mit einem Ort zu ergänzen.",
+    "NSPhotoLibraryUsageDescription": "beisammen benötigt Zugriff auf deine Fotos, um sie mit deinem Circle zu teilen.",
+    "NSCameraUsageDescription": "beisammen benötigt Zugriff auf deine Kamera, um Fotos aufzunehmen.",
+    "NSMicrophoneUsageDescription": "beisammen benötigt Zugriff auf dein Mikrofon, um Videos aufzunehmen.",
+    "NSPhotoLibraryAddUsageDescription": "beisammen benötigt Zugriff, um Fotos und Videos auf deinem Gerät zu speichern."
+  }
+}

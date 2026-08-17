@@ -27,4 +27,11 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  'sweep lapsed billing owners for retention',
+  { hours: 24 },
+  internal.billingRetention.sweep,
+  {},
+);
+
 export default crons;

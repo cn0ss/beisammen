@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { T, msg, useGT, useMessages } from 'gt-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,11 +10,23 @@ import { Button, Card } from '@/components/ui';
 import { FontSize, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import { resolveInstanceConfig } from '@/features/instances/discovery';
+import { useMarkInteractive } from '@/features/observe/interactive';
 import { useTheme } from '@/hooks/use-theme';
 
 function firstParam(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
 }
+
+const statusMessages = {
+  preparing: msg('Verbindung wird vorbereitet...'),
+  checkingInstance: msg('Instanz wird geprüft...'),
+  switchingInstance: msg('Instanz wird gewechselt...'),
+};
+
+const errorMessages = {
+  missingParams: msg('Dieser Link enthält weder eine Instanz noch einen Invite-Token.'),
+  unprocessable: msg('Dieser Link konnte nicht verarbeitet werden.'),
+};
 
 export default function ConnectScreen() {
   const router = useRouter();
@@ -25,9 +38,15 @@ export default function ConnectScreen() {
   }>();
   const inviteToken = firstParam(params.invite)?.trim() ?? '';
   const targetInstance = firstParam(params.instance)?.trim() ?? '';
+  const gt = useGT();
+  const m = useMessages();
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(true);
-  const [statusText, setStatusText] = useState('Verbindung wird vorbereitet...');
+  const [statusText, setStatusText] = useState<string>(statusMessages.preparing);
+
+  // While the link is processed this screen only redirects; the target screen
+  // reports interactivity. Mark here only when the error state is shown.
+  useMarkInteractive(isReady && !isProcessing);
 
   useEffect(() => {
     if (!isReady) {
@@ -42,10 +61,10 @@ export default function ConnectScreen() {
 
       setError(null);
       setIsProcessing(true);
-      setStatusText('Verbindung wird vorbereitet...');
+      setStatusText(statusMessages.preparing);
 
       if (!hasInviteToken && !hasTargetInstance) {
-        setError('Dieser Link enthält weder eine Instanz noch einen Invite-Token.');
+        setError(errorMessages.missingParams);
         setIsProcessing(false);
         return;
       }
@@ -54,12 +73,12 @@ export default function ConnectScreen() {
         hasTargetInstance &&
         normalizeBaseUrl(targetInstance) !== normalizeBaseUrl(instance.instance.baseUrl)
       ) {
-        setStatusText('Instanz wird geprüft...');
+        setStatusText(statusMessages.checkingInstance);
         const nextInstance = await resolveInstanceConfig(targetInstance, {
           signal: controller.signal,
         });
 
-        setStatusText('Instanz wird gewechselt...');
+        setStatusText(statusMessages.switchingInstance);
         await setActiveInstance(
           nextInstance,
           hasInviteToken ? { pendingInviteToken: inviteToken } : undefined,
@@ -78,7 +97,7 @@ export default function ConnectScreen() {
 
       if (!controller.signal.aborted) {
         router.replace(
-          session ? (hasInviteToken ? '/(app)/invite' : '/(app)/home') : '/(auth)/sign-in',
+          session ? (hasInviteToken ? '/invite' : '/home') : '/(auth)/sign-in',
         );
       }
     }
@@ -91,7 +110,7 @@ export default function ConnectScreen() {
       setError(
         error instanceof Error
           ? error.message
-          : 'Dieser Link konnte nicht verarbeitet werden.',
+          : errorMessages.unprocessable,
       );
       setIsProcessing(false);
     });
@@ -118,22 +137,24 @@ export default function ConnectScreen() {
       <View style={styles.container}>
         {error ? (
           <Card>
-            <Text style={[styles.title, { color: theme.text }]}>
-              Invite-Link konnte nicht geöffnet werden.
-            </Text>
-            <Text style={[styles.body, { color: theme.textSecondary }]}>{error}</Text>
+            <T>
+              <Text style={[styles.title, { color: theme.text }]}>
+                Invite-Link konnte nicht geöffnet werden.
+              </Text>
+            </T>
+            <Text style={[styles.body, { color: theme.textSecondary }]}>{m(error)}</Text>
             <Button
-              label={session ? 'Zur App' : 'Zur Anmeldung'}
+              label={session ? gt('Zur App') : gt('Zur Anmeldung')}
               icon={session ? 'arrow-forward-outline' : 'log-in-outline'}
               onPress={() => {
-                router.replace(session ? '/(app)/home' : '/(auth)/sign-in');
+                router.replace(session ? '/home' : '/(auth)/sign-in');
               }}
             />
           </Card>
         ) : (
           <View style={styles.loading}>
             <ActivityIndicator color={theme.primary} />
-            <Text style={[styles.body, { color: theme.textSecondary }]}>{statusText}</Text>
+            <Text style={[styles.body, { color: theme.textSecondary }]}>{m(statusText)}</Text>
           </View>
         )}
       </View>

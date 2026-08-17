@@ -1,14 +1,15 @@
 # Private Beta QA Checklist
 
-Run this checklist on a real iOS or Android development build against a WorkOS
-tenant and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
+Run this checklist on a real iOS or Android development build against a Clerk
+application and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
 
 ## Environment
 
 - `EXPO_PUBLIC_DEFAULT_INSTANCE_URL` points at the Convex site URL.
 - `EXPO_PUBLIC_DEFAULT_CONVEX_URL` points at the matching Convex client URL.
-- `EXPO_PUBLIC_DEFAULT_AUTH_MODE` is `native-client` or `hosted-browser`.
-- `WORKOS_CLIENT_ID` and `WORKOS_API_KEY` are configured on the Convex deployment.
+- `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` carries the Clerk publishable key.
+- `CLERK_JWT_ISSUER_DOMAIN`, `PUBLIC_AUTH_PUBLISHABLE_KEY`, and
+  `REVENUECAT_WEBHOOK_AUTH` are configured on the Convex deployment.
 - `S3_BUCKET`, credentials, and optional `S3_REGION`, `S3_ENDPOINT`, and `S3_BASE_PATH` are configured.
 - For Android release or development builds that render the Memories places
   map, enable Maps SDK for Android in Google Cloud and set
@@ -41,7 +42,7 @@ tenant and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
 
 ## Cloud Golden Path
 
-- Sign in with WorkOS, quit the app, reopen it, and confirm the session restores.
+- Sign in with Clerk, quit the app, reopen it, and confirm the session restores.
 - With a fresh account that has no circles, confirm Home redirects to the
   guided onboarding screen.
 - Create the first circle from onboarding and confirm it becomes the active circle.
@@ -53,8 +54,9 @@ tenant and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
   confirm it is shown as already used.
 - Open an invite as an account that is already in the circle and confirm the
   invite is not consumed and the app shows the already-member state.
-- Open Settings, confirm the billing card shows cloud billing, and verify the
-  checkout and billing portal links open for the owner account.
+- Open Settings, confirm the billing card shows cloud billing with quota
+  meters, and verify a sandbox in-app purchase and the RevenueCat Customer
+  Center open for the owner account.
 - Invite another account from circle management, open the invite link, sign in
   as that account, and accept it.
 - Upload from the invited member into the owner's circle and confirm the owner
@@ -103,7 +105,7 @@ tenant and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
 - Raise `PUBLIC_MINIMUM_APP_VERSION` above the installed app version in a test
   deployment and confirm the connect link shows an update-required error instead
   of switching instances.
-- Sign in with the self-hosted WorkOS tenant.
+- Sign in with the self-hosted Clerk application.
 - Open Settings and confirm billing is disabled.
 - Upload more than the cloud beta media count or a video over the cloud duration
   cap, and confirm self-hosted app-level limits do not block it.

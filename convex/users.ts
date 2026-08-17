@@ -1,15 +1,8 @@
 import { v } from 'convex/values';
 
 import type { Doc, Id } from './_generated/dataModel';
-import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
-import {
-  BILLING_FEATURE_IDS,
-  requireCloudFeatureAccess,
-  trackCloudUsage,
-} from './lib/billing/autumn';
-import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { createS3ReadUrl, createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
 import {
   buildImageUploadObjectKey,
@@ -44,6 +37,8 @@ function serializeViewer(viewer: Doc<'users'>) {
     avatarUrl: viewer.avatarUrl,
     createdAt: viewer.createdAt,
     hasProfileImage: Boolean(viewer.profileImageStorage),
+    deletionRequestedAt: viewer.deletionRequestedAt,
+    deletionCompletedAt: viewer.deletionCompletedAt,
   };
 }
 
@@ -56,40 +51,6 @@ interface PreparedProfileImageUpload {
 interface ProfileImageCompleteContext {
   uploadId: Id<'imageUploads'>;
   pendingStorage: NonNullable<Doc<'imageUploads'>['pendingStorage']>;
-}
-
-async function refundCloudImageUsage(input: {
-  ctx: ActionCtx;
-  mediaUploads: number;
-  storageBytes: number;
-  properties: Record<string, unknown>;
-}) {
-  const refunds: Array<{ featureId: string; value: number }> = [];
-
-  if (input.mediaUploads > 0) {
-    refunds.push({
-      featureId: BILLING_FEATURE_IDS.mediaUploads,
-      value: -input.mediaUploads,
-    });
-  }
-
-  if (input.storageBytes > 0) {
-    refunds.push({
-      featureId: BILLING_FEATURE_IDS.storageBytes,
-      value: -input.storageBytes,
-    });
-  }
-
-  for (const refund of refunds) {
-    try {
-      await trackCloudUsage(input.ctx, {
-        ...refund,
-        properties: input.properties,
-      });
-    } catch (error) {
-      console.error('Failed to refund Autumn profile image usage.', error);
-    }
-  }
 }
 
 export const viewer = query({
@@ -158,28 +119,36 @@ export const upsertFromIdentity = mutation({
       )
       .unique();
 
+    const email = args.email ?? identity.email;
+    const displayName = args.displayName ?? identity.name;
+    const avatarUrl = args.avatarUrl ?? identity.pictureUrl;
+
     if (existing) {
+      if (existing.deletionRequestedAt !== undefined) {
+        return serializeViewer(existing);
+      }
+
       const patch: {
-        authProvider: 'workos';
+        authProvider: 'clerk';
         authSubject: string;
         email?: string;
         displayName?: string;
         avatarUrl?: string;
       } = {
-        authProvider: 'workos',
+        authProvider: 'clerk',
         authSubject: identity.subject,
       };
 
-      if (args.email !== undefined) {
-        patch.email = args.email;
+      if (email !== undefined) {
+        patch.email = email;
       }
 
-      if (args.displayName !== undefined) {
-        patch.displayName = args.displayName;
+      if (displayName !== undefined) {
+        patch.displayName = displayName;
       }
 
-      if (args.avatarUrl !== undefined) {
-        patch.avatarUrl = args.avatarUrl;
+      if (avatarUrl !== undefined) {
+        patch.avatarUrl = avatarUrl;
       }
 
       await ctx.db.patch(existing._id, patch);
@@ -190,12 +159,12 @@ export const upsertFromIdentity = mutation({
 
     const userId = await ctx.db.insert('users', {
       tokenIdentifier: identity.tokenIdentifier,
-      authProvider: 'workos',
+      authProvider: 'clerk',
       authSubject: identity.subject,
       createdAt: Date.now(),
-      ...(args.email !== undefined ? { email: args.email } : {}),
-      ...(args.displayName !== undefined ? { displayName: args.displayName } : {}),
-      ...(args.avatarUrl !== undefined ? { avatarUrl: args.avatarUrl } : {}),
+      ...(email !== undefined ? { email } : {}),
+      ...(displayName !== undefined ? { displayName } : {}),
+      ...(avatarUrl !== undefined ? { avatarUrl } : {}),
     });
 
     const created = await ctx.db.get(userId);
@@ -384,14 +353,47 @@ export const getProfileImageDeleteContext = internalQuery({
   },
 });
 
+const PROFILE_IMAGE_SHARED_CIRCLE_LIMIT = 200;
+
 export const getProfileImageReadContext = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    userId: v.optional(v.id('users')),
+  },
+  handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
 
-    return {
-      storage: viewer.profileImageStorage ?? null,
-    };
+    if (!args.userId || args.userId === viewer._id) {
+      return {
+        storage: viewer.profileImageStorage ?? null,
+      };
+    }
+
+    const target = await ctx.db.get(args.userId);
+
+    if (!target?.profileImageStorage) {
+      return { storage: null };
+    }
+
+    // Another member's image is only visible when both share a circle.
+    const viewerMemberships = await ctx.db
+      .query('circleMembers')
+      .withIndex('by_user', (q) => q.eq('userId', viewer._id))
+      .take(PROFILE_IMAGE_SHARED_CIRCLE_LIMIT);
+
+    for (const membership of viewerMemberships) {
+      const sharedMembership = await ctx.db
+        .query('circleMembers')
+        .withIndex('by_circle_and_user', (q) =>
+          q.eq('circleId', membership.circleId).eq('userId', args.userId!),
+        )
+        .unique();
+
+      if (sharedMembership) {
+        return { storage: target.profileImageStorage };
+      }
+    }
+
+    return { storage: null };
   },
 });
 
@@ -401,14 +403,9 @@ export const createProfileImageTarget = action({
     fileName: v.string(),
   },
   handler: async (ctx, args) => {
-    const policy = getDeploymentPolicyFromEnv();
+    // Profile images are deliberately exempt from cloud billing: one small,
+    // client-compressed file per user, always allowed regardless of plan.
     await ctx.runQuery(internal.users.authorizeProfileImageUpload, {});
-
-    if (policy.isCloud) {
-      await requireCloudFeatureAccess(ctx, {
-        featureId: BILLING_FEATURE_IDS.mediaUploads,
-      });
-    }
 
     const prepared: PreparedProfileImageUpload = await ctx.runMutation(
       internal.users.prepareProfileImageUpload,
@@ -437,12 +434,6 @@ export const completeProfileImageUpload = action({
     sizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const policy = getDeploymentPolicyFromEnv();
-    const chargedUsage = {
-      mediaUploads: 0,
-      storageBytes: 0,
-    };
-
     try {
       const completeContext: ProfileImageCompleteContext & { previousSizeBytes: number } =
         await ctx.runQuery(
@@ -464,30 +455,6 @@ export const completeProfileImageUpload = action({
         storage: completeContext.pendingStorage,
       });
 
-      if (policy.isCloud) {
-        await trackCloudUsage(ctx, {
-          featureId: BILLING_FEATURE_IDS.mediaUploads,
-          value: 1,
-          properties: {
-            uploadId: args.uploadId,
-            targetKind: 'user-profile',
-          },
-        });
-        chargedUsage.mediaUploads = 1;
-
-        if (args.sizeBytes !== undefined && args.sizeBytes > 0) {
-          await trackCloudUsage(ctx, {
-            featureId: BILLING_FEATURE_IDS.storageBytes,
-            value: args.sizeBytes,
-            properties: {
-              uploadId: args.uploadId,
-              targetKind: 'user-profile',
-            },
-          });
-          chargedUsage.storageBytes = args.sizeBytes;
-        }
-      }
-
       const finalized: {
         previousStorage: Doc<'users'>['profileImageStorage'] | null;
         previousSizeBytes: number;
@@ -497,46 +464,18 @@ export const completeProfileImageUpload = action({
         storage: completeContext.pendingStorage,
         ...(args.sizeBytes !== undefined ? { sizeBytes: args.sizeBytes } : {}),
       });
-      chargedUsage.mediaUploads = 0;
-      chargedUsage.storageBytes = 0;
 
       if (
         finalized.previousStorage &&
         storageReferenceKey(finalized.previousStorage) !== storageReferenceKey(finalized.nextStorage)
       ) {
         await deleteStorageReference(ctx, finalized.previousStorage);
-
-        if (policy.isCloud && finalized.previousSizeBytes > 0) {
-          try {
-            await trackCloudUsage(ctx, {
-              featureId: BILLING_FEATURE_IDS.storageBytes,
-              value: -finalized.previousSizeBytes,
-              properties: {
-                uploadId: args.uploadId,
-                targetKind: 'user-profile',
-              },
-            });
-          } catch (creditError) {
-            console.error('Failed to credit replaced profile image storage.', creditError);
-          }
-        }
       }
 
       return {
         uploadId: args.uploadId,
       };
     } catch (error) {
-      if (policy.isCloud && (chargedUsage.mediaUploads > 0 || chargedUsage.storageBytes > 0)) {
-        await refundCloudImageUsage({
-          ctx,
-          ...chargedUsage,
-          properties: {
-            uploadId: args.uploadId,
-            targetKind: 'user-profile',
-          },
-        });
-      }
-
       await ctx.runMutation(internal.users.markProfileImageUploadFailed, {
         uploadId: args.uploadId,
         message: error instanceof Error ? error.message : 'Profile image upload failed.',
@@ -549,7 +488,6 @@ export const completeProfileImageUpload = action({
 export const removeProfileImage = action({
   args: {},
   handler: async (ctx) => {
-    const policy = getDeploymentPolicyFromEnv();
     const deleteContext: {
       previousStorage: Doc<'users'>['profileImageStorage'] | null;
       previousSizeBytes: number;
@@ -561,39 +499,8 @@ export const removeProfileImage = action({
       };
     }
 
-    let creditedStorageBytes = 0;
-
-    try {
-      if (policy.isCloud && deleteContext.previousSizeBytes > 0) {
-        await trackCloudUsage(ctx, {
-          featureId: BILLING_FEATURE_IDS.storageBytes,
-          value: -deleteContext.previousSizeBytes,
-          properties: {
-            targetKind: 'user-profile',
-          },
-        });
-        creditedStorageBytes = deleteContext.previousSizeBytes;
-      }
-
-      await deleteStorageReference(ctx, deleteContext.previousStorage);
-      await ctx.runMutation(internal.users.clearProfileImage, {});
-    } catch (error) {
-      if (policy.isCloud && creditedStorageBytes > 0) {
-        try {
-          await trackCloudUsage(ctx, {
-            featureId: BILLING_FEATURE_IDS.storageBytes,
-            value: creditedStorageBytes,
-            properties: {
-              targetKind: 'user-profile',
-            },
-          });
-        } catch (refundError) {
-          console.error('Failed to refund Autumn profile image storage credit.', refundError);
-        }
-      }
-
-      throw error;
-    }
+    await deleteStorageReference(ctx, deleteContext.previousStorage);
+    await ctx.runMutation(internal.users.clearProfileImage, {});
 
     return {
       removed: true,
@@ -602,11 +509,17 @@ export const removeProfileImage = action({
 });
 
 export const getProfileImageReadUrl = action({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    // Omitted: the viewer's own image. Set: another member's image, only
+    // resolvable when both share a circle.
+    userId: v.optional(v.id('users')),
+  },
+  handler: async (ctx, args) => {
     const context: {
       storage: Doc<'users'>['profileImageStorage'] | null;
-    } = await ctx.runQuery(internal.users.getProfileImageReadContext, {});
+    } = await ctx.runQuery(internal.users.getProfileImageReadContext, {
+      ...(args.userId ? { userId: args.userId } : {}),
+    });
 
     if (!context.storage) {
       return {

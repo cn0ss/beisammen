@@ -64,7 +64,7 @@ export const Colors = {
 
     // Utility
     border: '#2C2C2E',
-    borderLight: '#1C1C1E',
+    borderLight: '#2A2A2C',
     separator: '#2C2C2E',
     danger: '#E74C3C',
     dangerMuted: '#2A1414',

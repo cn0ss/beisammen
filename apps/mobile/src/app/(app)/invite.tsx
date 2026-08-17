@@ -1,30 +1,40 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
+import { T, useGT, useMessages } from 'gt-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useConvexAuth, useMutation, useQuery } from 'convex/react';
 
 import { Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
+import { enterSection } from '@/lib/motion';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
+import { useMarkInteractive } from '@/features/observe/interactive';
 import {
   inviteModeLabel,
   inviteRoleLabel,
   resolveInvitePreviewState,
 } from '@/features/invites/preview-state';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
-function formatInviteExpiry(timestamp: number) {
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(timestamp));
+const INVITE_EXPIRY_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+};
+
+function formatInviteExpiry(timestamp: number, format: Intl.DateTimeFormat) {
+  return format.format(new Date(timestamp));
 }
 
 export default function InviteAcceptScreen() {
+  const gt = useGT();
+  const m = useMessages();
+  const inviteExpiryFormat = useDateFormat(INVITE_EXPIRY_FORMAT_OPTIONS);
   const router = useRouter();
   const theme = useTheme();
   const { clearPendingInviteToken, pendingInviteToken, session, setActiveCircleId } = useSession();
@@ -43,9 +53,13 @@ export default function InviteAcceptScreen() {
     (viewerState === undefined || (viewerState.isAuthenticated && viewerState.viewer === null));
   const previewState = resolveInvitePreviewState({ preview });
 
+  useMarkInteractive(
+    Boolean(session && pendingInviteToken) && !isViewerBootstrapping && preview !== undefined,
+  );
+
   const handleDismiss = useCallback(async () => {
     await clearPendingInviteToken();
-    router.replace('/(app)/home');
+    router.replace('/home');
   }, [clearPendingInviteToken, router]);
 
   const handleAccept = useCallback(async () => {
@@ -60,20 +74,20 @@ export default function InviteAcceptScreen() {
       const accepted = await acceptInvite({ token: pendingInviteToken });
       await clearPendingInviteToken();
       setActiveCircleId(accepted.circleId);
-      router.replace('/(app)/home');
+      router.replace('/home');
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Einladung konnte nicht angenommen werden.');
+      setFeedback(error instanceof Error ? error.message : gt('Einladung konnte nicht angenommen werden.'));
     } finally {
       setIsAccepting(false);
     }
-  }, [acceptInvite, clearPendingInviteToken, pendingInviteToken, router, setActiveCircleId]);
+  }, [acceptInvite, clearPendingInviteToken, gt, pendingInviteToken, router, setActiveCircleId]);
 
   if (!session) {
     return <Redirect href="/(auth)/sign-in" />;
   }
 
   if (!pendingInviteToken) {
-    return <Redirect href="/(app)/home" />;
+    return <Redirect href="/home" />;
   }
 
   return (
@@ -83,9 +97,9 @@ export default function InviteAcceptScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
+        <Animated.View entering={enterSection(0)} style={styles.header}>
           <Pressable
-            accessibilityLabel="Zurück"
+            accessibilityLabel={gt('Zurück')}
             onPress={() => {
               void handleDismiss();
             }}
@@ -100,8 +114,10 @@ export default function InviteAcceptScreen() {
             <Ionicons name="arrow-back-outline" size={18} color={theme.text} />
           </Pressable>
           <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>invite</Text>
-          <Text style={[styles.title, { color: theme.text }]}>Circle-Einladung</Text>
-        </View>
+          <T>
+            <Text style={[styles.title, { color: theme.text }]}>Circle-Einladung</Text>
+          </T>
+        </Animated.View>
 
         {isViewerBootstrapping || previewState.kind === 'loading' ? (
           <Card>
@@ -109,11 +125,13 @@ export default function InviteAcceptScreen() {
           </Card>
         ) : previewState.kind === 'not-found' || !preview ? (
           <Card>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>{previewState.title}</Text>
-            <Text style={[styles.body, { color: theme.textSecondary }]}>
-              Der Invite-Link ist ungültig oder gehört nicht mehr zu einem bestehenden Circle.
-            </Text>
-            <Button label="Schließen" icon="close-outline" onPress={() => void handleDismiss()} />
+            <Text style={[styles.cardTitle, { color: theme.text }]}>{m(previewState.title)}</Text>
+            <T>
+              <Text style={[styles.body, { color: theme.textSecondary }]}>
+                Der Invite-Link ist ungültig oder gehört nicht mehr zu einem bestehenden Circle.
+              </Text>
+            </T>
+            <Button label={gt('Schließen')} icon="close-outline" onPress={() => void handleDismiss()} />
           </Card>
         ) : (
           <>
@@ -121,32 +139,32 @@ export default function InviteAcceptScreen() {
               <Text style={[styles.cardTitle, { color: theme.text }]}>{preview.circleName}</Text>
               <Text style={[styles.body, { color: theme.textSecondary }]}>
                 {preview.mode === 'open'
-                  ? 'Dieser offene Link kann einmalig von einem neuen Mitglied angenommen werden.'
-                  : 'Diese Einladung ist persönlich an die angegebene E-Mail gebunden.'}
+                  ? gt('Dieser offene Link kann einmalig von einem neuen Mitglied angenommen werden.')
+                  : gt('Diese Einladung ist persönlich an die angegebene E-Mail gebunden.')}
               </Text>
               <InfoRow
                 icon={preview.mode === 'open' ? 'link-outline' : 'mail-outline'}
-                label="Typ"
-                value={inviteModeLabel(preview.mode)}
+                label={gt('Typ')}
+                value={m(inviteModeLabel(preview.mode))}
               />
               {preview.invitedEmail ? (
-                <InfoRow icon="mail-outline" label="Eingeladen" value={preview.invitedEmail} />
+                <InfoRow icon="mail-outline" label={gt('Eingeladen')} value={preview.invitedEmail} />
               ) : null}
               <InfoRow
                 icon="mail-outline"
-                label="Aktives Konto"
-                value={viewer?.email ?? 'Keine E-Mail im Profil'}
+                label={gt('Aktives Konto')}
+                value={viewer?.email ?? gt('Keine E-Mail im Profil')}
               />
-              <InfoRow icon="person-outline" label="Rolle" value={inviteRoleLabel(preview.role)} />
+              <InfoRow icon="person-outline" label={gt('Rolle')} value={m(inviteRoleLabel(preview.role))} />
               <InfoRow
                 icon="time-outline"
-                label="Gültig bis"
-                value={formatInviteExpiry(preview.expiresAt)}
+                label={gt('Gültig bis')}
+                value={formatInviteExpiry(preview.expiresAt, inviteExpiryFormat)}
               />
               {preview.acceptedBy ? (
                 <InfoRow
                   icon="checkmark-circle-outline"
-                  label="Angenommen"
+                  label={gt('Angenommen')}
                   value={preview.acceptedBy.displayName}
                 />
               ) : null}
@@ -154,12 +172,14 @@ export default function InviteAcceptScreen() {
 
             {previewState.kind === 'can-accept' ? (
               <Card>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>{previewState.title}</Text>
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Wenn du fortfährst, wirst du sofort zu diesem Circle hinzugefügt.
-                </Text>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{m(previewState.title)}</Text>
+                <T>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>
+                    Wenn du fortfährst, wirst du sofort zu diesem Circle hinzugefügt.
+                  </Text>
+                </T>
                 <Button
-                  label="Einladung annehmen"
+                  label={gt('Einladung annehmen')}
                   icon="checkmark-outline"
                   loading={isAccepting}
                   onPress={() => {
@@ -167,7 +187,7 @@ export default function InviteAcceptScreen() {
                   }}
                 />
                 <Button
-                  label="Später"
+                  label={gt('Später')}
                   icon="close-outline"
                   variant="outline"
                   disabled={isAccepting}
@@ -178,17 +198,19 @@ export default function InviteAcceptScreen() {
               </Card>
             ) : (
               <Card>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>{previewState.title}</Text>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{m(previewState.title)}</Text>
                 <Text style={[styles.body, { color: theme.textSecondary }]}>
                   {previewState.kind === 'email-mismatch' && preview.invitedEmail
-                    ? `Melde dich mit ${preview.invitedEmail} an, um diesen Invite anzunehmen.`
+                    ? gt('Melde dich mit {email} an, um diesen Invite anzunehmen.', {
+                        email: preview.invitedEmail,
+                      })
                     : previewState.kind === 'already-member'
-                      ? 'Du bist bereits Mitglied in diesem Circle.'
+                      ? gt('Du bist bereits Mitglied in diesem Circle.')
                       : previewState.kind === 'consumed'
-                        ? 'Dieser Einmal-Link kann nicht erneut verwendet werden.'
-                        : 'Dieser Invite kann nicht mehr angenommen werden.'}
+                        ? gt('Dieser Einmal-Link kann nicht erneut verwendet werden.')
+                        : gt('Dieser Invite kann nicht mehr angenommen werden.')}
                 </Text>
-                <Button label="Zurück zur App" icon="arrow-back-outline" onPress={() => void handleDismiss()} />
+                <Button label={gt('Zurück zur App')} icon="arrow-back-outline" onPress={() => void handleDismiss()} />
               </Card>
             )}
           </>

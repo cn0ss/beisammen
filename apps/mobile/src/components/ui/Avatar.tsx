@@ -8,13 +8,14 @@ import { useTheme } from '@/hooks/use-theme';
 interface AvatarProps {
   name: string;
   imageUrl?: string | null;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 const sizeMap = {
   sm: { box: 32, radius: 10, fontSize: FontSize.sm },
   md: { box: 44, radius: 14, fontSize: FontSize.base },
   lg: { box: 52, radius: Radius.lg, fontSize: FontSize.md },
+  xl: { box: 76, radius: Radius.xl, fontSize: FontSize.xl },
 } as const;
 
 function getInitials(name: string): string {

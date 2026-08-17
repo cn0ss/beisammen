@@ -1,4 +1,8 @@
+export { AnimatedPressable } from './AnimatedPressable';
+export { AuroraBackdrop } from './skia/AuroraBackdrop';
 export { Avatar } from './Avatar';
+export { ShimmerBlock } from './skia/ShimmerBlock';
+export { UsageRing } from './skia/UsageRing';
 export { BrandMark } from './BrandMark';
 export { Button } from './Button';
 export { Card } from './Card';

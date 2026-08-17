@@ -3,19 +3,17 @@ export type StorageProviderKind = 's3';
 
 export type AssetKind = 'image' | 'video';
 export type UploadStatus = 'draft' | 'processing' | 'uploading' | 'uploaded' | 'failed';
-export type AuthProvider = 'workos';
-export type AuthMode = 'hosted-browser' | 'native-client';
+export type AuthProvider = 'clerk';
+export type AuthMode = 'native';
 export type AuthCapability = 'password' | 'email_otp' | 'social' | 'hosted_sso';
 export type DeploymentKind = 'cloud' | 'self-hosted';
-export type BillingProviderKind = 'autumn';
-export type BillingReturnSource = 'checkout' | 'portal';
+export type BillingProviderKind = 'revenuecat';
 export type NotificationKind = 'share.published' | 'comment.created' | 'reaction.set';
 export type NotificationDeliveryStatus = 'queued' | 'skipped' | 'delivered' | 'failed';
 export type MediaLocationSource = 'embedded' | 'device-fallback';
 export type PublicConfigValue = string | number | boolean | null;
 
 export const INSTANCE_DISCOVERY_PATH = '/.well-known/beisammen-instance.json';
-export const BILLING_RETURN_PATH = '/billing/return';
 
 export const BETA_MAX_MEDIA_SELECTION_COUNT = 10;
 export const BETA_MAX_VIDEO_DURATION_SECONDS = 30;
@@ -166,6 +164,7 @@ export interface BillingPlanSummary {
   name: string;
   description?: string;
   monthlyPriceLabel?: string;
+  yearlyPriceLabel?: string;
 }
 
 export interface BillingBalanceSummary {
@@ -201,24 +200,15 @@ export type BillingStatus =
       billing: {
         enabled: true;
         configured: boolean;
-        provider: 'autumn';
+        provider: 'revenuecat';
         customerId?: string;
       };
       plans: BillingPlanSummary[];
       activePlanIds: string[];
       subscriptions: BillingSubscriptionSummary[];
       balances: BillingBalanceSummary[];
+      managementUrl?: string | null;
     };
-
-export interface BillingCheckoutResult {
-  billingEnabled: boolean;
-  checkoutUrl: string | null;
-}
-
-export interface BillingPortalSessionResult {
-  billingEnabled: boolean;
-  portalUrl: string | null;
-}
 
 export interface CircleUploadReadiness {
   deployment: DeploymentKind;
@@ -230,8 +220,25 @@ export interface CircleUploadReadiness {
     | 'ready'
     | 'billing_not_configured'
     | 'plan_required'
+    | 'quota_exceeded'
     | 'billing_check_failed';
   message: string;
+}
+
+export interface CircleCreationReadiness {
+  deployment: DeploymentKind;
+  canCreate: boolean;
+  billingRequired: boolean;
+  reason:
+    | 'self_hosted'
+    | 'ready'
+    | 'billing_not_configured'
+    | 'plan_required'
+    | 'limit_reached'
+    | 'billing_check_failed';
+  message: string;
+  usedCircles: number | null;
+  maxCircles: number | null;
 }
 
 export interface NotificationDeviceRegistration {
@@ -259,52 +266,8 @@ export interface AppSession {
   capabilities: AuthCapability[];
 }
 
-export interface AuthSessionResult {
-  session: AppSession;
-  accessToken?: string;
-  refreshToken?: string;
-}
-
-export type AuthBeginSignInResult =
-  | {
-      type: 'open-browser';
-      authUrl: string;
-    }
-  | {
-      type: 'session';
-      result: AuthSessionResult;
-    };
-
-export interface AuthAdapter {
-  beginSignIn(input: {
-    instance: InstanceConfig;
-    redirectUrl: string;
-  }): Promise<AuthBeginSignInResult>;
-  handleCallback(input: {
-    instance: InstanceConfig;
-    callbackUrl: string;
-    currentSession: AppSession | null;
-  }): Promise<AuthSessionResult | null>;
-  refreshSession(input: {
-    instance: InstanceConfig;
-    currentSession: AppSession | null;
-    refreshToken: string;
-  }): Promise<AuthSessionResult | null>;
-  restoreSession(input: {
-    instance: InstanceConfig;
-    currentSession: AppSession | null;
-  }): Promise<AppSession | null>;
-  signOut(input: {
-    instance: InstanceConfig;
-    currentSession: AppSession | null;
-  }): Promise<void>;
-  getCurrentSession(input: {
-    currentSession: AppSession | null;
-  }): AppSession | null;
-}
-
-const authProviders: AuthProvider[] = ['workos'];
-const authModes: AuthMode[] = ['hosted-browser', 'native-client'];
+const authProviders: AuthProvider[] = ['clerk'];
+const authModes: AuthMode[] = ['native'];
 const authCapabilities: AuthCapability[] = [
   'password',
   'email_otp',
@@ -313,7 +276,7 @@ const authCapabilities: AuthCapability[] = [
 ];
 const storageProviders: StorageProviderKind[] = ['s3'];
 const deploymentKinds: DeploymentKind[] = ['cloud', 'self-hosted'];
-const billingProviders: BillingProviderKind[] = ['autumn'];
+const billingProviders: BillingProviderKind[] = ['revenuecat'];
 
 type ParsedAppVersion = {
   parts: [number, number, number];
@@ -512,6 +475,22 @@ export interface StorageUsageStats {
   isTruncated: boolean;
 }
 
+export interface CircleUsageBreakdownItem {
+  circleId: string;
+  name: string;
+  hasImage: boolean;
+  isOwner: boolean;
+  memberCount: number;
+  imageCount: number;
+  videoCount: number;
+  totalSizeBytes: number;
+}
+
+export interface CircleUsageBreakdown {
+  circles: CircleUsageBreakdownItem[];
+  isTruncated: boolean;
+}
+
 export interface CreateUploadTargetInput {
   circleId: string;
   shareBatchId: string;
@@ -578,14 +557,12 @@ export function isBillingProviderKind(value: unknown): value is BillingProviderK
   return typeof value === 'string' && billingProviders.includes(value as BillingProviderKind);
 }
 
-export interface BuildWorkOSInstanceConfigInput {
+export interface BuildClerkInstanceConfigInput {
   id: string;
   name: string;
   baseUrl: string;
   convexUrl: string;
-  authMode: AuthMode;
-  authClientId?: string;
-  authSignInUrl?: string;
+  authPublishableKey: string;
   capabilities?: AuthCapability[];
   deploymentKind?: DeploymentKind;
   billingPlans?: BillingPlanSummary[];
@@ -684,7 +661,7 @@ function buildBillingConfig(input: {
     return input.deploymentKind === 'cloud'
       ? {
           enabled: true,
-          provider: 'autumn',
+          provider: 'revenuecat',
           ...(input.billingPlans ? { plans: input.billingPlans } : {}),
         }
       : { enabled: false };
@@ -695,14 +672,14 @@ function buildBillingConfig(input: {
 
   if (!enabled) {
     if (input.deploymentKind === 'cloud') {
-      throw new Error('Cloud deployments must use Autumn billing.');
+      throw new Error('Cloud deployments must use RevenueCat billing.');
     }
 
     return { enabled: false };
   }
 
   if (!isBillingProviderKind(billing.provider)) {
-    throw new Error('Cloud deployments must use Autumn billing.');
+    throw new Error('Cloud deployments must use RevenueCat billing.');
   }
 
   if (input.deploymentKind !== 'cloud') {
@@ -761,18 +738,18 @@ function validateConvexClientUrl(convexUrl: string): void {
 }
 
 function validateAuthPublicConfig(
-  mode: AuthMode,
+  _mode: AuthMode,
   publicConfig: Record<string, PublicConfigValue>,
 ): void {
-  if (mode === 'native-client') {
-    requirePublicConfigString(publicConfig, 'clientId', 'auth.publicConfig.clientId');
-    return;
-  }
-
-  normalizePublicUrl(
-    requirePublicConfigString(publicConfig, 'signInUrl', 'auth.publicConfig.signInUrl'),
-    'auth.publicConfig.signInUrl',
+  const publishableKey = requirePublicConfigString(
+    publicConfig,
+    'publishableKey',
+    'auth.publicConfig.publishableKey',
   );
+
+  if (!publishableKey.startsWith('pk_')) {
+    throw new Error('auth.publicConfig.publishableKey must be a Clerk publishable key.');
+  }
 }
 
 function validateSelfHostedFlag(
@@ -816,19 +793,6 @@ export function buildInstanceDiscoveryUrl(baseUrl: string): string {
   return `${normalizePublicUrl(baseUrl, 'instance base URL')}${INSTANCE_DISCOVERY_PATH}`;
 }
 
-export function normalizeBillingReturnSource(value: unknown): BillingReturnSource {
-  return value === 'portal' ? 'portal' : 'checkout';
-}
-
-export function buildBillingReturnUrl(
-  baseUrl: string,
-  source: BillingReturnSource,
-): string {
-  const url = new URL(BILLING_RETURN_PATH, `${normalizePublicUrl(baseUrl, 'instance base URL')}/`);
-  url.searchParams.set('source', source);
-  return url.toString();
-}
-
 export function assertInstanceBaseUrlMatches(
   config: InstanceConfig,
   expectedBaseUrl: string,
@@ -842,25 +806,18 @@ export function assertInstanceBaseUrlMatches(
   }
 }
 
-export function buildWorkOSInstanceConfig(
-  input: BuildWorkOSInstanceConfigInput,
+export function buildClerkInstanceConfig(
+  input: BuildClerkInstanceConfigInput,
 ): InstanceConfig {
   const baseUrl = normalizePublicUrl(input.baseUrl, 'instance.baseUrl');
   const deploymentKind = input.deploymentKind ?? (input.selfHosted ? 'self-hosted' : 'cloud');
-  const publicConfig: Record<string, PublicConfigValue> = {
-    redirectPath: 'auth/callback',
-  };
-  const authClientId = input.authClientId?.trim();
-  const authSignInUrl = input.authSignInUrl?.trim();
+  const publishableKey = requireString(
+    input.authPublishableKey,
+    'auth.publicConfig.publishableKey',
+  );
 
-  if (authClientId) {
-    publicConfig.clientId = authClientId;
-  }
-
-  if (input.authMode === 'hosted-browser') {
-    publicConfig.signInUrl = authSignInUrl
-      ? normalizePublicUrl(authSignInUrl, 'auth.publicConfig.signInUrl')
-      : `${baseUrl}/auth/sign-in`;
+  if (!publishableKey.startsWith('pk_')) {
+    throw new Error('auth.publicConfig.publishableKey must be a Clerk publishable key.');
   }
 
   return {
@@ -873,10 +830,10 @@ export function buildWorkOSInstanceConfig(
       convexUrl: normalizePublicUrl(input.convexUrl, 'backend.convexUrl'),
     },
     auth: {
-      provider: 'workos',
-      mode: input.authMode,
+      provider: 'clerk',
+      mode: 'native',
       capabilities: input.capabilities ?? [...authCapabilities],
-      publicConfig,
+      publicConfig: { publishableKey },
     },
     features: {
       storageProviders: ['s3'],

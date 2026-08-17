@@ -1,9 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useGT } from 'gt-react-native';
 import { memo } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 
+import { AnimatedPressable } from '@/components/ui/AnimatedPressable';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+
+const FAB_SIZE = 56;
 
 interface ComposeFabProps {
   hasDraft: boolean;
@@ -19,60 +23,58 @@ export const ComposeFab = memo(function ComposeFab({
   onPress,
 }: ComposeFabProps) {
   const theme = useTheme();
+  const gt = useGT();
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.fab,
-        {
-          backgroundColor: theme.primary,
-          transform: [{ scale: pressed ? 0.92 : 1 }],
-          opacity: pressed ? 0.9 : 1,
-          ...Platform.select({
-            ios: { shadowColor: theme.primary },
-            android: {},
-          }),
-        },
-      ]}
-    >
-      {isUploading ? (
-        <ActivityIndicator size="small" color={theme.primaryText} />
-      ) : (
-        <Ionicons
-          name={hasDraft ? 'create-outline' : 'add'}
-          size={hasDraft ? 22 : 28}
-          color={theme.primaryText}
-        />
-      )}
+    <View style={styles.wrap} pointerEvents="box-none">
+      <AnimatedPressable
+        accessibilityRole="button"
+        accessibilityLabel={hasDraft ? gt('Entwurf bearbeiten') : gt('Neuen Beitrag erstellen')}
+        onPress={onPress}
+        pressedScale={0.95}
+        style={[styles.fab, { backgroundColor: theme.primary }]}
+      >
+        {isUploading ? (
+          <ActivityIndicator size="small" color={theme.primaryText} />
+        ) : (
+          <Ionicons
+            name={hasDraft ? 'create-outline' : 'add'}
+            size={hasDraft ? 22 : 28}
+            color={theme.primaryText}
+          />
+        )}
 
-      {hasDraft && draftAssetCount > 0 ? (
-        <View style={[styles.badge, { backgroundColor: theme.accent }]}>
-          <Text style={styles.badgeText}>{draftAssetCount}</Text>
-        </View>
-      ) : null}
-    </Pressable>
+        {hasDraft && draftAssetCount > 0 ? (
+          <View style={[styles.badge, { backgroundColor: theme.accent }]}>
+            <Text style={styles.badgeText}>{draftAssetCount}</Text>
+          </View>
+        ) : null}
+      </AnimatedPressable>
+    </View>
   );
 });
 
 const styles = StyleSheet.create({
-  fab: {
+  wrap: {
     position: 'absolute',
     bottom: Spacing.xl,
     right: Spacing.xl,
-    width: 56,
-    height: 56,
+  },
+  fab: {
+    width: FAB_SIZE,
+    height: FAB_SIZE,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
       ios: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.18,
+        shadowRadius: 8,
       },
       android: {
-        elevation: 8,
+        elevation: 6,
       },
     }),
   },

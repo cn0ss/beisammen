@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { T, useGT } from 'gt-react-native';
 import { memo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -45,6 +46,7 @@ export const Composer = memo(function Composer({
   onRemoveFailedUpload,
 }: ComposerProps) {
   const theme = useTheme();
+  const gt = useGT();
 
   if (isDraftLoading) {
     return (
@@ -57,12 +59,14 @@ export const Composer = memo(function Composer({
   if (!draft && uploadQueue.items.length === 0) {
     return (
       <Card>
-        <Text style={[styles.helper, { color: theme.textSecondary }]}>
-          Fotos und Videos bleiben zuerst privat im Entwurf. Veröffentlicht wird erst, wenn du
-          bereit bist.
-        </Text>
+        <T>
+          <Text style={[styles.helper, { color: theme.textSecondary }]}>
+            Fotos und Videos bleiben zuerst privat im Entwurf. Veröffentlicht wird erst, wenn du
+            bereit bist.
+          </Text>
+        </T>
         <Button
-          label={isUploading ? 'Medien werden vorbereitet...' : 'Fotos oder Videos auswählen'}
+          label={isUploading ? gt('Medien werden vorbereitet...') : gt('Fotos oder Videos auswählen')}
           icon={isUploading ? 'cloud-upload-outline' : 'images-outline'}
           loading={isUploading}
           onPress={onPickMedia}
@@ -75,14 +79,16 @@ export const Composer = memo(function Composer({
     <Card>
       <View style={styles.headerRow}>
         <View style={styles.headerInfo}>
-          <Text style={[styles.title, { color: theme.text }]}>Privater Entwurf</Text>
-          <Text style={[styles.helper, { color: theme.textSecondary }]}>
-            Nur du siehst diesen Entwurf, bis du ihn veröffentlichst.
-          </Text>
+          <T>
+            <Text style={[styles.title, { color: theme.text }]}>Privater Entwurf</Text>
+            <Text style={[styles.helper, { color: theme.textSecondary }]}>
+              Nur du siehst diesen Entwurf, bis du ihn veröffentlichst.
+            </Text>
+          </T>
         </View>
         {draft ? (
           <Button
-            label="Löschen"
+            label={gt('Löschen')}
             icon="trash-outline"
             variant="danger"
             loading={isDeletingDraft}
@@ -96,7 +102,7 @@ export const Composer = memo(function Composer({
         <TextInput
           value={caption}
           onChangeText={onChangeCaption}
-          placeholder="Schreib etwas dazu, wenn du magst"
+          placeholder={gt('Schreib etwas dazu, wenn du magst')}
           placeholderTextColor={theme.textTertiary}
           multiline
           style={[
@@ -109,9 +115,11 @@ export const Composer = memo(function Composer({
           ]}
         />
       ) : (
-        <Text style={[styles.helper, { color: theme.textSecondary }]}>
-          Der Entwurf wird vorbereitet. Du kannst gleich Text ergänzen.
-        </Text>
+        <T>
+          <Text style={[styles.helper, { color: theme.textSecondary }]}>
+            Der Entwurf wird vorbereitet. Du kannst gleich Text ergänzen.
+          </Text>
+        </T>
       )}
 
       {draft?.assets.length ? (
@@ -144,7 +152,9 @@ export const Composer = memo(function Composer({
 
       <Button
         label={
-          isUploading ? 'Medien werden vorbereitet...' : 'Weitere Fotos oder Videos hinzufügen'
+          isUploading
+            ? gt('Medien werden vorbereitet...')
+            : gt('Weitere Fotos oder Videos hinzufügen')
         }
         icon={isUploading ? 'cloud-upload-outline' : 'images-outline'}
         loading={isUploading}
@@ -153,7 +163,7 @@ export const Composer = memo(function Composer({
       />
 
       <Button
-        label={isPublishing ? 'Wird veröffentlicht...' : 'Veröffentlichen'}
+        label={isPublishing ? gt('Wird veröffentlicht...') : gt('Veröffentlichen')}
         icon="send-outline"
         variant="outline"
         loading={isPublishing}
@@ -179,6 +189,7 @@ const UploadQueueItem = memo(function UploadQueueItem({
   onRemove?: () => void;
 }) {
   const theme = useTheme();
+  const gt = useGT();
 
   const iconName =
     item.status === 'uploaded'
@@ -202,14 +213,14 @@ const UploadQueueItem = memo(function UploadQueueItem({
 
   const statusLabel =
     item.status === 'processing'
-      ? 'Wird komprimiert'
+      ? gt('Wird komprimiert')
       : item.status === 'uploading'
-        ? 'Wird hochgeladen'
+        ? gt('Wird hochgeladen')
         : item.status === 'uploaded'
-          ? 'Fertig'
+          ? gt('Fertig')
           : item.status === 'failed'
-            ? 'Fehlgeschlagen'
-            : 'Wartet';
+            ? gt('Fehlgeschlagen')
+            : gt('Wartet');
 
   return (
     <View style={[styles.queueItem, { borderBottomColor: theme.borderLight }]}>

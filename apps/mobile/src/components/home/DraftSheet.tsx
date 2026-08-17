@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { T, Var, useGT, useMessages } from 'gt-react-native';
 import { memo } from 'react';
 import {
   KeyboardAvoidingView,
@@ -80,6 +81,8 @@ export const DraftSheet = memo(function DraftSheet({
   onClose,
 }: DraftSheetProps) {
   const theme = useTheme();
+  const gt = useGT();
+  const m = useMessages();
   const captionLength = caption.length;
   const circleImageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
   const readinessNotice = uploadReadinessNotice(uploadReadiness);
@@ -112,9 +115,11 @@ export const DraftSheet = memo(function DraftSheet({
             </Pressable>
           </View>
 
-          <Text style={[styles.headerTitle, { color: theme.text }]}>
-            Neuer <Text style={styles.headerTitleAccent}>Beitrag</Text>
-          </Text>
+          <T>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>
+              Neuer <Text style={styles.headerTitleAccent}>Beitrag</Text>
+            </Text>
+          </T>
 
           <View style={styles.headerRight}>
             {draft ? (
@@ -154,11 +159,18 @@ export const DraftSheet = memo(function DraftSheet({
                 >
                   <Avatar name={circle.name} imageUrl={circleImageUrl} size="sm" />
                   <View style={styles.circleCopy}>
-                    <Text style={[styles.circleTarget, { color: theme.text }]} numberOfLines={1}>
-                      An · <Text style={styles.circleTargetName}>{circle.name}</Text>
-                    </Text>
+                    <T>
+                      <Text style={[styles.circleTarget, { color: theme.text }]} numberOfLines={1}>
+                        An ·{' '}
+                        <Text style={styles.circleTargetName}>
+                          <Var>{circle.name}</Var>
+                        </Text>
+                      </Text>
+                    </T>
                     <Text style={[styles.circleMembers, { color: theme.textTertiary }]}>
-                      {circle.memberCount} {circle.memberCount === 1 ? 'Person' : 'Personen'}
+                      {gt('{count, plural, one {# Person} other {# Personen}}', {
+                        count: circle.memberCount,
+                      })}
                     </Text>
                   </View>
                 </View>
@@ -187,15 +199,15 @@ export const DraftSheet = memo(function DraftSheet({
                   </View>
                   <View style={styles.readinessCopy}>
                     <Text style={[styles.readinessTitle, { color: theme.text }]}>
-                      {readinessNotice.title}
+                      {m(readinessNotice.title)}
                     </Text>
                     <Text style={[styles.readinessMessage, { color: theme.textSecondary }]}>
-                      {readinessNotice.message}
+                      {m(readinessNotice.message)}
                     </Text>
                     {readinessNotice.action === 'choose_plan' && onOpenBilling ? (
                       <View style={styles.readinessAction}>
                         <Button
-                          label="Tarif wählen"
+                          label={gt('Tarif wählen')}
                           icon="card-outline"
                           variant="outline"
                           onPress={onOpenBilling}
@@ -219,7 +231,7 @@ export const DraftSheet = memo(function DraftSheet({
                 <TextInput
                   value={caption}
                   onChangeText={onChangeCaption}
-                  placeholder="Schreib etwas dazu..."
+                  placeholder={gt('Schreib etwas dazu...')}
                   placeholderTextColor={theme.textTertiary}
                   multiline
                   maxLength={CAPTION_MAX_LENGTH}
@@ -228,9 +240,11 @@ export const DraftSheet = memo(function DraftSheet({
                 <View style={styles.captionMeta}>
                   <View style={styles.captionMetaLeft}>
                     <Ionicons name="lock-closed-outline" size={12} color={theme.textTertiary} />
-                    <Text style={[styles.captionMetaHint, { color: theme.textTertiary }]}>
-                      Nur dieser Circle
-                    </Text>
+                    <T>
+                      <Text style={[styles.captionMetaHint, { color: theme.textTertiary }]}>
+                        Nur dieser Circle
+                      </Text>
+                    </T>
                   </View>
                   <Text
                     style={[
@@ -247,7 +261,9 @@ export const DraftSheet = memo(function DraftSheet({
               {draft?.assets.length ? (
                 <View style={styles.assetsSection}>
                   <Text style={[styles.assetsSectionLabel, { color: theme.textSecondary }]}>
-                    {draft.assets.length} {draft.assets.length === 1 ? 'Medium' : 'Medien'}
+                    {gt('{count, plural, one {# Medium} other {# Medien}}', {
+                      count: draft.assets.length,
+                    })}
                   </Text>
                   <ScrollView
                     horizontal
@@ -304,7 +320,7 @@ export const DraftSheet = memo(function DraftSheet({
               {/* Actions */}
               <View style={styles.actions}>
                 <Button
-                  label={isUploading ? 'Wird vorbereitet...' : 'Medien hinzufügen'}
+                  label={isUploading ? gt('Wird vorbereitet...') : gt('Medien hinzufügen')}
                   icon={isUploading ? 'cloud-upload-outline' : 'images-outline'}
                   variant="ghost"
                   loading={isUploading}
@@ -313,7 +329,7 @@ export const DraftSheet = memo(function DraftSheet({
                 />
 
                 <Button
-                  label={isPublishing ? 'Wird veröffentlicht...' : 'Veröffentlichen'}
+                  label={isPublishing ? gt('Wird veröffentlicht...') : gt('Veröffentlichen')}
                   icon="send-outline"
                   loading={isPublishing}
                   disabled={!canPublish || isUploading || isDeletingDraft}
@@ -359,6 +375,7 @@ const UploadQueueItem = memo(function UploadQueueItem({
   onRemove?: () => void;
 }) {
   const theme = useTheme();
+  const gt = useGT();
 
   const iconName =
     item.status === 'uploaded'
@@ -382,14 +399,14 @@ const UploadQueueItem = memo(function UploadQueueItem({
 
   const statusLabel =
     item.status === 'processing'
-      ? 'Wird komprimiert'
+      ? gt('Wird komprimiert')
       : item.status === 'uploading'
-        ? 'Wird hochgeladen'
+        ? gt('Wird hochgeladen')
         : item.status === 'uploaded'
-          ? 'Fertig'
+          ? gt('Fertig')
           : item.status === 'failed'
-            ? 'Fehlgeschlagen'
-            : 'Wartet';
+            ? gt('Fehlgeschlagen')
+            : gt('Wartet');
   const progressPercent = item.status === 'uploading'
     ? formatProgressPercent(item.progressRatio)
     : null;
@@ -427,12 +444,12 @@ const UploadQueueItem = memo(function UploadQueueItem({
       {onRetry || onRemove ? (
         <View style={styles.queueActions}>
           {onRetry ? (
-            <Pressable accessibilityLabel="Upload erneut versuchen" onPress={onRetry} hitSlop={8}>
+            <Pressable accessibilityLabel={gt('Upload erneut versuchen')} onPress={onRetry} hitSlop={8}>
               <Ionicons name="refresh-circle" size={20} color={theme.primary} />
             </Pressable>
           ) : null}
           {onRemove ? (
-            <Pressable accessibilityLabel="Upload entfernen" onPress={onRemove} hitSlop={8}>
+            <Pressable accessibilityLabel={gt('Upload entfernen')} onPress={onRemove} hitSlop={8}>
               <Ionicons name="close-circle" size={20} color={theme.textTertiary} />
             </Pressable>
           ) : null}

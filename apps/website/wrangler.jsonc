@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "beisammen-website",
+  "account_id": "d23b5ac9eae1324193ae991568b5a16b",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  // The Worker script only exists to 301 www → apex; everything else is
+  // served from the static build in ./dist. run_worker_first is required
+  // for the redirect — host-based logic can't run when assets are served
+  // directly.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "html_handling": "auto-trailing-slash",
+    "run_worker_first": true
+  },
+  "routes": [
+    { "pattern": "beisammen.app", "custom_domain": true },
+    { "pattern": "www.beisammen.app", "custom_domain": true }
+  ],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  }
+}

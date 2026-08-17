@@ -1,0 +1,9 @@
+{
+  "ios": {
+    "NSLocationWhenInUseUsageDescription": "beisammen can optionally use your current location to add a place to media without embedded GPS data.",
+    "NSPhotoLibraryUsageDescription": "beisammen needs access to your photos to share them with your circle.",
+    "NSCameraUsageDescription": "beisammen needs access to your camera to take photos.",
+    "NSMicrophoneUsageDescription": "beisammen needs access to your microphone to record videos.",
+    "NSPhotoLibraryAddUsageDescription": "beisammen needs access to save photos and videos to your device."
+  }
+}

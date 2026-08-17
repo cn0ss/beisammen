@@ -9,33 +9,41 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAction, useConvexAuth, useMutation, useQuery } from 'convex/react';
+import { Branch, Num, Plural, T, Var, msg, useGT, useMessages } from 'gt-react-native';
+
+import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 
 import { Avatar, Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { InviteComposer, type InviteComposerSubmitArgs } from '@/components/invites/InviteComposer';
 import { PublicCircleLinkPanel } from '@/components/share/PublicCircleLinkPanel';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
+import { enterSection } from '@/lib/motion';
 import type { CircleInviteRecord, CircleMemberRecord } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
 import { inviteModeLabel } from '@/features/invites/preview-state';
-import { optimizePickerAsset, uploadPreparedFile } from '@/features/media/client';
+import { formatBytes, optimizePickerAsset, uploadPreparedFile } from '@/features/media/client';
 import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { buildMemoryViewerHref } from '@/features/memories/timeline';
+import { MemoryTile } from '@/features/memories/MemoryTile';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
 function firstParam(value?: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-async function pickSingleImageAsset() {
+async function pickSingleImageAsset(permissionErrorMessage: string) {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
   if (!permission.granted) {
-    throw new Error('Ohne Mediathek-Zugriff kann kein Bild ausgewählt werden.');
+    throw new Error(permissionErrorMessage);
   }
 
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -51,40 +59,44 @@ async function pickSingleImageAsset() {
   return result.assets[0] ?? null;
 }
 
-function formatDateTime(timestamp: number) {
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(timestamp));
+const DATE_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+};
+
+function formatDateTime(timestamp: number, format: Intl.DateTimeFormat) {
+  return format.format(new Date(timestamp));
 }
 
 function roleLabel(role: 'owner' | 'admin' | 'member') {
   switch (role) {
     case 'owner':
-      return 'Owner';
+      return msg('Owner');
     case 'admin':
-      return 'Admin';
+      return msg('Admin');
     default:
-      return 'Mitglied';
+      return msg('Mitglied');
   }
 }
 
 function inviteStatusLabel(status: CircleInviteRecord['status']) {
   switch (status) {
     case 'accepted':
-      return 'Angenommen';
+      return msg('Angenommen');
     case 'expired':
-      return 'Abgelaufen';
+      return msg('Abgelaufen');
     case 'revoked':
-      return 'Zurückgezogen';
+      return msg('Zurückgezogen');
     default:
-      return 'Ausstehend';
+      return msg('Ausstehend');
   }
 }
 
 export default function CircleManagementScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const gt = useGT();
+  const m = useMessages();
   const { setActiveCircleId } = useSession();
   const convexAuth = useConvexAuth();
   const params = useLocalSearchParams<{ circleId?: string | string[] }>();
@@ -110,6 +122,12 @@ export default function CircleManagementScreen() {
   const createCircleImageTarget = useAction(api.circles.createImageTarget);
   const completeCircleImageUpload = useAction(api.circles.completeImageUpload);
   const removeCircleImage = useAction(api.circles.removeImage);
+  const deleteCircle = useAction(api.circles.deleteOwn);
+  const mediaPage = usePaginatedQuery(
+    api.memories.listForViewer,
+    circleId && hasViewer ? { circleId } : 'skip',
+    { initialNumItems: 12 },
+  );
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -120,7 +138,13 @@ export default function CircleManagementScreen() {
   const [busyPublicLinkId, setBusyPublicLinkId] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [isImageBusy, setIsImageBusy] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const imageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
+  const { width: windowWidth } = useWindowDimensions();
+  // Screen padding + card padding on both sides, two gaps between three tiles.
+  const mediaTileSize = Math.floor(
+    (windowWidth - Spacing.lg * 4 - Spacing.xs * 2) / 3,
+  );
 
   useEffect(() => {
     if (!circle) {
@@ -154,13 +178,15 @@ export default function CircleManagementScreen() {
         name: name.trim(),
         description: description.trim() || undefined,
       });
-      setFeedback('Circle-Details aktualisiert.');
+      setFeedback(gt('Circle-Details aktualisiert.'));
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Circle konnte nicht aktualisiert werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Circle konnte nicht aktualisiert werden.'),
+      );
     } finally {
       setIsSavingDetails(false);
     }
-  }, [circle, circleId, description, name, updateCircle]);
+  }, [circle, circleId, description, gt, name, updateCircle]);
 
   const handlePickCircleImage = useCallback(async () => {
     if (!circle?.canManage) {
@@ -171,7 +197,9 @@ export default function CircleManagementScreen() {
     setFeedback(null);
 
     try {
-      const pickedAsset = await pickSingleImageAsset();
+      const pickedAsset = await pickSingleImageAsset(
+        gt('Ohne Mediathek-Zugriff kann kein Bild ausgewählt werden.'),
+      );
 
       if (!pickedAsset) {
         return;
@@ -194,50 +222,56 @@ export default function CircleManagementScreen() {
         storageId: uploaded.storageId,
         sizeBytes: processedAsset.sizeBytes,
       });
-      setFeedback(`Bild für "${circle.name}" aktualisiert.`);
+      setFeedback(gt('Bild für "{name}" aktualisiert.', { name: circle.name }));
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Circle-Bild konnte nicht gesetzt werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Circle-Bild konnte nicht gesetzt werden.'),
+      );
     } finally {
       setIsImageBusy(false);
     }
-  }, [circle, completeCircleImageUpload, createCircleImageTarget]);
+  }, [circle, completeCircleImageUpload, createCircleImageTarget, gt]);
 
   const handleRemoveCircleImage = useCallback(() => {
     if (!circle?.canManage || !circle.hasImage || isImageBusy) {
       return;
     }
 
-    Alert.alert('Circle-Bild entfernen?', `Das Bild von "${circle.name}" wird entfernt.`, [
-      { text: 'Abbrechen', style: 'cancel' },
-      {
-        text: 'Entfernen',
-        style: 'destructive',
-        onPress: () => {
-          setIsImageBusy(true);
-          setFeedback(null);
-          void removeCircleImage({ circleId: circle._id })
-            .then(() => {
-              setFeedback(`Bild für "${circle.name}" entfernt.`);
-            })
-            .catch((error) => {
-              setFeedback(
-                error instanceof Error
-                  ? error.message
-                  : 'Circle-Bild konnte nicht entfernt werden.',
-              );
-            })
-            .finally(() => {
-              setIsImageBusy(false);
-            });
+    Alert.alert(
+      gt('Circle-Bild entfernen?'),
+      gt('Das Bild von "{name}" wird entfernt.', { name: circle.name }),
+      [
+        { text: gt('Abbrechen'), style: 'cancel' },
+        {
+          text: gt('Entfernen'),
+          style: 'destructive',
+          onPress: () => {
+            setIsImageBusy(true);
+            setFeedback(null);
+            void removeCircleImage({ circleId: circle._id })
+              .then(() => {
+                setFeedback(gt('Bild für "{name}" entfernt.', { name: circle.name }));
+              })
+              .catch((error) => {
+                setFeedback(
+                  error instanceof Error
+                    ? error.message
+                    : gt('Circle-Bild konnte nicht entfernt werden.'),
+                );
+              })
+              .finally(() => {
+                setIsImageBusy(false);
+              });
+          },
         },
-      },
-    ]);
-  }, [circle, isImageBusy, removeCircleImage]);
+      ],
+    );
+  }, [circle, gt, isImageBusy, removeCircleImage]);
 
   const handleCreateInvite = useCallback(
     async (args: InviteComposerSubmitArgs) => {
       if (!circleId) {
-        throw new Error('Circle ist noch nicht geladen.');
+        throw new Error(gt('Circle ist noch nicht geladen.'));
       }
 
       setIsSubmittingInvite(true);
@@ -253,18 +287,18 @@ export default function CircleManagementScreen() {
         setIsSubmittingInvite(false);
       }
     },
-    [circleId, createInvite],
+    [circleId, createInvite, gt],
   );
 
   const handleCreatePublicLink = useCallback(async () => {
     if (!circleId) {
-      throw new Error('Circle ist noch nicht geladen.');
+      throw new Error(gt('Circle ist noch nicht geladen.'));
     }
 
     return await createPublicLink({
       circleId,
     });
-  }, [circleId, createPublicLink]);
+  }, [circleId, createPublicLink, gt]);
 
   const handleRevokePublicLink = useCallback(
     async (publicLinkId: string) => {
@@ -282,15 +316,18 @@ export default function CircleManagementScreen() {
   const handleToggleRole = useCallback(
     (member: CircleMemberRecord) => {
       const nextRole = member.role === 'admin' ? 'member' : 'admin';
-      const actionLabel = nextRole === 'admin' ? 'zum Admin machen' : 'zum Mitglied herunterstufen';
+      const message =
+        nextRole === 'admin'
+          ? gt('{name} wird zum Admin machen.', { name: member.displayName })
+          : gt('{name} wird zum Mitglied herunterstufen.', { name: member.displayName });
 
       Alert.alert(
-        'Rolle ändern?',
-        `${member.displayName} wird ${actionLabel}.`,
+        gt('Rolle ändern?'),
+        message,
         [
-          { text: 'Abbrechen', style: 'cancel' },
+          { text: gt('Abbrechen'), style: 'cancel' },
           {
-            text: 'Bestätigen',
+            text: gt('Bestätigen'),
             onPress: () => {
               setBusyMemberId(member._id);
               setFeedback(null);
@@ -300,11 +337,13 @@ export default function CircleManagementScreen() {
                 role: nextRole,
               })
                 .then(() => {
-                  setFeedback(`Rolle für ${member.displayName} aktualisiert.`);
+                  setFeedback(gt('Rolle für {name} aktualisiert.', { name: member.displayName }));
                 })
                 .catch((error) => {
                   setFeedback(
-                    error instanceof Error ? error.message : 'Rolle konnte nicht geändert werden.',
+                    error instanceof Error
+                      ? error.message
+                      : gt('Rolle konnte nicht geändert werden.'),
                   );
                 })
                 .finally(() => {
@@ -315,18 +354,20 @@ export default function CircleManagementScreen() {
         ],
       );
     },
-    [circleId, updateMemberRole],
+    [circleId, gt, updateMemberRole],
   );
 
   const handleRemoveMember = useCallback(
     (member: CircleMemberRecord) => {
       Alert.alert(
-        'Mitglied entfernen?',
-        `${member.displayName} verliert sofort den Zugriff auf diesen Circle.`,
+        gt('Mitglied entfernen?'),
+        gt('{name} verliert sofort den Zugriff auf diesen Circle.', {
+          name: member.displayName,
+        }),
         [
-          { text: 'Abbrechen', style: 'cancel' },
+          { text: gt('Abbrechen'), style: 'cancel' },
           {
-            text: 'Entfernen',
+            text: gt('Entfernen'),
             style: 'destructive',
             onPress: () => {
               setBusyMemberId(member._id);
@@ -336,11 +377,13 @@ export default function CircleManagementScreen() {
                 memberId: member._id,
               })
                 .then(() => {
-                  setFeedback(`${member.displayName} wurde entfernt.`);
+                  setFeedback(gt('{name} wurde entfernt.', { name: member.displayName }));
                 })
                 .catch((error) => {
                   setFeedback(
-                    error instanceof Error ? error.message : 'Mitglied konnte nicht entfernt werden.',
+                    error instanceof Error
+                      ? error.message
+                      : gt('Mitglied konnte nicht entfernt werden.'),
                   );
                 })
                 .finally(() => {
@@ -351,18 +394,20 @@ export default function CircleManagementScreen() {
         ],
       );
     },
-    [circleId, removeMember],
+    [circleId, gt, removeMember],
   );
 
   const handleTransferOwnership = useCallback(
     (member: CircleMemberRecord) => {
       Alert.alert(
-        'Ownership übertragen?',
-        `${member.displayName} wird Owner. Dein eigener Zugriff bleibt als Admin bestehen.`,
+        gt('Ownership übertragen?'),
+        gt('{name} wird Owner. Dein eigener Zugriff bleibt als Admin bestehen.', {
+          name: member.displayName,
+        }),
         [
-          { text: 'Abbrechen', style: 'cancel' },
+          { text: gt('Abbrechen'), style: 'cancel' },
           {
-            text: 'Uebertragen',
+            text: gt('Uebertragen'),
             onPress: () => {
               setBusyMemberId(member._id);
               setFeedback(null);
@@ -371,13 +416,13 @@ export default function CircleManagementScreen() {
                 targetMemberId: member._id,
               })
                 .then(() => {
-                  setFeedback(`Ownership an ${member.displayName} übertragen.`);
+                  setFeedback(gt('Ownership an {name} übertragen.', { name: member.displayName }));
                 })
                 .catch((error) => {
                   setFeedback(
                     error instanceof Error
                       ? error.message
-                      : 'Ownership konnte nicht übertragen werden.',
+                      : gt('Ownership konnte nicht übertragen werden.'),
                   );
                 })
                 .finally(() => {
@@ -388,31 +433,35 @@ export default function CircleManagementScreen() {
         ],
       );
     },
-    [circleId, transferOwnership],
+    [circleId, gt, transferOwnership],
   );
 
   const handleRevokeInvite = useCallback(
     (invite: CircleInviteRecord) => {
       Alert.alert(
-        'Einladung zurückziehen?',
-        `Die Einladung für ${invite.invitedEmail} wird sofort ungültig.`,
+        gt('Einladung zurückziehen?'),
+        gt('Die Einladung für {email} wird sofort ungültig.', { email: invite.invitedEmail }),
         [
-          { text: 'Abbrechen', style: 'cancel' },
+          { text: gt('Abbrechen'), style: 'cancel' },
           {
-            text: 'Zurückziehen',
+            text: gt('Zurückziehen'),
             style: 'destructive',
             onPress: () => {
               setBusyInviteId(invite._id);
               setFeedback(null);
               void revokeInvite({ inviteId: invite._id })
                 .then(() => {
-                  setFeedback(`Einladung für ${invite.invitedEmail} wurde zurückgezogen.`);
+                  setFeedback(
+                    gt('Einladung für {email} wurde zurückgezogen.', {
+                      email: invite.invitedEmail,
+                    }),
+                  );
                 })
                 .catch((error) => {
                   setFeedback(
                     error instanceof Error
                       ? error.message
-                      : 'Einladung konnte nicht zurückgezogen werden.',
+                      : gt('Einladung konnte nicht zurückgezogen werden.'),
                   );
                 })
                 .finally(() => {
@@ -423,7 +472,7 @@ export default function CircleManagementScreen() {
         ],
       );
     },
-    [revokeInvite],
+    [gt, revokeInvite],
   );
 
   const handleLeaveCircle = useCallback(() => {
@@ -431,32 +480,102 @@ export default function CircleManagementScreen() {
       return;
     }
 
-    Alert.alert('Circle verlassen?', `Du verlässt "${circle.name}" und verlierst den Zugriff.`, [
-      { text: 'Abbrechen', style: 'cancel' },
-      {
-        text: 'Verlassen',
-        style: 'destructive',
-        onPress: () => {
-          setIsLeaving(true);
-          setFeedback(null);
-          void leaveCircle({ circleId })
-            .then(() => {
-              setActiveCircleId(null);
-              router.replace('/(app)/settings');
-            })
-            .catch((error) => {
-              setFeedback(error instanceof Error ? error.message : 'Circle konnte nicht verlassen werden.');
-            })
-            .finally(() => {
-              setIsLeaving(false);
-            });
+    Alert.alert(
+      gt('Circle verlassen?'),
+      gt('Du verlässt "{name}" und verlierst den Zugriff.', { name: circle.name }),
+      [
+        { text: gt('Abbrechen'), style: 'cancel' },
+        {
+          text: gt('Verlassen'),
+          style: 'destructive',
+          onPress: () => {
+            setIsLeaving(true);
+            setFeedback(null);
+            void leaveCircle({ circleId })
+              .then(() => {
+                setActiveCircleId(null);
+                router.replace('/settings');
+              })
+              .catch((error) => {
+                setFeedback(
+                  error instanceof Error
+                    ? error.message
+                    : gt('Circle konnte nicht verlassen werden.'),
+                );
+              })
+              .finally(() => {
+                setIsLeaving(false);
+              });
+          },
         },
-      },
-    ]);
-  }, [circle?.canLeave, circle?.name, circleId, leaveCircle, router, setActiveCircleId]);
+      ],
+    );
+  }, [circle?.canLeave, circle?.name, circleId, gt, leaveCircle, router, setActiveCircleId]);
+
+  const handleOpenMemory = useCallback(
+    (item: { _id: string }) => {
+      router.push(buildMemoryViewerHref({ memoryId: item._id, circleId }) as never);
+    },
+    [circleId, router],
+  );
+
+  const handleDeleteCircle = useCallback(() => {
+    if (!circleId || !circle?.isOwner || isDeleting) {
+      return;
+    }
+
+    Alert.alert(
+      gt('Circle wirklich löschen?'),
+      gt(
+        '"{name}" wird mit allen Beiträgen, Kommentaren, Reaktionen und Medien dauerhaft gelöscht – auch die Inhalte aller anderen Mitglieder. Dieser Vorgang kann nicht rückgängig gemacht werden.',
+        { name: circle.name },
+      ),
+      [
+        { text: gt('Abbrechen'), style: 'cancel' },
+        {
+          text: gt('Circle löschen'),
+          style: 'destructive',
+          onPress: () => {
+            setIsDeleting(true);
+            setFeedback(null);
+            void deleteCircle({ circleId })
+              .then(() => {
+                setActiveCircleId(null);
+                router.replace('/settings');
+              })
+              .catch((error) => {
+                setFeedback(
+                  error instanceof Error
+                    ? error.message
+                    : gt('Circle konnte nicht gelöscht werden.'),
+                );
+              })
+              .finally(() => {
+                setIsDeleting(false);
+              });
+          },
+        },
+      ],
+    );
+  }, [
+    circle?.isOwner,
+    circle?.name,
+    circleId,
+    deleteCircle,
+    gt,
+    isDeleting,
+    router,
+    setActiveCircleId,
+  ]);
 
   if (!circleId) {
-    return <Redirect href="/(app)/settings" />;
+    return <Redirect href="/settings" />;
+  }
+
+  // The circle disappeared (deleted or membership revoked) while this screen
+  // was open — leave gracefully instead of rendering a half-empty page.
+  if (circle === null) {
+    return <Redirect href="/settings" />;
   }
 
   return (
@@ -466,25 +585,27 @@ export default function CircleManagementScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <Pressable
-            accessibilityLabel="Zurück"
-            onPress={() => {
-              router.back();
-            }}
-            style={({ pressed }) => [
-              styles.backButton,
-              {
-                backgroundColor: theme.surface,
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
-          >
-            <Ionicons name="arrow-back-outline" size={18} color={theme.text} />
-          </Pressable>
-          <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>circle management</Text>
-          <Text style={[styles.title, { color: theme.text }]}>{circle?.name ?? 'Circle'}</Text>
-        </View>
+        <Animated.View entering={enterSection(0)} style={styles.header}>
+          <T>
+            <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>circle management</Text>
+          </T>
+          <View style={styles.titleRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={gt('Zurück')}
+              hitSlop={12}
+              onPress={() => {
+                router.back();
+              }}
+              style={({ pressed }) => [styles.backChevron, { opacity: pressed ? 0.5 : 1 }]}
+            >
+              <Ionicons name="chevron-back" size={26} color={theme.text} />
+            </Pressable>
+            <Text style={[styles.title, { color: theme.text }]} numberOfLines={2}>
+              {circle?.name ?? 'Circle'}
+            </Text>
+          </View>
+        </Animated.View>
 
         {!hasViewer ||
         circle === undefined ||
@@ -498,9 +619,11 @@ export default function CircleManagementScreen() {
           <>
             <Card>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Circle-Details</Text>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Circle-Details</Text>
+                </T>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
-                  {roleLabel(circle.role)}
+                  {m(roleLabel(circle.role))}
                 </Text>
               </View>
 
@@ -508,9 +631,23 @@ export default function CircleManagementScreen() {
                 <Avatar name={circle.name} imageUrl={imageUrl} size="lg" />
                 <View style={styles.heroCopy}>
                   <Text style={[styles.heroTitle, { color: theme.text }]}>{circle.name}</Text>
-                  <Text style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
-                    {circle.memberCount} {circle.memberCount === 1 ? 'Mitglied' : 'Mitglieder'}
-                  </Text>
+                  <T>
+                    <Text style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
+                      <Plural
+                        n={circle.memberCount}
+                        one={
+                          <>
+                            <Num>{circle.memberCount}</Num> Mitglied
+                          </>
+                        }
+                        other={
+                          <>
+                            <Num>{circle.memberCount}</Num> Mitglieder
+                          </>
+                        }
+                      />
+                    </Text>
+                  </T>
                 </View>
               </View>
 
@@ -518,7 +655,7 @@ export default function CircleManagementScreen() {
                 <View style={styles.buttonRow}>
                   <View style={styles.buttonCol}>
                     <Button
-                      label={circle.hasImage ? 'Bild ändern' : 'Bild wählen'}
+                      label={circle.hasImage ? gt('Bild ändern') : gt('Bild wählen')}
                       icon="image-outline"
                       variant="ghost"
                       loading={isImageBusy}
@@ -530,7 +667,7 @@ export default function CircleManagementScreen() {
                   {circle.hasImage ? (
                     <View style={styles.buttonCol}>
                       <Button
-                        label="Entfernen"
+                        label={gt('Entfernen')}
                         icon="trash-outline"
                         variant="danger"
                         loading={isImageBusy}
@@ -546,7 +683,7 @@ export default function CircleManagementScreen() {
                   <TextInput
                     value={name}
                     onChangeText={setName}
-                    placeholder="Name des Circles"
+                    placeholder={gt('Name des Circles')}
                     placeholderTextColor={theme.textTertiary}
                     style={[
                       styles.input,
@@ -560,7 +697,7 @@ export default function CircleManagementScreen() {
                   <TextInput
                     value={description}
                     onChangeText={setDescription}
-                    placeholder="Beschreibung"
+                    placeholder={gt('Beschreibung')}
                     placeholderTextColor={theme.textTertiary}
                     multiline
                     style={[
@@ -574,7 +711,7 @@ export default function CircleManagementScreen() {
                     ]}
                   />
                   <Button
-                    label="Details speichern"
+                    label={gt('Details speichern')}
                     icon="save-outline"
                     loading={isSavingDetails}
                     disabled={!name.trim() || !detailsDirty}
@@ -585,16 +722,76 @@ export default function CircleManagementScreen() {
                 </>
               ) : (
                 <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  {circle.description || 'Keine Beschreibung hinterlegt.'}
+                  {circle.description || gt('Keine Beschreibung hinterlegt.')}
                 </Text>
               )}
             </Card>
 
             <Card>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Web-Link</Text>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Statistiken</Text>
+                </T>
+              </View>
+              <View style={styles.statGrid}>
+                <StatTile value={String(circle.imageCount)} label={gt('Fotos')} />
+                <StatTile value={String(circle.videoCount)} label={gt('Videos')} />
+                <StatTile
+                  value={formatBytes(circle.totalSizeBytes) ?? '0 KB'}
+                  label={gt('Speicher')}
+                />
+                <StatTile value={String(circle.memberCount)} label={gt('Mitglieder')} />
+              </View>
+            </Card>
+
+            <Card>
+              <View style={styles.sectionHeader}>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Medien</Text>
+                </T>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
-                  {circle.canInvite ? 'privat' : 'read only'}
+                  {String(circle.imageCount + circle.videoCount).padStart(2, '0')}
+                </Text>
+              </View>
+              {mediaPage.status === 'LoadingFirstPage' ? (
+                <LoadingBox />
+              ) : mediaPage.results.length === 0 ? (
+                <T>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>
+                    In diesem Circle wurden noch keine Medien geteilt.
+                  </Text>
+                </T>
+              ) : (
+                <View style={styles.mediaGrid}>
+                  {mediaPage.results.map((item) => (
+                    <MemoryTile
+                      key={item._id}
+                      item={item}
+                      size={mediaTileSize}
+                      onOpen={handleOpenMemory}
+                    />
+                  ))}
+                </View>
+              )}
+              {mediaPage.results.length > 0 && mediaPage.status !== 'Exhausted' ? (
+                <Button
+                  label={mediaPage.status === 'LoadingMore' ? gt('Lädt...') : gt('Mehr anzeigen')}
+                  icon="chevron-down-outline"
+                  variant="outline"
+                  loading={mediaPage.status === 'LoadingMore'}
+                  disabled={mediaPage.status === 'LoadingMore'}
+                  onPress={() => mediaPage.loadMore(24)}
+                />
+              ) : null}
+            </Card>
+
+            <Card>
+              <View style={styles.sectionHeader}>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Web-Link</Text>
+                </T>
+                <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
+                  {circle.canInvite ? gt('privat') : gt('read only')}
                 </Text>
               </View>
 
@@ -608,15 +805,19 @@ export default function CircleManagementScreen() {
                   onFeedback={setFeedback}
                 />
               ) : (
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Nur Owner und Admins dürfen öffentliche Web-Links verwalten.
-                </Text>
+                <T>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>
+                    Nur Owner und Admins dürfen öffentliche Web-Links verwalten.
+                  </Text>
+                </T>
               )}
             </Card>
 
             <Card>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Mitglieder</Text>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Mitglieder</Text>
+                </T>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
                   {members.length.toString().padStart(2, '0')}
                 </Text>
@@ -636,9 +837,11 @@ export default function CircleManagementScreen() {
 
             <Card>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Einladen</Text>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Einladen</Text>
+                </T>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
-                  {circle.canInvite ? 'aktiv' : 'read only'}
+                  {circle.canInvite ? gt('aktiv') : gt('read only')}
                 </Text>
               </View>
 
@@ -650,23 +853,29 @@ export default function CircleManagementScreen() {
                   onFeedback={setFeedback}
                 />
               ) : (
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Nur Owner und Admins dürfen neue Personen einladen.
-                </Text>
+                <T>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>
+                    Nur Owner und Admins dürfen neue Personen einladen.
+                  </Text>
+                </T>
               )}
             </Card>
 
             <Card>
               <View style={styles.sectionHeader}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Einladungen</Text>
+                <T>
+                  <Text style={[styles.cardTitle, { color: theme.text }]}>Einladungen</Text>
+                </T>
                 <Text style={[styles.sectionMeta, { color: theme.textTertiary }]}>
                   {invites.length.toString().padStart(2, '0')}
                 </Text>
               </View>
               {invites.length === 0 ? (
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Aktuell gibt es keine offenen Einladungen für diesen Circle.
-                </Text>
+                <T>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>
+                    Aktuell gibt es keine offenen Einladungen für diesen Circle.
+                  </Text>
+                </T>
               ) : (
                 invites.map((invite, index) => (
                   <InviteRow
@@ -681,28 +890,48 @@ export default function CircleManagementScreen() {
             </Card>
 
             <Card>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Circle verlassen</Text>
-              {circle.canLeave ? (
+              {circle.isOwner ? (
                 <>
-                  <Text style={[styles.body, { color: theme.textSecondary }]}>
-                    Du kannst diesen Circle jederzeit verlassen. Der Zugriff auf alle Inhalte endet
-                    sofort.
-                  </Text>
+                  <T>
+                    <Text style={[styles.cardTitle, { color: theme.text }]}>Circle löschen</Text>
+                    <Text style={[styles.body, { color: theme.textSecondary }]}>
+                      Löscht diesen Circle mit allen Beiträgen, Kommentaren und Medien dauerhaft –
+                      auch die Inhalte aller anderen Mitglieder.
+                      <Branch
+                        branch={otherMembers.length === 0 ? 'empty' : 'members'}
+                        empty={''}
+                        members={
+                          ' Wenn der Circle bestehen bleiben soll, übertrage die Ownership stattdessen oben an ein Mitglied.'
+                        }
+                      />
+                    </Text>
+                  </T>
                   <Button
-                    label="Circle verlassen"
+                    label={gt('Circle löschen')}
+                    icon="trash-outline"
+                    variant="danger"
+                    loading={isDeleting}
+                    disabled={isDeleting}
+                    onPress={handleDeleteCircle}
+                  />
+                </>
+              ) : (
+                <>
+                  <T>
+                    <Text style={[styles.cardTitle, { color: theme.text }]}>Circle verlassen</Text>
+                    <Text style={[styles.body, { color: theme.textSecondary }]}>
+                      Du kannst diesen Circle jederzeit verlassen. Der Zugriff auf alle Inhalte
+                      endet sofort.
+                    </Text>
+                  </T>
+                  <Button
+                    label={gt('Circle verlassen')}
                     icon="exit-outline"
                     variant="danger"
                     loading={isLeaving}
                     onPress={handleLeaveCircle}
                   />
                 </>
-              ) : (
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Als Owner musst du Ownership zuerst an ein anderes Mitglied übertragen.
-                  {otherMembers.length === 0
-                    ? ' Aktuell gibt es noch niemanden, an den du den Circle übergeben kannst.'
-                    : ' Wähle dazu oben ein Mitglied aus.'}
-                </Text>
               )}
             </Card>
           </>
@@ -729,6 +958,9 @@ function MemberRow({
   onTransferOwnership: (member: CircleMemberRecord) => void;
 }) {
   const theme = useTheme();
+  const gt = useGT();
+  const m = useMessages();
+  const dateTimeFormat = useDateFormat(DATE_TIME_FORMAT_OPTIONS);
 
   return (
     <View
@@ -747,12 +979,17 @@ function MemberRow({
             {member.displayName}
           </Text>
           {member.isSelf ? (
-            <Text style={[styles.selfBadge, { color: theme.primary }]}>du</Text>
+            <T>
+              <Text style={[styles.selfBadge, { color: theme.primary }]}>du</Text>
+            </T>
           ) : null}
         </View>
-        <Text style={[styles.rowMeta, { color: theme.textSecondary }]} numberOfLines={1}>
-          {roleLabel(member.role)} · seit {formatDateTime(member.joinedAt)}
-        </Text>
+        <T>
+          <Text style={[styles.rowMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+            <Var>{m(roleLabel(member.role))}</Var> · seit{' '}
+            <Var>{formatDateTime(member.joinedAt, dateTimeFormat)}</Var>
+          </Text>
+        </T>
         {member.email ? (
           <Text style={[styles.rowMeta, { color: theme.textTertiary }]} numberOfLines={1}>
             {member.email}
@@ -762,14 +999,14 @@ function MemberRow({
       <View style={styles.toolsColumn}>
         {member.canChangeRole ? (
           <MiniAction
-            label={member.role === 'admin' ? 'Als Mitglied' : 'Als Admin'}
+            label={member.role === 'admin' ? gt('Als Mitglied') : gt('Als Admin')}
             onPress={() => onToggleRole(member)}
             disabled={isBusy}
           />
         ) : null}
         {member.canTransferOwnership ? (
           <MiniAction
-            label="Owner geben"
+            label={gt('Owner geben')}
             variant="outline"
             onPress={() => onTransferOwnership(member)}
             disabled={isBusy}
@@ -777,7 +1014,7 @@ function MemberRow({
         ) : null}
         {member.canRemove ? (
           <MiniAction
-            label="Entfernen"
+            label={gt('Entfernen')}
             variant="danger"
             onPress={() => onRemove(member)}
             disabled={isBusy}
@@ -800,6 +1037,9 @@ function InviteRow({
   onRevoke: (invite: CircleInviteRecord) => void;
 }) {
   const theme = useTheme();
+  const gt = useGT();
+  const m = useMessages();
+  const dateTimeFormat = useDateFormat(DATE_TIME_FORMAT_OPTIONS);
 
   return (
     <View
@@ -820,24 +1060,44 @@ function InviteRow({
       </View>
       <View style={styles.rowCopy}>
         <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>
-          {invite.invitedEmail ?? inviteModeLabel(invite.mode)}
+          {invite.invitedEmail ?? m(inviteModeLabel(invite.mode))}
         </Text>
         <Text style={[styles.rowMeta, { color: theme.textSecondary }]}>
-          {roleLabel(invite.role)} · {inviteStatusLabel(invite.status)}
+          {m(roleLabel(invite.role))} · {m(inviteStatusLabel(invite.status))}
           {invite.acceptedBy ? ` · ${invite.acceptedBy.displayName}` : ''}
         </Text>
-        <Text style={[styles.rowMeta, { color: theme.textTertiary }]} numberOfLines={1}>
-          Von {invite.invitedBy.displayName} · bis {formatDateTime(invite.expiresAt)}
-        </Text>
+        <T>
+          <Text style={[styles.rowMeta, { color: theme.textTertiary }]} numberOfLines={1}>
+            Von <Var>{invite.invitedBy.displayName}</Var> · bis{' '}
+            <Var>{formatDateTime(invite.expiresAt, dateTimeFormat)}</Var>
+          </Text>
+        </T>
       </View>
       {invite.canRevoke ? (
         <MiniAction
-          label="Zurückziehen"
+          label={gt('Zurückziehen')}
           variant="danger"
           onPress={() => onRevoke(invite)}
           disabled={isBusy}
         />
       ) : null}
+    </View>
+  );
+}
+
+function StatTile({ value, label }: { value: string; label: string }) {
+  const theme = useTheme();
+
+  return (
+    <View style={styles.statTile}>
+      <Text
+        style={[styles.statValue, { color: theme.text }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+      >
+        {value}
+      </Text>
+      <Text style={[styles.statLabel, { color: theme.textTertiary }]}>{label}</Text>
     </View>
   );
 }
@@ -890,13 +1150,15 @@ const styles = StyleSheet.create({
   header: {
     gap: Spacing.xs,
   },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.md,
+  titleRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: Spacing.xs,
+    marginLeft: -6,
+  },
+  backChevron: {
+    height: 38,
     justifyContent: 'center',
-    marginBottom: Spacing.sm,
   },
   eyebrow: {
     fontFamily: Fonts.mono,
@@ -905,6 +1167,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
+    flex: 1,
     fontFamily: Fonts.display,
     fontSize: FontSize['2xl'],
     letterSpacing: -0.6,
@@ -1015,5 +1278,32 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  statGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  statTile: {
+    width: '50%',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.md,
+  },
+  statValue: {
+    fontFamily: Fonts.display,
+    fontSize: FontSize.xl,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+  },
+  statLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  mediaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.xs,
   },
 });

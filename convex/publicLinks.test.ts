@@ -4,25 +4,27 @@ import { convexTest, type TestConvex } from 'convex-test';
 import { makeFunctionReference, type UserIdentity } from 'convex/server';
 import { describe, expect, test, vi } from 'vitest';
 
-const autumnMocks = vi.hoisted(() => ({
-  check: vi.fn(),
-  track: vi.fn(),
-  customersGet: vi.fn(),
-  billingPortal: vi.fn(),
+const rcMocks = vi.hoisted(() => ({
+  hasEntitlement: vi.fn(),
+  getActiveSubscriptions: vi.fn(),
+  getCustomer: vi.fn(),
 }));
 
-vi.mock('autumn-js', () => ({
-  Autumn: vi.fn(function AutumnMock() {
-    return {
-      check: autumnMocks.check,
-      track: autumnMocks.track,
-      customers: {
-        get: autumnMocks.customersGet,
-        billingPortal: autumnMocks.billingPortal,
-      },
-    };
-  }),
-}));
+vi.mock('convex-revenuecat', async () => {
+  const { httpActionGeneric } = await import('convex/server');
+
+  return {
+    RevenueCat: vi.fn(function RevenueCatMock() {
+      return {
+        hasEntitlement: rcMocks.hasEntitlement,
+        getActiveSubscriptions: rcMocks.getActiveSubscriptions,
+        getCustomer: rcMocks.getCustomer,
+        httpHandler: () =>
+          httpActionGeneric(async () => new Response(null, { status: 501 })),
+      };
+    }),
+  };
+});
 
 import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
@@ -76,11 +78,15 @@ function createTestDb() {
   return convexTest(schema, modules);
 }
 
-function workosIdentity(email: string, name = email): Partial<UserIdentity> {
+const CLERK_TEST_ISSUER = 'https://test.clerk.accounts.dev';
+
+function clerkIdentity(email: string, name = email): Partial<UserIdentity> {
+  const subject = `user_${email.replace(/[^a-z0-9]+/gi, '_')}`;
+
   return {
-    issuer: 'https://api.workos.com/user_management/client_test',
-    subject: `user_${email.replace(/[^a-z0-9]+/gi, '_')}`,
-    tokenIdentifier: `workos|${email.toLowerCase()}`,
+    issuer: CLERK_TEST_ISSUER,
+    subject,
+    tokenIdentifier: `${CLERK_TEST_ISSUER}|${subject}`,
     email,
     name,
   };
@@ -94,7 +100,7 @@ async function upsertViewer(
   user: TestUser;
   viewer: Doc<'users'>;
 }> {
-  const user = t.withIdentity(workosIdentity(email, displayName));
+  const user = t.withIdentity(clerkIdentity(email, displayName));
   const result = await user.mutation(api.users.upsertFromIdentity, {
     email,
     displayName,

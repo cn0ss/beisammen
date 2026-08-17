@@ -1,0 +1,1073 @@
+{
+  "3907dcd3c24571f9": "Verbindung wird vorbereitet...",
+  "a27b9633b3003ffc": "Instanz wird geprüft...",
+  "08084b3c27d49cec": "Instanz wird gewechselt...",
+  "159ccebcaa61cf15": "Dieser Link enthält weder eine Instanz noch einen Invite-Token.",
+  "6ec405d1b5e604a7": "Dieser Link konnte nicht verarbeitet werden.",
+  "46fb35701f72d8f4": "Zur App",
+  "d95ecb4808a5186b": "Zur Anmeldung",
+  "edf8457196665821": {
+    "t": "Text",
+    "i": 1,
+    "c": "Invite-Link konnte nicht geöffnet werden."
+  },
+  "2ecf88ef9e8e4259": "Home",
+  "42eca0dce9b76b14": "Erinnerungen",
+  "cbcaa6e85dfe2e72": "Aktivität",
+  "0a75e464d833bca8": "Settings",
+  "9c2d2a1d59d74d67": "{displayText} Beitrag öffnen",
+  "91c55a84e7182385": "Aktivität konnte nicht gelesen markiert werden.",
+  "bf76d5856ed23850": "Aktivität konnte nicht geöffnet werden.",
+  "35f8ebb715bc1157": "Keine Aktivität",
+  "d0ae7dd55e56ec02": "Sobald andere in deinen Circles teilen, kommentieren oder reagieren, erscheint es hier.",
+  "9f1587052393a7ba": "Lädt...",
+  "edc8697a0dbf37b9": "Mehr Aktivität",
+  "498491e678458df8": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Aktivität"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Neue Kommentare, Reaktionen und Beiträge aus deinen Circles."
+    }
+  ],
+  "08f7f816df797140": "Entwurf konnte nicht aktualisiert werden.",
+  "f572dcdc1700aa53": "Beitrag konnte nicht gelöscht werden.",
+  "fff3ee04d7ec41c5": "Entwurf löschen?",
+  "8dc911190e3a4049": "Der Entwurf und alle hochgeladenen Medien werden dauerhaft entfernt.",
+  "ed7c796784489b63": "Abbrechen",
+  "dd6fab30e25e0a8a": "Löschen",
+  "fa086722dce737e5": "Entwurf wurde gelöscht.",
+  "577b45c2e72be41e": "Beitrag löschen?",
+  "7cd54b4af08a62d4": "Der Beitrag und alle Medien werden dauerhaft gelöscht.",
+  "a13a44f97ded489b": "Beitrag wurde gelöscht.",
+  "57180256b5f517fd": "Medium entfernen?",
+  "0f60b94afc3f71d2": "Die Datei wird aus dem Entwurf und aus dem Storage gelöscht.",
+  "022a220bff2fd4a6": "Entfernen",
+  "5a533d77696e1a97": "Medium wurde entfernt.",
+  "eb78c37badfb0fbd": "Medium konnte nicht entfernt werden.",
+  "1e7b9dfaac59831e": "Unterbrochener Upload wurde entfernt.",
+  "fcdb3e1a77134c84": "Unterbrochener Upload konnte nicht entfernt werden.",
+  "6276fdce651fa4fa": "Beitrag wurde veröffentlicht.",
+  "a258e0bf86717aee": "Beitrag konnte nicht veröffentlicht werden.",
+  "5e0a042031bf8aa2": "Bitte wähle zuerst einen Circle aus.",
+  "22755e52159dac76": "Upload-Bereitschaft wird noch geprüft. Versuche es gleich noch einmal.",
+  "1cff31c013e58048": "Weitere Circles",
+  "83d1f8c593ce5011": "Erstelle deinen ersten Circle in den Einstellungen, um loszulegen.",
+  "e648b842b980d86c": "Wähle einen Circle aus, um den Feed zu sehen.",
+  "c2e04df58ee7d09e": "Noch keine Beiträge",
+  "4978f4480e7ccce9": "Teile dein erstes Foto oder Video mit {circleName}.",
+  "96b07b80474d1417": "Mehr laden",
+  "48ca2aa432e72acd": {
+    "t": "Text",
+    "i": 1,
+    "c": "Deine Circles"
+  },
+  "5f98b54b4ee842c6": {
+    "t": "Text",
+    "i": 1,
+    "c": "Aktuelles aus"
+  },
+  "6747286d3eca0e4e": "Einladung konnte nicht angenommen werden.",
+  "1ef59bfe626a5ba4": "Zurück",
+  "bcb3266836fa2e13": "Schließen",
+  "c184857fa604bccb": "Dieser offene Link kann einmalig von einem neuen Mitglied angenommen werden.",
+  "815a82cf6ca95e80": "Diese Einladung ist persönlich an die angegebene E-Mail gebunden.",
+  "376fdc6e590c6d48": "Typ",
+  "889ac4c59ce34610": "Eingeladen",
+  "9adfd1f931a92035": "Aktives Konto",
+  "6f26d8c762058086": "Keine E-Mail im Profil",
+  "faa142b2115eb0a1": "Rolle",
+  "c7220eace6986fea": "Gültig bis",
+  "fc95021125c49bf9": "Angenommen",
+  "9a0fc7365486d4ce": "Einladung annehmen",
+  "b0e92b5f17293559": "Später",
+  "ab8daa10ce5b9b2f": "Melde dich mit {email} an, um diesen Invite anzunehmen.",
+  "66e4c1b247b132f4": "Du bist bereits Mitglied in diesem Circle.",
+  "3418fb9f9de0cbc3": "Dieser Einmal-Link kann nicht erneut verwendet werden.",
+  "ed0b8bf96b8d16ef": "Dieser Invite kann nicht mehr angenommen werden.",
+  "123568a1106c7b47": "Zurück zur App",
+  "e9b0d5b8381d64a3": {
+    "t": "Text",
+    "i": 1,
+    "c": "Circle-Einladung"
+  },
+  "98c279f9d1aacee7": {
+    "t": "Text",
+    "i": 1,
+    "c": "Der Invite-Link ist ungültig oder gehört nicht mehr zu einem bestehenden Circle."
+  },
+  "7b95249e9a150cf3": {
+    "t": "Text",
+    "i": 1,
+    "c": "Wenn du fortfährst, wirst du sofort zu diesem Circle hinzugefügt."
+  },
+  "f4c25635ff520fe8": "Gib deinem Circle einen Namen.",
+  "6d96caaa6fea68e0": "Circle erstellt.",
+  "5a65f1998da194a3": "Circle konnte nicht erstellt werden.",
+  "c23ac781bfe96349": "Erstelle zuerst einen Circle.",
+  "262e41be59156dec": "Schön, dass du da bist",
+  "75b6b6dbbe3dee6e": "Ein Circle ist deine private Gruppe. Erstelle einen eigenen oder tritt einem bestehenden bei.",
+  "3187d5ea53938423": "Dein erster Circle",
+  "fb50163bfa307007": "Starte mit einer festen Gruppe und teile danach Fotos oder Videos nur mit diesen Menschen.",
+  "34e479e1e916fae4": "Circle beitreten",
+  "321261bd6bf9033e": "Füge den Einladungslink oder Code ein, den du bekommen hast.",
+  "824cae8733a9d54f": "Neuen Circle erstellen",
+  "b8ce283f0a846927": "Für deine Familie, Partner oder engen Freundeskreis. Du lädst danach alle ein.",
+  "9492118ac6c3f145": "Mit Einladung beitreten",
+  "3ec23e8b7a45b760": "Du hast einen Einladungslink oder Code bekommen? Tritt dem Circle direkt bei.",
+  "dbcc750fae869a15": "Benennen",
+  "3e528ae74b187feb": "Einladen",
+  "451c997ff0226aa7": "Teilen",
+  "f680e1a1ef7f36a3": "Circle-Name",
+  "9123c51354900e89": "Familie, Urlaub, Partner",
+  "75f87056d4518c0d": "Beschreibung (optional)",
+  "ca29ff250fd4bb95": "Circle erstellt",
+  "6c90dfe0858e626a": "Erstellt...",
+  "ef5cece58c7f8094": "Circle erstellen",
+  "e4f61f2b3d31e88c": "Zu Home",
+  "83afb6af9aae8afc": "Einladungslink oder Code",
+  "83df91cca14c72b2": "Tritt bei...",
+  "e381376035d47da4": "„{name}\" beitreten",
+  "d04f67bd201631a3": {
+    "t": "Text",
+    "i": 1,
+    "c": "Willkommen"
+  },
+  "a42d2a31523c9f3f": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Circle benennen"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Der Name sollte die Gruppe klar wiedererkennen lassen."
+    }
+  ],
+  "7468f52ca5b76650": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Menschen einladen"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "E-Mail bleibt privat voreingestellt. Offene Links sind für schnelle Übergaben gedacht."
+    }
+  ],
+  "f461ed89f81efff8": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Bereit zum Teilen"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Dein Circle ist aktiv. Auf Home kannst du den ersten Beitrag vorbereiten."
+    }
+  ],
+  "902599521465f33e": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Einladung einfügen"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Der Link sieht so aus: beisammen://connect?invite=…"
+    }
+  ],
+  "0723615833246645": {
+    "t": "Text",
+    "i": 1,
+    "c": "Das sieht nicht wie ein Einladungslink oder Code aus."
+  },
+  "23f59bef7720cc4f": {
+    "t": "Text",
+    "i": 1,
+    "c": "Prüfe, ob der Link vollständig ist, oder bitte um eine neue Einladung."
+  },
+  "5ff12a4f7302ea8f": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": [
+        {
+          "i": 2,
+          "k": "_gt_value_2",
+          "v": "v"
+        },
+        " · Rolle:",
+        " ",
+        {
+          "i": 3,
+          "k": "_gt_value_3",
+          "v": "v"
+        }
+      ]
+    },
+    {
+      "t": "Text",
+      "i": 4,
+      "c": [
+        "Gültig bis ",
+        {
+          "i": 5,
+          "k": "_gt_value_5",
+          "v": "v"
+        }
+      ]
+    }
+  ],
+  "22f87ebcb79a3bfe": "{singular} „{name}\" wurde angelegt.",
+  "4285d656b7847b1f": "Dein Profil ist noch nicht geladen.",
+  "2bfc087b315be573": "Ohne Mediathek-Zugriff kann kein Bild ausgewählt werden.",
+  "941956f70d9e2126": "Profilbild aktualisiert.",
+  "95f95207c00e8f6f": "Profilbild konnte nicht gesetzt werden.",
+  "0a72656d9da0a978": "Profilbild entfernen?",
+  "0d493a71491198e6": "Dein eigenes Profilbild wird entfernt.",
+  "5ee08db78e0dc180": "Profilbild entfernt.",
+  "703783411a1e299b": "Profilbild konnte nicht entfernt werden.",
+  "8077d62464ff4417": "Du kannst dieses Circle-Bild nicht ändern.",
+  "89b5d607c39bd98f": "Bild für „{name}\" aktualisiert.",
+  "f87b57fd7ab0a057": "Circle-Bild konnte nicht gesetzt werden.",
+  "ceec6c8ca514eaae": "Circle-Bild entfernen?",
+  "11019848e3baae03": "Das Bild von „{name}\" wird entfernt.",
+  "9f2a25ce3b3f5d9f": "Bild für „{name}\" entfernt.",
+  "887fbba666ea8701": "Circle-Bild konnte nicht entfernt werden.",
+  "d7de93422dfb236e": "Speicherprüfung fehlgeschlagen.",
+  "b99588eac1c6d04f": "Diagnose",
+  "69cf13fea6bb4872": "Leeren",
+  "c33072d06750b5fc": "Diagnoseeinträge geleert.",
+  "b6e5b31255e011c5": "OK",
+  "7c1db1c6ed01acc8": "In-App-Käufe sind in diesem Build nicht konfiguriert.",
+  "7a566674abff740a": "Abrechnung konnte nicht geöffnet werden.",
+  "254f3675b9dae468": "Dieser Tarif ist derzeit nicht im Store verfügbar.",
+  "0e1799c39336f1f8": "Kauf abgeschlossen. Dein Tarif ist aktiv.",
+  "b443be02b17a24f7": "Kauf abgeschlossen. Dein Tarif wird gleich aktualisiert.",
+  "8b0dad52299dd1bf": "Kauf konnte nicht abgeschlossen werden.",
+  "b98c76c2536601f8": "Käufe wurden wiederhergestellt.",
+  "406f47799b1c5c71": "Für dieses Store-Konto wurden keine aktiven Käufe gefunden.",
+  "6f60f007adcebc7e": "Käufe konnten nicht wiederhergestellt werden.",
+  "c3fe440d6e3952f4": "Push-Mitteilung aktiviert.",
+  "3b1c42fe5aa47b28": "Push-Mitteilung deaktiviert.",
+  "aad0c7cb3140ab7e": "Push-Mitteilung konnte nicht geändert werden.",
+  "43204a56109daccd": "Angemeldet",
+  "2e9ed25b9f82e012": "Weitere Circles laden",
+  "ca08abafff48e25b": "Speicher",
+  "838b1fed193e5f5b": "Diagnose anzeigen",
+  "0f9349925763fcbc": "Tarif",
+  "a4a5867af2a92527": "Benachrichtigungen",
+  "b5a67083f398f43d": "Konto",
+  "3301a39f0a035c0e": {
+    "t": "Text",
+    "i": 1,
+    "c": "beisammen · Deine Erinnerungen, dein Speicher"
+  },
+  "8cffa7e07e7a0961": "Anmeldung fehlgeschlagen.",
+  "82bcd716deaf884f": "Gib die Backend-Adresse deiner Instanz ein.",
+  "8ad13c6df3df248d": "Verbunden mit {name}.",
+  "1906256b127b760f": "Instanz konnte nicht geprüft werden.",
+  "31e70727361b4703": "Standard-Instanz konnte nicht aktiviert werden.",
+  "72435c6516c0fc27": "E-Mail-Adresse und Passwort werden benötigt.",
+  "f4709ca74a126710": "Diese Anmeldung erfordert weitere Schritte. Bitte versuche es erneut.",
+  "f2255a27ff7dd8cd": "Gib den Code aus deiner E-Mail ein.",
+  "d033b73f17ce8b6a": "Bestätigung unvollständig. Bitte versuche es erneut.",
+  "90e603698a180b14": "Melde dich an, um deine Circle-Einladung zu öffnen.",
+  "9ab1896932c2e6b8": "Familien- und Partner-Medien\nprivat und selbstbestimmt teilen.",
+  "999d4bbbb458bd29": "Bestätigungscode",
+  "b16a848f2300b653": "Wird geprüft...",
+  "b9c62a802960e14e": "Code bestätigen",
+  "4e0f8855bb4745ec": "E-Mail-Adresse",
+  "af0c8525da17e580": "Passwort",
+  "5cbfa25cdac6844b": "Instanz wird geladen...",
+  "7b50bff7c20fe298": "Anmeldung läuft...",
+  "ee84b6f5784e116b": "Anmelden und Einladung öffnen",
+  "a6d2d6b25d4b2153": "Anmelden",
+  "6856cedc2dd5726d": "Konto erstellen",
+  "11c879d94ceab995": "Einladung liegt bereit · {name}",
+  "8156a75c016e20a0": "Verbunden mit {name}",
+  "a73fb7a8c649654e": "Backend-Adresse der Instanz",
+  "a9733d094ccc3d9b": "Prüfen",
+  "c3bbd7411a2dc811": "Cloud",
+  "96752cdadfd1e743": {
+    "t": "Text",
+    "i": 1,
+    "c": "E-Mail bestätigen"
+  },
+  "8f599218560d4e19": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Wir haben dir einen Code an",
+      " ",
+      {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      " ",
+      "geschickt."
+    ]
+  },
+  "c6a430a38154b360": {
+    "t": "Text",
+    "i": 1,
+    "c": "Zurück"
+  },
+  "deaed52fa88e23fb": {
+    "t": "Text",
+    "i": 1,
+    "c": "oder"
+  },
+  "c76767bfdfbf6379": [
+    "Noch kein Konto?",
+    " ",
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Registrieren"
+    }
+  ],
+  "1feaf77de5302373": [
+    "Schon ein Konto?",
+    " ",
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Anmelden"
+    }
+  ],
+  "711ceccd93a94f22": {
+    "t": "Text",
+    "i": 1,
+    "c": "Backend vor der Anmeldung"
+  },
+  "b4d04073b61ae79b": {
+    "t": "Text",
+    "i": 1,
+    "c": "Login läuft über die aktive Instanz."
+  },
+  "843a5db118c6c5b2": {
+    "t": "Text",
+    "i": 1,
+    "c": "Deine Erinnerungen, dein Speicher"
+  },
+  "d6c3090020577b0f": "Über Google anmelden",
+  "856d0442ce69ae8c": "Mit Apple anmelden",
+  "8f286c593f75cbd1": {
+    "t": "Text",
+    "i": 1,
+    "c": "Über Google anmelden"
+  },
+  "a4f02385229c8976": {
+    "t": "Text",
+    "i": 1,
+    "c": "Mit Apple anmelden"
+  },
+  "b83d53d4e1aefbbd": "{text} Beitrag öffnen",
+  "d9c740b3c9c694f8": {
+    "t": "Text",
+    "i": 1,
+    "c": "Aktivität"
+  },
+  "641a9be9baaf4442": {
+    "t": "Text",
+    "i": 1,
+    "c": "Noch keine neuen Aktivitäten."
+  },
+  "87b2efbd27d6fe33": "Circle {name}",
+  "4cb9a01453ccea45": "Entwurf bearbeiten",
+  "c6f15e386da94501": "Neuen Beitrag erstellen",
+  "9cf1570386333a6e": "Medien werden vorbereitet...",
+  "96b477ca32caf9fd": "Fotos oder Videos auswählen",
+  "96ad945bae9c7292": "Schreib etwas dazu, wenn du magst",
+  "8fb305a8f30362fe": "Weitere Fotos oder Videos hinzufügen",
+  "f4a7c927e9402205": "Wird veröffentlicht...",
+  "e933c347c255043c": "Veröffentlichen",
+  "9e47cd3ec4fdd01b": "Wird komprimiert",
+  "da9c2664af71ca7b": "Wird hochgeladen",
+  "0064142936cc373b": "Fertig",
+  "264fa583e61b7d34": "Fehlgeschlagen",
+  "1e8626cdba7b19c6": "Wartet",
+  "5611e8755552131e": {
+    "t": "Text",
+    "i": 1,
+    "c": "Fotos und Videos bleiben zuerst privat im Entwurf. Veröffentlicht wird erst, wenn du bereit bist."
+  },
+  "72be0576c0aae4bb": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Privater Entwurf"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Nur du siehst diesen Entwurf, bis du ihn veröffentlichst."
+    }
+  ],
+  "df31260bd3c786c1": {
+    "t": "Text",
+    "i": 1,
+    "c": "Der Entwurf wird vorbereitet. Du kannst gleich Text ergänzen."
+  },
+  "844e3edd13caf5c3": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Verbunden mit ",
+      {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    ]
+  },
+  "0a893517bd1fdd36": "Name des Circles",
+  "013d3e81a25c44b8": "Erstelle...",
+  "fe5ee5be5a8b9954": "Circle anlegen",
+  "cfcfa2dbd51f7308": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "neuer circle"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Benenne zuerst die Menschen."
+    },
+    {
+      "t": "Text",
+      "i": 3,
+      "c": "Erstelle einen privaten Raum für genau eine Gruppe. Keine Suche, kein Publikum, nur eingeladene Personen."
+    }
+  ],
+  "4c5833d908d513a4": "{count, plural, one {# Person} other {# Personen}}",
+  "ee33583564c9af33": "Tarif wählen",
+  "a9dc1462b9cad2cc": "Schreib etwas dazu...",
+  "7e1a6e26bbcbaaed": "{count, plural, one {# Medium} other {# Medien}}",
+  "1a998c721ad22bc8": "Wird vorbereitet...",
+  "fea732bc29b44969": "Medien hinzufügen",
+  "c24a9dcf6416c43a": "Upload erneut versuchen",
+  "b34ae61da9b35a7b": "Upload entfernen",
+  "592fb7c3787edf52": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Neuer ",
+      {
+        "t": "Text",
+        "i": 2,
+        "c": "Beitrag"
+      }
+    ]
+  },
+  "4a66e26275dbcb45": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "An ·",
+      " ",
+      {
+        "t": "Text",
+        "i": 2,
+        "c": {
+          "i": 3,
+          "k": "_gt_value_3",
+          "v": "v"
+        }
+      }
+    ]
+  },
+  "d51ab707b900998d": {
+    "t": "Text",
+    "i": 1,
+    "c": "Nur dieser Circle"
+  },
+  "b0ead806bb73687d": "Beitrag löschen",
+  "04d5933620647b02": {
+    "t": "Text",
+    "i": 1,
+    "c": "Video"
+  },
+  "3840055deac2caea": "Einstellungen öffnen",
+  "04a3ef4dbcadcc28": {
+    "t": "Text",
+    "i": 1,
+    "c": "Geteilte Momente, für die Menschen, die zählen."
+  },
+  "51068d23e23795ed": "Gib eine E-Mail-Adresse ein oder wähle einen offenen Einmal-Link.",
+  "f433f628ef68f854": "Einladung erstellt.",
+  "00acaa4314845a2a": "Einladung konnte nicht erstellt werden.",
+  "f010bcf18a650ca3": "Invite-Link konnte nicht geteilt werden.",
+  "dda4012fcd21bae4": "E-Mail",
+  "ee90eeb61c5def86": "Offen",
+  "1681365fb984c8c9": "Mitglied",
+  "edf44df5be41e0a0": "Admin",
+  "35a43a3525780782": "Invite-Link erstellen",
+  "854115a6c88ac473": "Erneut teilen",
+  "5351632673dbd34b": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Einladen"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Link erstellen"
+    },
+    {
+      "t": "Text",
+      "i": 3,
+      "c": "Persönliche Links bleiben an eine E-Mail gebunden. Offene Links sind einmalig nutzbar."
+    }
+  ],
+  "76e6c0d3c2808561": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "letzter link"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": [
+        {
+          "i": 3,
+          "k": "_gt_value_3",
+          "v": "v"
+        },
+        " ·",
+        " ",
+        {
+          "i": 4,
+          "k": "_gt_value_4",
+          "v": "v"
+        }
+      ]
+    }
+  ],
+  "77c61ac22770f619": "Video",
+  "eb287187ffe94186": "Bild",
+  "ea96a343057dd499": "Bild ändern",
+  "43b21981e1c2b2ec": "Bild wählen",
+  "2416e6e5fb5efe36": "Server",
+  "500c6839cd8f308d": "Adresse",
+  "56ac51542ec50d1b": "Sitzung erneuern",
+  "bc16a52bdd93d554": "Abmelden",
+  "544e38c798e87fff": {
+    "t": "Text",
+    "i": 1,
+    "c": "Eigenes Profilbild mit Fallback auf dein Login-Bild."
+  },
+  "5b36c969a22e5c04": "Abrechnung",
+  "1072fb37a1e98424": "Aus",
+  "c8fa587fc0be1938": "Limits",
+  "4255f3d1ad0761e3": "Dein Tarif gilt für eigene Circles.",
+  "31f97ed39fa3a20d": "Abrechnung nicht konfiguriert",
+  "87ac5c823f33129a": "Kein aktiver Tarif",
+  "f29843fa758c475f": "Gilt für",
+  "edcc808770f8f8e0": "Eigene Circles",
+  "6fcbe82a238813e8": "Uploads/Monat",
+  "29a88762939560f7": "{used} von {total}",
+  "99cfce7ed750ebb8": "Abo verwalten",
+  "5ea094ed4519f04c": "Käufe wiederherstellen",
+  "a5aee4599844cbf5": "Aktiv",
+  "bf9ed68001ed9c6f": "Wählen",
+  "6bcad77b8c858701": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Self-hosted"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Keine Zahlungen. Keine App-Limits."
+    }
+  ],
+  "a742ef44c5de8d03": {
+    "t": "Text",
+    "i": 1,
+    "c": "Cloud"
+  },
+  "7561ba7749d64952": "Verwalten",
+  "a23e0c096a79c70c": "Ansehen",
+  "0398c05d2951174d": "Bild entfernen",
+  "243ce9a19a8e9423": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      {
+        "i": 2,
+        "k": "_gt_n_2",
+        "v": "n"
+      },
+      " Mitglieder · ",
+      {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    ]
+  },
+  "0034240d1e16ebf7": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Push-Mitteilungen"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Wähle, welche Aktivität dich außerhalb der App erreichen darf."
+    }
+  ],
+  "9ca1900419b0c005": "Fotos",
+  "2f2f6f3f4aa92ee8": "Videos",
+  "b8976b12bbc2c155": "Circles",
+  "06002df497e9c37a": "Prüft...",
+  "058a4fb8ba5fab49": "Speicher prüfen",
+  "d2d1d02d17168334": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Speicherwerte zeigen die zuletzt geladenen ",
+      {
+        "i": 2,
+        "k": "_gt_n_2",
+        "v": "n"
+      },
+      " Circles."
+    ]
+  },
+  "9509b30d7c9feff8": "Circle",
+  "d28474a413c7d7a1": "Deine Circles",
+  "076cc7bb8151df3f": "Noch kein Circle vorhanden.",
+  "6659cec4933ade1b": "Einstellungen",
+  "64f896014cab2cc7": "Kommentar entfernen",
+  "992600bd57cb593e": "Kommentar konnte nicht gespeichert werden.",
+  "2d0dbf3fdbb7274d": "Reaktion konnte nicht gespeichert werden.",
+  "8ae1bde08b9b2949": "Reaktion konnte nicht entfernt werden.",
+  "b1d0e8f3e40a2cdf": "Kommentar entfernen?",
+  "a39fe4b79ed02b9e": "Dieser Kommentar wird für alle Mitglieder entfernt.",
+  "a5fbc7f165eb5977": "Kommentar konnte nicht entfernt werden.",
+  "eecc18947c25104f": "Beitrag als Gesprächsfokus wählen",
+  "ecb5c533df14ffab": "Beitrag",
+  "e2d70a54361f4211": "Aktuelles Medium als Gesprächsfokus wählen",
+  "b2ac3183408cf717": "Medium",
+  "00ab23e09ee3c31e": "Reaktion",
+  "684380594da8edbc": "Ändern",
+  "651087c489d10c11": "Reagieren",
+  "63e20998e0721765": "Reaktion entfernen",
+  "b59dd2fc6e3bddcf": "Kommentar schreiben",
+  "05468e81ccf67a7e": "Antwort schreiben",
+  "56d4f4a8941a1733": "Senden",
+  "7b81feb911321ffb": {
+    "t": "Text",
+    "i": 1,
+    "c": "Entfernen"
+  },
+  "51edd9a77b665785": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Gespräch"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": [
+        {
+          "i": 3,
+          "k": "_gt_n_3",
+          "v": "n"
+        },
+        " Kommentare ·",
+        " ",
+        {
+          "i": 4,
+          "k": "_gt_n_4",
+          "v": "n"
+        },
+        " Reaktionen"
+      ]
+    }
+  ],
+  "ff93453d487f9b98": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Fokus: ",
+      {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    ]
+  },
+  "539b094beebb4497": {
+    "t": "Text",
+    "i": 1,
+    "c": "Noch keine Reaktionen."
+  },
+  "24fff1e0c205e251": {
+    "t": "Text",
+    "i": 1,
+    "c": "Noch keine Kommentare in diesem Fokus."
+  },
+  "8bb35279944e8230": "Hier kannst du die neuen Momente aus \"{circleName}\" ansehen:\n{shareUrl}",
+  "48135fc1caa3a4c4": "Web-Link erstellt.",
+  "7cfda5da40f32577": "Web-Link konnte nicht erstellt werden.",
+  "244331424dfc7423": "Web-Link konnte nicht geteilt werden.",
+  "2b11518d3284f067": "Web-Link zurückgezogen.",
+  "b6646cbc6a0cd0a0": "Web-Link konnte nicht zurückgezogen werden.",
+  "18e6782e3ec3f8c6": "Aktiv bis {date}",
+  "ad4b7ef1a7d8af0a": "Kein aktiver Web-Link",
+  "8b4be72e6ca864c4": "Erstellt von {name}",
+  "6bc9130025df3eaa": "Beim Erstellen werden ältere aktive Web-Links ersetzt.",
+  "4c2aa5611b23ce38": "Neuen Link erstellen",
+  "ba4d1854cc12cb9f": "Web-Link erstellen",
+  "c15872aa1b923fd3": "Zurückziehen",
+  "bda5634b9ca02274": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Öffentliche Website"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Link für Familie"
+    },
+    {
+      "t": "Text",
+      "i": 3,
+      "c": "Der Link zeigt veröffentlichte Beiträge ohne App-Installation. Nur Personen mit dem Link können ihn öffnen."
+    }
+  ],
+  "ebd9c11ec8977790": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "letzter web-link"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": [
+        "gültig bis ",
+        {
+          "i": 3,
+          "k": "_gt_value_3",
+          "v": "v"
+        }
+      ]
+    }
+  ],
+  "c91117939a923aeb": "Aktuelles Medium",
+  "b19100f7c4e50f8e": "Offener Einmal-Link",
+  "62ca70a806ebab11": "Persönlicher E-Mail-Link",
+  "f4ee5116b0e85d38": "Komm in meinen Circle \"{circleName}\": {inviteLink}\n\nDieser Link ist einmalig nutzbar.",
+  "12315ddc0a51893d": "Komm in meinen Circle \"{circleName}\": {inviteLink}\n\nDieser persönliche Link ist nur für die eingeladene E-Mail gedacht.",
+  "c5983e4a7f986013": "Einladung wird geladen",
+  "dec4c139b10add43": "Einladung nicht gefunden",
+  "6e9cc51ada5c84d7": "Du bist schon Mitglied",
+  "472ab18ca1f65251": "Einladung wurde bereits verwendet",
+  "489c1a99267bcb19": "Einladung ist abgelaufen",
+  "d88ff6038e6bc865": "Einladung wurde zurückgezogen",
+  "f4106b17dd37d4f8": "E-Mail passt nicht",
+  "095990862063bf89": "Einladung kann nicht angenommen werden",
+  "f41d9e9beaf16aef": "Ort ergänzen?",
+  "f019f1eee605f644": "Einige Medien enthalten keine GPS-Daten. Möchtest du einmalig deinen aktuellen Standort nutzen, um diese Medien mit einem Ort zu ergänzen?",
+  "94dbbeb2b609c24d": "Nicht jetzt",
+  "7793cf561b86a2b6": "Ort ergänzen",
+  "7cf5c09789663c49": "Abrechnung nicht erreichbar",
+  "929d56ba4324ea6f": "Die Upload-Berechtigung konnte gerade nicht geprüft werden. Versuche es gleich noch einmal.",
+  "9a4379d4129a5cae": "Abrechnung nicht eingerichtet",
+  "1be9eb4457287738": "Cloud-Abrechnung ist für diese Instanz noch nicht eingerichtet.",
+  "32fde405fdcbadfd": "Die Cloud-Abrechnung dieser Instanz muss eingerichtet werden, bevor Mitglieder Medien hochladen.",
+  "f3ed70b7986ef70c": "Monatslimit erreicht",
+  "58d2cd2c6a9fa82b": "Dein Upload-Kontingent für diesen Monat ist aufgebraucht. Wechsle den Tarif oder warte auf den nächsten Monat.",
+  "725e90b456e5bc36": "Das Upload-Kontingent des Circle-Owners ist für diesen Monat aufgebraucht.",
+  "2c37d74d668deea8": "Tarif erforderlich",
+  "8c0c0d9aa942415c": "Wähle einen aktiven Cloud-Tarif, bevor du Medien hochlädst.",
+  "dd7924aebf8bd306": "Upload pausiert",
+  "3b4028f81220da85": "Der Circle-Owner muss die Cloud-Abrechnung aktivieren, bevor Mitglieder Medien hochladen.",
+  "16e06311ba0e41ca": "Ohne Mediathek-Zugriff können keine Fotos oder Videos ausgewählt werden.",
+  "1b08d9dc751054ed": "Zu viele Medien ausgewählt.",
+  "be45c9a7a3c287f2": "Upload fehlgeschlagen.",
+  "b678e879e97d40ec": "Medien wurden zum Entwurf hinzugefügt.",
+  "c3fde80673dc642f": "{successCount} von {total} Medien wurden zum Entwurf hinzugefügt.",
+  "77040eaed598ba90": "Kein Asset konnte hochgeladen werden.",
+  "cbeeb66e1b3c97f9": "Medien konnten nicht hinzugefügt werden.",
+  "68a0e0adc362b659": "Upload wurde abgeschlossen.",
+  "12282c61f9237eff": "Fehlgeschlagener Upload konnte nicht entfernt werden.",
+  "e889e775d2959d01": {
+    "t": "Text",
+    "i": 1,
+    "c": "Orte"
+  },
+  "d4434205b94f39cb": "{dateLabel} aus {circleName} öffnen",
+  "0fc4e6fead4bed4c": "Neue Beiträge",
+  "d131cae25eac3806": "Wenn jemand in einem deiner Circles Fotos oder Videos teilt.",
+  "437890f5f0ab1ae6": "Kommentare",
+  "fbf739a42c39b1c2": "Wenn jemand auf einen Beitrag oder ein einzelnes Medium antwortet.",
+  "7b6bb912cfbced2b": "Reaktionen",
+  "9ca4094fb14fed77": "Wenn jemand mit einem Emoji auf gemeinsame Erinnerungen reagiert.",
+  "e97e409bef7c68db": "Owner",
+  "4320bb61c3060389": "Abgelaufen",
+  "c13f406098a93796": "Zurückgezogen",
+  "8315b56e808f77d7": "Ausstehend",
+  "9869ada8f04fc7e4": "Circle-Details aktualisiert.",
+  "77e5056f00239d94": "Circle konnte nicht aktualisiert werden.",
+  "52985c83b3e25c0b": "Bild für \"{name}\" aktualisiert.",
+  "1b7da8c312404e37": "Das Bild von \"{name}\" wird entfernt.",
+  "f896531c6aab1022": "Bild für \"{name}\" entfernt.",
+  "cbd9ee79d79faec3": "Circle ist noch nicht geladen.",
+  "6264fd4464124152": "{name} wird zum Admin machen.",
+  "db61e45127a150e2": "{name} wird zum Mitglied herunterstufen.",
+  "77e8264d5c3a70c4": "Rolle ändern?",
+  "c193995864ba8ca4": "Bestätigen",
+  "315aa65e261152af": "Rolle für {name} aktualisiert.",
+  "6b3b5c06da72ed81": "Rolle konnte nicht geändert werden.",
+  "e37f897b505bfbb8": "Mitglied entfernen?",
+  "673c083e7e0a15a8": "{name} verliert sofort den Zugriff auf diesen Circle.",
+  "ddf17d7aac8a9e35": "{name} wurde entfernt.",
+  "cadfc8ec7730daab": "Mitglied konnte nicht entfernt werden.",
+  "75267fa7987625ce": "Ownership übertragen?",
+  "90cb0b881a2a8149": "{name} wird Owner. Dein eigener Zugriff bleibt als Admin bestehen.",
+  "1af5a1cca29f5661": "Uebertragen",
+  "0405844921b42473": "Ownership an {name} übertragen.",
+  "7945a73ca5ffe653": "Ownership konnte nicht übertragen werden.",
+  "64072531c749fee5": "Einladung zurückziehen?",
+  "b82cccf85c0a81fd": "Die Einladung für {email} wird sofort ungültig.",
+  "2b73806be5e7ebbc": "Einladung für {email} wurde zurückgezogen.",
+  "8070761498415893": "Einladung konnte nicht zurückgezogen werden.",
+  "1dd9e5cc7911d6c3": "Circle verlassen?",
+  "46aee1783fd42c98": "Du verlässt \"{name}\" und verlierst den Zugriff.",
+  "f6a7f6c8162649d4": "Verlassen",
+  "830ae3de2be27474": "Circle konnte nicht verlassen werden.",
+  "baa0c1475b9eedba": "Beschreibung",
+  "3d09da9ba02a58dc": "Details speichern",
+  "62968035b2645633": "Keine Beschreibung hinterlegt.",
+  "ffb45fec4fd67dbd": "privat",
+  "98beaece66ed4bb3": "read only",
+  "6b0df79992c02997": "aktiv",
+  "b7943c5d8fb7dcf2": "Circle verlassen",
+  "0aa80ce5d3984ba1": "Als Mitglied",
+  "ef652295312ae3a0": "Als Admin",
+  "039572b9c58367f8": "Owner geben",
+  "6e1f009430844d25": {
+    "t": "Text",
+    "i": 1,
+    "c": "circle management"
+  },
+  "0147d7e038886c42": {
+    "t": "Text",
+    "i": 1,
+    "c": "Circle-Details"
+  },
+  "35bf3eb589947717": {
+    "t": "Text",
+    "i": 1,
+    "c": {
+      "t": "Plural",
+      "i": 2,
+      "d": {
+        "b": {
+          "one": {
+            "t": "C3",
+            "i": 3,
+            "c": [
+              {
+                "i": 4,
+                "k": "_gt_n_4",
+                "v": "n"
+              },
+              " Mitglied"
+            ]
+          },
+          "other": {
+            "t": "C3",
+            "i": 3,
+            "c": [
+              {
+                "i": 4,
+                "k": "_gt_n_4",
+                "v": "n"
+              },
+              " Mitglieder"
+            ]
+          }
+        },
+        "t": "p"
+      }
+    }
+  },
+  "4ddf288565acb8cd": {
+    "t": "Text",
+    "i": 1,
+    "c": "Web-Link"
+  },
+  "4314a73b0ab79432": {
+    "t": "Text",
+    "i": 1,
+    "c": "Nur Owner und Admins dürfen öffentliche Web-Links verwalten."
+  },
+  "f396be422acc8cef": {
+    "t": "Text",
+    "i": 1,
+    "c": "Mitglieder"
+  },
+  "c99174010e4d6957": {
+    "t": "Text",
+    "i": 1,
+    "c": "Einladen"
+  },
+  "3b7da8a7a0d49f5e": {
+    "t": "Text",
+    "i": 1,
+    "c": "Nur Owner und Admins dürfen neue Personen einladen."
+  },
+  "331b8a45d201472f": {
+    "t": "Text",
+    "i": 1,
+    "c": "Einladungen"
+  },
+  "3b8d2fa1652ceb39": {
+    "t": "Text",
+    "i": 1,
+    "c": "Aktuell gibt es keine offenen Einladungen für diesen Circle."
+  },
+  "89f663bd1bbcc5ce": {
+    "t": "Text",
+    "i": 1,
+    "c": "Circle verlassen"
+  },
+  "6d18146c16effd1f": {
+    "t": "Text",
+    "i": 1,
+    "c": "Du kannst diesen Circle jederzeit verlassen. Der Zugriff auf alle Inhalte endet sofort."
+  },
+  "63b3cff3196912e7": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Als Owner musst du Ownership zuerst an ein anderes Mitglied übertragen.",
+      {
+        "t": "Branch",
+        "i": 2,
+        "d": {
+          "b": {
+            "empty": " Aktuell gibt es noch niemanden, an den du den Circle übergeben kannst.",
+            "members": " Wähle dazu oben ein Mitglied aus."
+          },
+          "t": "b"
+        }
+      }
+    ]
+  },
+  "e70120e779260b40": {
+    "t": "Text",
+    "i": 1,
+    "c": "du"
+  },
+  "52a7faf40025b789": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      " · seit",
+      " ",
+      {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    ]
+  },
+  "4bd3e97a6d371e83": {
+    "t": "Text",
+    "i": 1,
+    "c": [
+      "Von ",
+      {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      " · bis",
+      " ",
+      {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    ]
+  },
+  "9aa15f9962d10a9a": "Alle Monate",
+  "f48d8f09a226a66e": "Alle Orte",
+  "f75c0c2d74629504": "Zeitleiste",
+  "1ab86dbec362b3b7": "Orte",
+  "00793ccca9f9fa52": "Alle Circles",
+  "27dad249fed6c222": "Mehr",
+  "3c386e014cbc0b47": "Keine Orte",
+  "a4c65d04ff7f40a2": "Keine Erinnerungen",
+  "d4951b46a555e389": "Veröffentlichte Medien mit Standort erscheinen hier auf der Karte.",
+  "7fda8feba9bfacd5": "Veröffentlichte Fotos und Videos erscheinen hier nach ihrem Aufnahmedatum.",
+  "39f0df7af6035f1a": "Mehr Erinnerungen",
+  "9387012f02c26adf": [
+    {
+      "t": "Text",
+      "i": 1,
+      "c": "Archiv"
+    },
+    {
+      "t": "Text",
+      "i": 2,
+      "c": "Erinnerungen"
+    },
+    {
+      "t": "Text",
+      "i": 3,
+      "c": "Fotos und Videos nach Zeit und Ort entdecken."
+    }
+  ],
+  "7f7fd85191066d52": "Foto",
+  "1b981ea96db7f20a": "Erinnerung ist noch nicht geladen.",
+  "1cf7d6c128d5ac86": "Datei ist nicht mehr im Speicher vorhanden.",
+  "1e8ae01006afbd56": "Medium wurde auf dem Gerät gespeichert.",
+  "9afae6494295d7c4": "Medium konnte nicht gespeichert werden.",
+  "be7719a5a04b851c": "Medium konnte nicht geteilt werden.",
+  "e76e831660e4e903": "Speichert...",
+  "a25f9f392a6cee49": "Speichern",
+  "c8d3bc8b770000ad": "Teilt...",
+  "bf3089586ca31366": "Gespräch öffnen",
+  "48343a3f5a470ae1": {
+    "t": "Text",
+    "i": 1,
+    "c": "Erinnerungen"
+  },
+  "9cfb7a9dc7c5351c": {
+    "t": "Text",
+    "i": 1,
+    "c": "Keine Medien"
+  },
+  "993b3e037e421080": "Dieser Beitrag und alle Medien werden dauerhaft entfernt."
+}

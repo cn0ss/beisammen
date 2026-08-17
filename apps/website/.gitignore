@@ -1,0 +1,23 @@
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# Environment (.env.production is committed — it only holds PUBLIC_* values)
+.env
+.env.local
+
+# Cloudflare
+.wrangler/
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/
+.DS_Store
+.vercel

@@ -16,11 +16,11 @@ const cloudManifest = {
     convexUrl: 'https://cloud.convex.cloud',
   },
   auth: {
-    provider: 'workos',
-    mode: 'native-client',
+    provider: 'clerk',
+    mode: 'native',
     capabilities: ['password'],
     publicConfig: {
-      clientId: 'client_123',
+      publishableKey: 'pk_test_123',
     },
   },
   features: {
@@ -32,7 +32,7 @@ const cloudManifest = {
   },
   billing: {
     enabled: true,
-    provider: 'autumn',
+    provider: 'revenuecat',
     plans: [
       {
         id: 'cloud_family',
@@ -55,7 +55,7 @@ describe('beta smoke manifest validation', () => {
     expect(validateManifest(cloudManifest, 'https://cloud.example.com', 'cloud')).toEqual({
       instanceName: 'Cloud',
       deploymentKind: 'cloud',
-      authMode: 'native-client',
+      authMode: 'native',
       minimumAppVersion: '0.1.0',
     });
   });
@@ -65,10 +65,6 @@ describe('beta smoke manifest validation', () => {
     manifest.instance.id = 'self-hosted';
     manifest.instance.name = 'Self-hosted';
     manifest.instance.baseUrl = 'https://home.example.com';
-    manifest.auth.mode = 'hosted-browser';
-    manifest.auth.publicConfig = {
-      signInUrl: 'https://home.example.com/auth/sign-in',
-    };
     manifest.features.selfHosted = true;
     manifest.deployment.kind = 'self-hosted';
     manifest.billing = {
@@ -78,7 +74,7 @@ describe('beta smoke manifest validation', () => {
     expect(validateManifest(manifest, 'https://home.example.com', 'self-hosted')).toEqual({
       instanceName: 'Self-hosted',
       deploymentKind: 'self-hosted',
-      authMode: 'hosted-browser',
+      authMode: 'native',
       minimumAppVersion: '0.1.0',
     });
   });

@@ -1,3 +1,4 @@
+import { T, Var } from 'gt-react-native';
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -16,9 +17,11 @@ export const ConnectionFooter = memo(function ConnectionFooter({
   return (
     <View style={[styles.chip, { backgroundColor: theme.primaryMuted }]}>
       <View style={[styles.dot, { backgroundColor: theme.primary }]} />
-      <Text style={[styles.text, { color: theme.primary }]}>
-        Verbunden mit {instanceName}
-      </Text>
+      <T>
+        <Text style={[styles.text, { color: theme.primary }]}>
+          Verbunden mit <Var>{instanceName}</Var>
+        </Text>
+      </T>
     </View>
   );
 });

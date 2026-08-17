@@ -1,19 +1,18 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildWorkOSInstanceConfig } from '@beisammen/contracts';
+import { buildClerkInstanceConfig } from '@beisammen/contracts';
 
 import {
   AppVersionUnsupportedError,
   parseDiscoveredInstanceConfig,
 } from './validation';
 
-const manifest = buildWorkOSInstanceConfig({
+const manifest = buildClerkInstanceConfig({
   id: 'home',
   name: 'Home',
   baseUrl: 'https://home.example.com',
   convexUrl: 'https://home.convex.cloud',
-  authMode: 'hosted-browser',
-  authSignInUrl: 'https://home.example.com/auth/sign-in',
+  authPublishableKey: 'pk_test_123',
   deploymentKind: 'self-hosted',
   minimumAppVersion: '0.1.0',
 });

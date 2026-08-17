@@ -2,14 +2,12 @@ import { describe, expect, test } from 'vitest';
 
 import {
   COMMENT_MAX_BODY_LENGTH,
-  BILLING_RETURN_PATH,
   INSTANCE_DISCOVERY_PATH,
   REACTION_TOP_EMOJI_LIMIT,
   assertInstanceBaseUrlMatches,
   assertAppVersionSupported,
-  buildBillingReturnUrl,
   buildInstanceDiscoveryUrl,
-  buildWorkOSInstanceConfig,
+  buildClerkInstanceConfig,
   compareAppVersions,
   isAppVersionSupported,
   normalizeCommentBody,
@@ -44,23 +42,13 @@ describe('instance discovery', () => {
     );
   });
 
-  test('builds the billing return URL from an instance base URL', () => {
-    expect(buildBillingReturnUrl('https://family.example.com/', 'checkout')).toBe(
-      `https://family.example.com${BILLING_RETURN_PATH}?source=checkout`,
-    );
-    expect(buildBillingReturnUrl('https://family.example.com', 'portal')).toBe(
-      `https://family.example.com${BILLING_RETURN_PATH}?source=portal`,
-    );
-  });
-
   test('accepts manifests whose base URL matches the requested instance URL', () => {
-    const config = buildWorkOSInstanceConfig({
+    const config = buildClerkInstanceConfig({
       id: 'family',
       name: 'Family',
       baseUrl: 'https://family.example.com/',
       convexUrl: 'https://family.convex.cloud/',
-      authMode: 'native-client',
-      authClientId: 'client_123',
+      authPublishableKey: 'pk_test_123',
       minimumAppVersion: '0.1.0',
     });
 
@@ -70,13 +58,12 @@ describe('instance discovery', () => {
   });
 
   test('rejects manifests whose base URL does not match the requested instance URL', () => {
-    const config = buildWorkOSInstanceConfig({
+    const config = buildClerkInstanceConfig({
       id: 'family',
       name: 'Family',
       baseUrl: 'https://other.example.com/',
       convexUrl: 'https://family.convex.cloud/',
-      authMode: 'native-client',
-      authClientId: 'client_123',
+      authPublishableKey: 'pk_test_123',
       minimumAppVersion: '0.1.0',
     });
 
@@ -85,15 +72,14 @@ describe('instance discovery', () => {
     ).toThrow(/instance\.baseUrl.*does not match/i);
   });
 
-  test('builds a public WorkOS instance config', () => {
+  test('builds a public Clerk instance config', () => {
     expect(
-      buildWorkOSInstanceConfig({
+      buildClerkInstanceConfig({
         id: 'family',
         name: 'Family',
         baseUrl: 'https://family.example.com/',
         convexUrl: 'https://family.convex.cloud/',
-        authMode: 'native-client',
-        authClientId: 'client_123',
+        authPublishableKey: 'pk_test_123',
         minimumAppVersion: '0.1.0',
       }),
     ).toMatchObject({
@@ -106,11 +92,10 @@ describe('instance discovery', () => {
         convexUrl: 'https://family.convex.cloud',
       },
       auth: {
-        provider: 'workos',
-        mode: 'native-client',
+        provider: 'clerk',
+        mode: 'native',
         publicConfig: {
-          clientId: 'client_123',
-          redirectPath: 'auth/callback',
+          publishableKey: 'pk_test_123',
         },
       },
       features: {
@@ -122,7 +107,7 @@ describe('instance discovery', () => {
       },
       billing: {
         enabled: true,
-        provider: 'autumn',
+        provider: 'revenuecat',
       },
       client: {
         minimumAppVersion: '0.1.0',
@@ -130,15 +115,27 @@ describe('instance discovery', () => {
     });
   });
 
-  test('builds self-hosted public config with billing disabled', () => {
-    expect(
-      buildWorkOSInstanceConfig({
+  test('rejects publishable keys that are not Clerk publishable keys', () => {
+    expect(() =>
+      buildClerkInstanceConfig({
         id: 'family',
         name: 'Family',
         baseUrl: 'https://family.example.com/',
         convexUrl: 'https://family.convex.cloud/',
-        authMode: 'native-client',
-        authClientId: 'client_123',
+        authPublishableKey: 'sk_test_123',
+        minimumAppVersion: '0.1.0',
+      }),
+    ).toThrow(/publishableKey/i);
+  });
+
+  test('builds self-hosted public config with billing disabled', () => {
+    expect(
+      buildClerkInstanceConfig({
+        id: 'family',
+        name: 'Family',
+        baseUrl: 'https://family.example.com/',
+        convexUrl: 'https://family.convex.cloud/',
+        authPublishableKey: 'pk_test_123',
         deploymentKind: 'self-hosted',
         minimumAppVersion: '0.1.0',
       }),
@@ -166,12 +163,11 @@ describe('instance discovery', () => {
         convexUrl: 'https://family.convex.cloud/',
       },
       auth: {
-        provider: 'workos',
-        mode: 'hosted-browser',
+        provider: 'clerk',
+        mode: 'native',
         capabilities: ['password', 'email_otp'],
         publicConfig: {
-          redirectPath: 'auth/callback',
-          signInUrl: 'https://family.example.com/auth/sign-in',
+          publishableKey: 'pk_test_123',
         },
       },
       features: {
@@ -203,7 +199,7 @@ describe('instance discovery', () => {
     ).toThrow(/storage provider/i);
   });
 
-  test('rejects cloud config without Autumn billing', () => {
+  test('rejects cloud config without RevenueCat billing', () => {
     expect(() =>
       parseInstanceConfig({
         instance: {
@@ -215,12 +211,11 @@ describe('instance discovery', () => {
           convexUrl: 'https://cloud.convex.cloud',
         },
         auth: {
-          provider: 'workos',
-          mode: 'native-client',
+          provider: 'clerk',
+          mode: 'native',
           capabilities: ['password'],
           publicConfig: {
-            clientId: 'client_123',
-            redirectPath: 'auth/callback',
+            publishableKey: 'pk_test_123',
           },
         },
         features: {
@@ -238,7 +233,7 @@ describe('instance discovery', () => {
           minimumAppVersion: '0.1.0',
         },
       }),
-    ).toThrow(/Autumn billing/i);
+    ).toThrow(/RevenueCat billing/i);
   });
 
   test('rejects manifests whose self-hosted flag does not match deployment kind', () => {
@@ -253,12 +248,11 @@ describe('instance discovery', () => {
           convexUrl: 'https://cloud.convex.cloud',
         },
         auth: {
-          provider: 'workos',
-          mode: 'native-client',
+          provider: 'clerk',
+          mode: 'native',
           capabilities: ['password'],
           publicConfig: {
-            clientId: 'client_123',
-            redirectPath: 'auth/callback',
+            publishableKey: 'pk_test_123',
           },
         },
         features: {
@@ -270,7 +264,7 @@ describe('instance discovery', () => {
         },
         billing: {
           enabled: true,
-          provider: 'autumn',
+          provider: 'revenuecat',
         },
         client: {
           minimumAppVersion: '0.1.0',
@@ -279,52 +273,39 @@ describe('instance discovery', () => {
     ).toThrow(/selfHosted.*deployment/i);
   });
 
-  test('rejects manifests missing auth public config required by their auth mode', () => {
-    const nativeClientManifest = {
-      instance: {
-        id: 'cloud',
-        name: 'Cloud',
-        baseUrl: 'https://cloud.example.com',
-      },
-      backend: {
-        convexUrl: 'https://cloud.convex.cloud',
-      },
-      auth: {
-        provider: 'workos',
-        mode: 'native-client',
-        capabilities: ['password'],
-        publicConfig: {
-          redirectPath: 'auth/callback',
+  test('rejects manifests missing the Clerk publishable key', () => {
+    expect(() =>
+      parseInstanceConfig({
+        instance: {
+          id: 'cloud',
+          name: 'Cloud',
+          baseUrl: 'https://cloud.example.com',
         },
-      },
-      features: {
-        storageProviders: ['s3'],
-        selfHosted: false,
-      },
-      deployment: {
-        kind: 'cloud',
-      },
-      billing: {
-        enabled: true,
-        provider: 'autumn',
-      },
-      client: {
-        minimumAppVersion: '0.1.0',
-      },
-    };
-    const hostedBrowserManifest = {
-      ...nativeClientManifest,
-      auth: {
-        ...nativeClientManifest.auth,
-        mode: 'hosted-browser',
-        publicConfig: {
-          redirectPath: 'auth/callback',
+        backend: {
+          convexUrl: 'https://cloud.convex.cloud',
         },
-      },
-    };
-
-    expect(() => parseInstanceConfig(nativeClientManifest)).toThrow(/clientId/i);
-    expect(() => parseInstanceConfig(hostedBrowserManifest)).toThrow(/signInUrl/i);
+        auth: {
+          provider: 'clerk',
+          mode: 'native',
+          capabilities: ['password'],
+          publicConfig: {},
+        },
+        features: {
+          storageProviders: ['s3'],
+          selfHosted: false,
+        },
+        deployment: {
+          kind: 'cloud',
+        },
+        billing: {
+          enabled: true,
+          provider: 'revenuecat',
+        },
+        client: {
+          minimumAppVersion: '0.1.0',
+        },
+      }),
+    ).toThrow(/publishableKey/i);
   });
 
   test('rejects manifests that use a Convex site URL as the client URL', () => {
@@ -339,12 +320,11 @@ describe('instance discovery', () => {
           convexUrl: 'https://cloud.convex.site',
         },
         auth: {
-          provider: 'workos',
-          mode: 'native-client',
+          provider: 'clerk',
+          mode: 'native',
           capabilities: ['password'],
           publicConfig: {
-            clientId: 'client_123',
-            redirectPath: 'auth/callback',
+            publishableKey: 'pk_test_123',
           },
         },
         features: {
@@ -356,7 +336,7 @@ describe('instance discovery', () => {
         },
         billing: {
           enabled: true,
-          provider: 'autumn',
+          provider: 'revenuecat',
         },
         client: {
           minimumAppVersion: '0.1.0',

@@ -44,7 +44,7 @@ Feed cards and thumbnails request preview URLs; share detail playback, download,
 and native sharing request original URLs.
 
 Cloud deployments keep the current app-level beta media count and video duration
-limits while Autumn enforces paid plan access and usage billing before
+limits while RevenueCat entitlements and Convex quotas enforce paid plan access before
 storage-generating uploads. Self-hosted deployments keep the same storage safety
 checks and MIME validation, but do not enforce those app product limits.
 

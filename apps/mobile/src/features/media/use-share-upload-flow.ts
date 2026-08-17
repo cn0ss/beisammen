@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import { useGT, useMessages } from 'gt-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAction, useMutation } from 'convex/react';
@@ -50,6 +51,16 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+/**
+ * The server refuses to discard uploads that already produced an asset. When a
+ * locally failed or recovered queue item hits this, the upload actually
+ * succeeded and the queue entry is stale — it is safe to drop locally, since
+ * the resulting asset lives in the draft and is deleted there instead.
+ */
+function isUploadAlreadyCompletedError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('must be deleted via their asset');
+}
+
 interface UseShareUploadFlowArgs {
   selectedCircle: CircleListItem | null;
   activeDraft?: ShareDraftRecord | null;
@@ -63,6 +74,8 @@ export function useShareUploadFlow({
   existingDraftAssetCount,
   onFeedback,
 }: UseShareUploadFlowArgs) {
+  const gt = useGT();
+  const m = useMessages();
   const getOrCreateDraft = useMutation(api.shares.getOrCreateDraft);
   const createTarget = useAction(api.uploads.createTarget);
   const retryUpload = useAction(api.uploads.retry);
@@ -293,23 +306,34 @@ export function useShareUploadFlow({
         capturedAt: input.preparedAsset.capturedAt,
       });
 
-      await uploadRecoveryStore.clearItemFiles({
-        cacheUri: input.cacheUri,
-        previewCacheUri,
-      });
+      try {
+        await uploadRecoveryStore.clearItemFiles({
+          cacheUri: input.cacheUri,
+          previewCacheUri,
+        });
+      } catch (error) {
+        // The upload is already committed at this point. Some picker-provided
+        // temporary files are not writable on newer iOS versions, so cleanup
+        // must never turn a completed upload into a failed queue item.
+        logger.warn('Upload recovery file cleanup failed after upload', {
+          queueId: input.queueId,
+          uploadId: prepared.uploadId,
+          error,
+        });
+      }
     },
     [completeUpload, createTarget, deploymentKind, retryUpload],
   );
 
   const handlePickMedia = useCallback(async () => {
     if (!selectedCircle) {
-      onFeedback('Bitte wähle zuerst einen Circle aus.');
+      onFeedback(gt('Bitte wähle zuerst einen Circle aus.'));
       return;
     }
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      onFeedback('Ohne Mediathek-Zugriff können keine Fotos oder Videos ausgewählt werden.');
+      onFeedback(gt('Ohne Mediathek-Zugriff können keine Fotos oder Videos ausgewählt werden.'));
       return;
     }
 
@@ -331,7 +355,7 @@ export function useShareUploadFlow({
           existingPendingCount: selectedQueueItems.length,
         });
       } catch (error) {
-        onFeedback(errorMessage(error, 'Zu viele Medien ausgewählt.'));
+        onFeedback(errorMessage(error, gt('Zu viele Medien ausgewählt.')));
         return;
       }
     }
@@ -341,7 +365,7 @@ export function useShareUploadFlow({
 
     try {
       const draft = await getOrCreateDraft({ circleId: selectedCircle._id });
-      const resolvedMetadata = await resolvePickerAssetMetadata(result.assets);
+      const resolvedMetadata = await resolvePickerAssetMetadata(result.assets, m);
 
       let successCount = 0;
 
@@ -443,7 +467,7 @@ export function useShareUploadFlow({
           successCount += 1;
           setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === queueId));
         } catch (error) {
-          const message = errorMessage(error, 'Upload fehlgeschlagen.');
+          const message = errorMessage(error, gt('Upload fehlgeschlagen.'));
           logger.warn('Upload item failed', {
             queueId,
             circleId: selectedCircle._id,
@@ -467,11 +491,14 @@ export function useShareUploadFlow({
       if (successCount > 0) {
         onFeedback(
           successCount === result.assets.length
-            ? 'Medien wurden zum Entwurf hinzugefügt.'
-            : `${successCount} von ${result.assets.length} Medien wurden zum Entwurf hinzugefügt.`,
+            ? gt('Medien wurden zum Entwurf hinzugefügt.')
+            : gt('{successCount} von {total} Medien wurden zum Entwurf hinzugefügt.', {
+                successCount,
+                total: result.assets.length,
+              }),
         );
       } else {
-        onFeedback('Kein Asset konnte hochgeladen werden.');
+        onFeedback(gt('Kein Asset konnte hochgeladen werden.'));
       }
     } catch (error) {
       logger.error('Media selection upload failed', {
@@ -482,7 +509,7 @@ export function useShareUploadFlow({
         circleId: selectedCircle._id,
         error,
       });
-      onFeedback(errorMessage(error, 'Medien konnten nicht hinzugefügt werden.'));
+      onFeedback(errorMessage(error, gt('Medien konnten nicht hinzugefügt werden.')));
     } finally {
       setIsUploading(false);
     }
@@ -490,8 +517,10 @@ export function useShareUploadFlow({
     getOrCreateDraft,
     existingDraftAssetCount,
     deploymentKind,
+    gt,
     instanceUrl,
     isCloud,
+    m,
     onFeedback,
     selectedCircle,
     selectedQueueItems.length,
@@ -556,9 +585,9 @@ export function useShareUploadFlow({
         });
 
         setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === itemId));
-        onFeedback('Upload wurde abgeschlossen.');
+        onFeedback(gt('Upload wurde abgeschlossen.'));
       } catch (error) {
-        const message = errorMessage(error, 'Upload fehlgeschlagen.');
+        const message = errorMessage(error, gt('Upload fehlgeschlagen.'));
         logger.warn('Upload retry failed', {
           itemId,
           circleId: queueItem.circleId,
@@ -579,7 +608,7 @@ export function useShareUploadFlow({
         setIsUploading(false);
       }
     },
-    [deploymentKind, onFeedback, uploadPreparedAsset, uploadQueue.items],
+    [deploymentKind, gt, onFeedback, uploadPreparedAsset, uploadQueue.items],
   );
 
   const handleRemoveFailedUpload = useCallback(
@@ -592,34 +621,85 @@ export function useShareUploadFlow({
 
       if (queueItem.uploadId) {
         try {
-          await discardUpload({
+          const result = await discardUpload({
             uploadId: queueItem.uploadId,
           });
+
+          if (result.outcome && result.outcome !== 'discarded') {
+            logger.info('Cleared stale upload queue item', {
+              itemId,
+              uploadId: queueItem.uploadId,
+              outcome: result.outcome,
+            });
+          }
         } catch (error) {
-          logger.warn('Discard failed upload failed', {
+          if (!isUploadAlreadyCompletedError(error)) {
+            logger.warn('Discard failed upload failed', {
+              itemId,
+              uploadId: queueItem.uploadId,
+              error,
+            });
+            onFeedback(
+              errorMessage(error, gt('Fehlgeschlagener Upload konnte nicht entfernt werden.')),
+            );
+            return;
+          }
+
+          logger.info('Dropping stale queue item for completed upload', {
             itemId,
             uploadId: queueItem.uploadId,
-            error,
           });
-          onFeedback(errorMessage(error, 'Fehlgeschlagener Upload konnte nicht entfernt werden.'));
-          return;
         }
       }
 
-      await clearUploadRecoveryItemFiles(queueItem);
+      try {
+        await clearUploadRecoveryItemFiles(queueItem);
+      } catch (error) {
+        // Queue removal must remain possible after the server confirms that the
+        // upload already completed, even when iOS owns an undeletable picker
+        // temporary file.
+        logger.warn('Upload recovery file cleanup failed while removing queue item', {
+          itemId,
+          uploadId: queueItem.uploadId,
+          error,
+        });
+      }
       setUploadQueue((state) => removeUploadQueueItems(state, (item) => item.id === itemId));
     },
-    [discardUpload, onFeedback, uploadQueue.items],
+    [discardUpload, gt, onFeedback, uploadQueue.items],
   );
 
   const handleDiscardUpload = useCallback(
     async (uploadId: string) => {
       const matchingItems = uploadQueue.items.filter((item) => item.uploadId === uploadId);
 
-      await discardUpload({
-        uploadId,
-      });
-      await Promise.all(matchingItems.map((item) => clearUploadRecoveryItemFiles(item)));
+      try {
+        await discardUpload({
+          uploadId,
+        });
+      } catch (error) {
+        if (!isUploadAlreadyCompletedError(error)) {
+          throw error;
+        }
+
+        logger.info('Dropping stale queue item for completed upload', { uploadId });
+      }
+
+      const cleanupResults = await Promise.allSettled(
+        matchingItems.map((item) => clearUploadRecoveryItemFiles(item)),
+      );
+
+      for (const [index, result] of cleanupResults.entries()) {
+        if (result.status !== 'rejected') {
+          continue;
+        }
+
+        logger.warn('Upload recovery file cleanup failed while discarding upload', {
+          uploadId,
+          itemId: matchingItems[index]?.id,
+          error: result.reason,
+        });
+      }
       setUploadQueue((state) =>
         removeUploadQueueItems(state, (item) => item.uploadId === uploadId),
       );

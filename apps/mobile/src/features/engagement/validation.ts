@@ -1,3 +1,5 @@
+import { msg } from 'gt-react-native';
+
 import {
   normalizeCommentBody,
   normalizeReactionEmoji as normalizeSharedReactionEmoji,
@@ -34,7 +36,7 @@ export function buildCommentTarget(input: {
       shareBatchId: input.shareBatchId,
       targetKind: 'asset',
       assetId: input.activeAssetId,
-      label: 'Aktuelles Medium',
+      label: msg('Aktuelles Medium'),
     };
   }
 
@@ -42,6 +44,6 @@ export function buildCommentTarget(input: {
     shareBatchId: input.shareBatchId,
     targetKind: 'share',
     assetId: undefined,
-    label: 'Beitrag',
+    label: msg('Beitrag'),
   };
 }

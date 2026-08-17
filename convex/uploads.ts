@@ -5,13 +5,13 @@ import type { ActionCtx, MutationCtx, QueryCtx } from './_generated/server';
 import { action, internalMutation, internalQuery } from './_generated/server';
 import { internal } from './_generated/api';
 import { adjustCircleStats, assetStatsDelta } from './circleStats';
-import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
 import {
+  BILLING_FEATURE_IDS,
   type BillingOwner,
   requireCloudOwnerFeatureAccess,
   resolveCircleBillingOwner,
   trackCloudOwnerUsage,
-} from './lib/billing/owner';
+} from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { canPublish } from './lib/permissions';
 import { createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
@@ -152,7 +152,7 @@ async function refundCloudUsage(input: {
         value: usage.value,
       });
     } catch (error) {
-      console.error('Failed to refund Autumn usage after upload failure.', error);
+      console.error('Failed to refund usage after upload failure.', error);
     }
   }
 }
@@ -393,10 +393,12 @@ export const createTarget = action({
     );
 
     if (policy.isCloud) {
+      // Only storage is limited; the exact file size is unknown here, so this
+      // verifies an active plan with headroom left in the storage pool.
       await requireCloudOwnerFeatureAccess(ctx, {
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
-        featureId: BILLING_FEATURE_IDS.mediaUploads,
+        featureId: BILLING_FEATURE_IDS.storageBytes,
       });
     }
 
@@ -444,7 +446,7 @@ export const retry = action({
       await requireCloudOwnerFeatureAccess(ctx, {
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
-        featureId: BILLING_FEATURE_IDS.mediaUploads,
+        featureId: BILLING_FEATURE_IDS.storageBytes,
       });
     }
 
@@ -840,16 +842,44 @@ export const complete = action({
   },
 });
 
+const storageReferenceValidator = v.union(
+  v.object({
+    provider: v.literal('convex-files'),
+    storageId: v.id('_storage'),
+  }),
+  v.object({
+    provider: v.literal('s3'),
+    objectKey: v.string(),
+    bucket: v.string(),
+    region: v.optional(v.string()),
+    endpoint: v.optional(v.string()),
+    basePath: v.optional(v.string()),
+  }),
+);
+
 export const getDiscardContext = internalQuery({
   args: {
     uploadId: v.id('uploads'),
   },
+  returns: v.union(
+    v.object({ kind: v.literal('missing') }),
+    v.object({ kind: v.literal('completed') }),
+    v.object({
+      kind: v.literal('discardable'),
+      uploadId: v.id('uploads'),
+      shareBatchId: v.id('shareBatches'),
+      storageReferences: v.array(storageReferenceValidator),
+    }),
+  ),
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
     const upload = await ctx.db.get(args.uploadId);
 
+    // Stale client queue items may reference uploads that were already
+    // discarded elsewhere or that completed into an asset. Report those as
+    // outcomes instead of throwing so cleanup stays idempotent.
     if (!upload) {
-      throw new Error('Upload not found.');
+      return { kind: 'missing' as const };
     }
 
     await requireCircleMembership(ctx, viewer._id, upload.circleId);
@@ -865,10 +895,11 @@ export const getDiscardContext = internalQuery({
     }
 
     if (upload.assetId) {
-      throw new Error('Completed uploads must be deleted via their asset.');
+      return { kind: 'completed' as const };
     }
 
     return {
+      kind: 'discardable' as const,
       uploadId: upload._id,
       shareBatchId: upload.shareBatchId,
       storageReferences: [
@@ -886,6 +917,9 @@ export const finalizeDiscard = internalMutation({
     uploadId: v.id('uploads'),
     shareBatchId: v.id('shareBatches'),
   },
+  returns: v.object({
+    uploadId: v.id('uploads'),
+  }),
   handler: async (ctx, args) => {
     await ctx.db.delete(args.uploadId);
     await ctx.db.patch(args.shareBatchId, {
@@ -902,27 +936,37 @@ export const discard = action({
   args: {
     uploadId: v.id('uploads'),
   },
+  returns: v.object({
+    uploadId: v.id('uploads'),
+    outcome: v.union(v.literal('discarded'), v.literal('completed'), v.literal('missing')),
+  }),
   handler: async (
     ctx,
     args,
   ): Promise<{
     uploadId: Id<'uploads'>;
+    outcome: 'discarded' | 'completed' | 'missing';
   }> => {
-    const discardContext: {
-      uploadId: Id<'uploads'>;
-      shareBatchId: Id<'shareBatches'>;
-      storageReferences: Doc<'uploads'>['pendingStorage'][];
-    } = await ctx.runQuery(internal.uploads.getDiscardContext, {
+    const discardContext:
+      | { kind: 'missing' }
+      | { kind: 'completed' }
+      | {
+          kind: 'discardable';
+          uploadId: Id<'uploads'>;
+          shareBatchId: Id<'shareBatches'>;
+          storageReferences: NonNullable<Doc<'uploads'>['pendingStorage']>[];
+        } = await ctx.runQuery(internal.uploads.getDiscardContext, {
       uploadId: args.uploadId,
     });
+
+    // Nothing to clean up server-side; let the client drop its stale item.
+    if (discardContext.kind !== 'discardable') {
+      return { uploadId: args.uploadId, outcome: discardContext.kind };
+    }
 
     const uniqueStorageReferences = new Map<string, NonNullable<Doc<'uploads'>['pendingStorage']>>();
 
     for (const storageReference of discardContext.storageReferences) {
-      if (!storageReference) {
-        continue;
-      }
-
       uniqueStorageReferences.set(storageReferenceKey(storageReference), storageReference);
     }
 
@@ -930,9 +974,11 @@ export const discard = action({
       await deleteStorageReference(ctx, storageReference);
     }
 
-    return await ctx.runMutation(internal.uploads.finalizeDiscard, {
+    const finalized = await ctx.runMutation(internal.uploads.finalizeDiscard, {
       uploadId: discardContext.uploadId,
       shareBatchId: discardContext.shareBatchId,
     });
+
+    return { uploadId: finalized.uploadId, outcome: 'discarded' };
   },
 });

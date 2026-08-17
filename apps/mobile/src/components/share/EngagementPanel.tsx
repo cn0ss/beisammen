@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Num, T, useGT, useMessages, Var } from 'gt-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -29,14 +30,15 @@ import {
   normalizeReactionEmoji,
 } from '@/features/engagement/validation';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
-const COMMENT_TIME = new Intl.DateTimeFormat('de-DE', {
+const COMMENT_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   dateStyle: 'short',
   timeStyle: 'short',
-});
+};
 
-function formatCommentTime(timestamp: number): string {
-  return COMMENT_TIME.format(new Date(timestamp));
+function formatCommentTime(timestamp: number, format: Intl.DateTimeFormat): string {
+  return format.format(new Date(timestamp));
 }
 
 function reactionTargetMatches(
@@ -56,6 +58,8 @@ const CommentRow = memo(function CommentRow({
   onDelete: (comment: CommentRecord) => void;
 }) {
   const theme = useTheme();
+  const gt = useGT();
+  const commentTimeFormat = useDateFormat(COMMENT_TIME_OPTIONS);
 
   return (
     <View style={[styles.commentRow, { borderColor: theme.borderLight }]}>
@@ -64,20 +68,22 @@ const CommentRow = memo(function CommentRow({
           {comment.authorName}
         </Text>
         <Text style={[styles.commentTime, { color: theme.textTertiary }]}>
-          {formatCommentTime(comment.createdAt)}
+          {formatCommentTime(comment.createdAt, commentTimeFormat)}
         </Text>
       </View>
       <Text style={[styles.commentBody, { color: theme.textSecondary }]}>{comment.body}</Text>
       {comment.canDelete ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Kommentar entfernen"
+          accessibilityLabel={gt('Kommentar entfernen')}
           hitSlop={10}
           onPress={() => onDelete(comment)}
           style={styles.commentDelete}
         >
           <Ionicons name="trash-outline" size={14} color={theme.danger} />
-          <Text style={[styles.commentDeleteText, { color: theme.danger }]}>Entfernen</Text>
+          <T>
+            <Text style={[styles.commentDeleteText, { color: theme.danger }]}>Entfernen</Text>
+          </T>
         </Pressable>
       ) : null}
     </View>
@@ -94,6 +100,8 @@ export const EngagementPanel = memo(function EngagementPanel({
   share: ShareBatchRecord;
 }) {
   const theme = useTheme();
+  const gt = useGT();
+  const m = useMessages();
   const [engagementScope, setEngagementScope] = useState<'share' | 'asset'>('share');
   const [commentDraft, setCommentDraft] = useState('');
   const [reactionDraft, setReactionDraft] = useState('');
@@ -156,11 +164,13 @@ export const EngagementPanel = memo(function EngagementPanel({
       });
       setCommentDraft('');
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Kommentar konnte nicht gespeichert werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Kommentar konnte nicht gespeichert werden.'),
+      );
     } finally {
       setIsSubmittingComment(false);
     }
-  }, [commentDraft, commentTarget, createComment, onFeedback]);
+  }, [commentDraft, commentTarget, createComment, gt, onFeedback]);
 
   const handleSetReaction = useCallback(async () => {
     setIsReacting(true);
@@ -175,11 +185,13 @@ export const EngagementPanel = memo(function EngagementPanel({
       });
       setReactionDraft('');
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Reaktion konnte nicht gespeichert werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Reaktion konnte nicht gespeichert werden.'),
+      );
     } finally {
       setIsReacting(false);
     }
-  }, [commentTarget, onFeedback, reactionDraft, setReaction]);
+  }, [commentTarget, gt, onFeedback, reactionDraft, setReaction]);
 
   const handleRemoveReaction = useCallback(async () => {
     setIsReacting(true);
@@ -191,31 +203,39 @@ export const EngagementPanel = memo(function EngagementPanel({
         ...(commentTarget.assetId ? { assetId: commentTarget.assetId } : {}),
       });
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : 'Reaktion konnte nicht entfernt werden.');
+      onFeedback(
+        error instanceof Error ? error.message : gt('Reaktion konnte nicht entfernt werden.'),
+      );
     } finally {
       setIsReacting(false);
     }
-  }, [commentTarget, onFeedback, removeReaction]);
+  }, [commentTarget, gt, onFeedback, removeReaction]);
 
   const handleDeleteComment = useCallback(
     (comment: CommentRecord) => {
-      Alert.alert('Kommentar entfernen?', 'Dieser Kommentar wird für alle Mitglieder entfernt.', [
-        { text: 'Abbrechen', style: 'cancel' },
-        {
-          text: 'Entfernen',
-          style: 'destructive',
-          onPress: () => {
-            onFeedback(null);
-            void deleteComment({ commentId: comment._id }).catch((error) => {
-              onFeedback(
-                error instanceof Error ? error.message : 'Kommentar konnte nicht entfernt werden.',
-              );
-            });
+      Alert.alert(
+        gt('Kommentar entfernen?'),
+        gt('Dieser Kommentar wird für alle Mitglieder entfernt.'),
+        [
+          { text: gt('Abbrechen'), style: 'cancel' },
+          {
+            text: gt('Entfernen'),
+            style: 'destructive',
+            onPress: () => {
+              onFeedback(null);
+              void deleteComment({ commentId: comment._id }).catch((error) => {
+                onFeedback(
+                  error instanceof Error
+                    ? error.message
+                    : gt('Kommentar konnte nicht entfernt werden.'),
+                );
+              });
+            },
           },
-        },
-      ]);
+        ],
+      );
     },
-    [deleteComment, onFeedback],
+    [deleteComment, gt, onFeedback],
   );
 
   const targetSummary =
@@ -245,15 +265,18 @@ export const EngagementPanel = memo(function EngagementPanel({
     >
       <View style={styles.engagementHeader}>
         <View style={styles.engagementHeading}>
-          <Text style={[styles.engagementTitle, { color: theme.text }]}>Gespräch</Text>
-          <Text style={[styles.engagementMeta, { color: theme.textSecondary }]}>
-            {targetSummary?.commentCount ?? 0} Kommentare · {targetSummary?.reactionCount ?? 0} Reaktionen
-          </Text>
+          <T>
+            <Text style={[styles.engagementTitle, { color: theme.text }]}>Gespräch</Text>
+            <Text style={[styles.engagementMeta, { color: theme.textSecondary }]}>
+              <Num>{targetSummary?.commentCount ?? 0}</Num> Kommentare ·{' '}
+              <Num>{targetSummary?.reactionCount ?? 0}</Num> Reaktionen
+            </Text>
+          </T>
         </View>
         <View style={styles.scopeToggle}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Beitrag als Gesprächsfokus wählen"
+            accessibilityLabel={gt('Beitrag als Gesprächsfokus wählen')}
             onPress={() => setEngagementScope('share')}
             style={[
               styles.scopeButton,
@@ -269,12 +292,12 @@ export const EngagementPanel = memo(function EngagementPanel({
                 { color: engagementScope === 'share' ? theme.primary : theme.textSecondary },
               ]}
             >
-              Beitrag
+              {gt('Beitrag')}
             </Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Aktuelles Medium als Gesprächsfokus wählen"
+            accessibilityLabel={gt('Aktuelles Medium als Gesprächsfokus wählen')}
             disabled={!activeAsset}
             onPress={() => setEngagementScope('asset')}
             style={[
@@ -292,15 +315,17 @@ export const EngagementPanel = memo(function EngagementPanel({
                 { color: engagementScope === 'asset' ? theme.primary : theme.textSecondary },
               ]}
             >
-              Medium
+              {gt('Medium')}
             </Text>
           </Pressable>
         </View>
       </View>
 
-      <Text style={[styles.targetLabel, { color: theme.textTertiary }]}>
-        Fokus: {commentTarget.label}
-      </Text>
+      <T>
+        <Text style={[styles.targetLabel, { color: theme.textTertiary }]}>
+          Fokus: <Var>{m(commentTarget.label)}</Var>
+        </Text>
+      </T>
 
       <View style={styles.reactionComposer}>
         <View style={styles.reactionSummary}>
@@ -329,14 +354,16 @@ export const EngagementPanel = memo(function EngagementPanel({
               </View>
             ))
           ) : (
-            <Text style={[styles.noEngagementText, { color: theme.textTertiary }]}>
-              Noch keine Reaktionen.
-            </Text>
+            <T>
+              <Text style={[styles.noEngagementText, { color: theme.textTertiary }]}>
+                Noch keine Reaktionen.
+              </Text>
+            </T>
           )}
         </View>
         <View style={styles.reactionInputRow}>
           <TextInput
-            accessibilityLabel="Reaktion"
+            accessibilityLabel={gt('Reaktion')}
             value={reactionDraft}
             onChangeText={setReactionDraft}
             placeholder={viewerReaction ?? '❤️'}
@@ -354,7 +381,7 @@ export const EngagementPanel = memo(function EngagementPanel({
             returnKeyType="done"
           />
           <Button
-            label={viewerReaction ? 'Ändern' : 'Reagieren'}
+            label={viewerReaction ? gt('Ändern') : gt('Reagieren')}
             icon="heart-outline"
             variant="outline"
             loading={isReacting}
@@ -366,7 +393,7 @@ export const EngagementPanel = memo(function EngagementPanel({
           {viewerReaction ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Reaktion entfernen"
+              accessibilityLabel={gt('Reaktion entfernen')}
               hitSlop={10}
               disabled={isReacting}
               onPress={() => {
@@ -382,10 +409,10 @@ export const EngagementPanel = memo(function EngagementPanel({
 
       <View style={styles.commentComposer}>
         <TextInput
-          accessibilityLabel="Kommentar schreiben"
+          accessibilityLabel={gt('Kommentar schreiben')}
           value={commentDraft}
           onChangeText={setCommentDraft}
-          placeholder="Antwort schreiben"
+          placeholder={gt('Antwort schreiben')}
           placeholderTextColor={theme.textTertiary}
           multiline
           maxLength={COMMENT_MAX_BODY_LENGTH}
@@ -402,7 +429,7 @@ export const EngagementPanel = memo(function EngagementPanel({
           {commentDraft.length}/{COMMENT_MAX_BODY_LENGTH}
         </Text>
         <Button
-          label="Senden"
+          label={gt('Senden')}
           icon="send-outline"
           loading={isSubmittingComment}
           disabled={!canSubmitComment}
@@ -420,14 +447,16 @@ export const EngagementPanel = memo(function EngagementPanel({
             <CommentRow key={comment._id} comment={comment} onDelete={handleDeleteComment} />
           ))
         ) : (
-          <Text style={[styles.noEngagementText, { color: theme.textTertiary }]}>
-            Noch keine Kommentare in diesem Fokus.
-          </Text>
+          <T>
+            <Text style={[styles.noEngagementText, { color: theme.textTertiary }]}>
+              Noch keine Kommentare in diesem Fokus.
+            </Text>
+          </T>
         )}
 
         {hasMoreComments && comments.length > 0 ? (
           <Button
-            label={commentsPage.status === 'LoadingMore' ? 'Lädt...' : 'Mehr laden'}
+            label={commentsPage.status === 'LoadingMore' ? gt('Lädt...') : gt('Mehr laden')}
             icon="chevron-down-outline"
             variant="ghost"
             loading={commentsPage.status === 'LoadingMore'}

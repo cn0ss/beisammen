@@ -1,0 +1,353 @@
+/* transitions.dev Pro recipes used on this site.
+   All recipes guard prefers-reduced-motion — keep that intact. */
+
+:root {
+  /* Spinner-to-check morph */
+  --check-spin-dur: 900ms;
+  --check-pop-dur: 350ms;
+  --check-pop-ease: cubic-bezier(0.34, 1.96, 0.94, 1);
+  --check-fill-dur: 350ms;
+  --check-fill-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
+  --check-draw-dur: 600ms;
+  --check-draw-delay: 80ms;
+  --check-draw-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --check-hold: 2000ms;
+  --check-revert-dur: 250ms;
+  --check-revert-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --check-hop: 3px;
+  --check-up-dur: 250ms;
+  --check-up-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
+  --check-down-dur: 300ms;
+  --check-down-ease: cubic-bezier(0.14, 2.56, 0.94, 1);
+  --check-pop-scale: 1.09;
+  --check-blur: 0.5px;
+  --check-ring-w: 2.5px;
+  --check-mark-w: 2;
+  --check-green: #3f7a43;
+
+  /* Image open tilt */
+  --opentilt-open-dur: 620ms;
+  --opentilt-close-dur: 420ms;
+  --opentilt-open-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --opentilt-close-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --opentilt-closed-scale: 0.78;
+  --opentilt-tilt-x: 16deg;
+  --opentilt-tilt-y: -10deg;
+  --opentilt-lift: 50px;
+  --opentilt-perspective: 900px;
+  --opentilt-bend: 22;
+  --opentilt-bend-dur: 300ms;
+  --opentilt-bend-ease: ease-out;
+
+  /* Confetti burst */
+  --confetti-count: 110;
+  --confetti-gravity: 1300;
+  --confetti-size: 8px;
+  --confetti-sway: 16;
+  --confetti-bounce: 0.3;
+  --confetti-hold: 1800ms;
+  --confetti-fade: 700ms;
+}
+
+/* ── Image open tilt ──────────────────────────────────────────── */
+
+/* The stage supplies the 3D perspective so the tilt reads as depth.
+   It also reserves the card's FULL open size — the preview is the same
+   card shrunk purely with `scale`. */
+.t-opentilt-stage {
+  perspective: var(--opentilt-perspective);
+  width: 100%;
+}
+
+.t-opentilt-card {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 32px;
+  /* overflow stays VISIBLE (the rounded clip lives on the img via
+     border-radius: inherit) so the bend canvas can bow past the box —
+     and so overflow never toggles mid-flight (Safari compositing). */
+  overflow: visible;
+  cursor: pointer;
+  background: var(--color-paper-deep);
+  box-shadow:
+    0 0 0 1px rgb(15 14 12 / 0.06),
+    0 2px 6px rgb(15 14 12 / 0.05),
+    0 4px 42px rgb(15 14 12 / 0.08);
+  -webkit-tap-highlight-color: transparent;
+  transform-origin: center;
+  /* The zoom lives on the separate `scale` property so it runs as ONE
+     continuous spring, while the tilt rides on `transform` keyframes
+     that compose with it. */
+  scale: var(--opentilt-closed-scale);
+  transform: rotateX(0deg) rotateY(0deg) translateZ(0);
+  will-change: scale, transform;
+  transition:
+    scale var(--opentilt-close-dur) var(--opentilt-close-ease),
+    border-radius var(--opentilt-close-dur) var(--opentilt-close-ease);
+}
+
+/* Bend render layer: hidden at rest; JS sizes it (with an inline
+   negative inset so the bow can travel outside the card box) and
+   draws the warped photo during the flight. */
+.t-opentilt-canvas {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+}
+/* While bending, the canvas IS the card's visual: hide the flat photo
+   and background so no straight-edged fill peeks out behind the bowed
+   edges (the rounded clip is baked into the warp). */
+.t-opentilt-card.is-bending {
+  background: transparent;
+}
+.t-opentilt-card.is-bending .t-opentilt-img {
+  visibility: hidden;
+}
+.t-opentilt-card.is-bending .t-opentilt-canvas {
+  display: block;
+}
+
+.t-opentilt-card.is-open {
+  border-radius: 16px;
+  scale: 1;
+  transition:
+    scale var(--opentilt-open-dur) var(--opentilt-open-ease),
+    border-radius var(--opentilt-open-dur) var(--opentilt-open-ease);
+  animation: t-opentilt-open var(--opentilt-open-dur) both;
+}
+
+.t-opentilt-card.is-closing {
+  animation: t-opentilt-close var(--opentilt-close-dur) both;
+}
+
+@keyframes t-opentilt-open {
+  0% {
+    transform: rotateX(0deg) rotateY(0deg) translateZ(0);
+    animation-timing-function: cubic-bezier(0.3, 0.7, 0.4, 1);
+  }
+  40% {
+    transform: rotateX(var(--opentilt-tilt-x)) rotateY(var(--opentilt-tilt-y))
+      translateZ(var(--opentilt-lift));
+    animation-timing-function: cubic-bezier(0.45, 0, 0.3, 1);
+  }
+  100% {
+    transform: rotateX(0deg) rotateY(0deg) translateZ(0);
+  }
+}
+
+@keyframes t-opentilt-close {
+  0% {
+    transform: rotateX(0deg) rotateY(0deg) translateZ(0);
+    animation-timing-function: cubic-bezier(0.4, 0.4, 0.5, 1);
+  }
+  45% {
+    transform: rotateX(calc(var(--opentilt-tilt-x) * -0.45))
+      rotateY(calc(var(--opentilt-tilt-y) * -0.45)) translateZ(calc(var(--opentilt-lift) * 0.4));
+    animation-timing-function: cubic-bezier(0.45, 0, 0.3, 1);
+  }
+  100% {
+    transform: rotateX(0deg) rotateY(0deg) translateZ(0);
+  }
+}
+
+.t-opentilt-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  pointer-events: none;
+  /* The rounded clip (tracks the card's animating radius). */
+  border-radius: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-opentilt-card,
+  .t-opentilt-card.is-open {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ── Confetti burst ───────────────────────────────────────────── */
+
+.t-confetti-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+.t-confetti-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ── Spinner-to-check morph ───────────────────────────────────── */
+
+.t-check-blur-wrap {
+  display: inline-flex;
+  filter: blur(0);
+  transition: filter var(--check-revert-dur) var(--check-revert-ease);
+  will-change: filter;
+}
+.t-check-blur-wrap.is-crossing {
+  filter: blur(var(--check-blur));
+  transition: filter calc(var(--check-fill-dur) * 0.45) var(--check-fill-ease);
+}
+
+.t-check-badge {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  scale: 1;
+  transition: scale var(--check-revert-dur) var(--check-revert-ease);
+  will-change: scale, transform;
+}
+.t-check-badge[data-state="done"] {
+  scale: var(--check-pop-scale);
+  transition: scale var(--check-pop-dur) var(--check-pop-ease);
+  animation-name: t-check-pop-up, t-check-pop-down;
+  animation-duration: var(--check-up-dur), var(--check-down-dur);
+  animation-timing-function: var(--check-up-ease), var(--check-down-ease);
+  animation-delay: 0ms, var(--check-up-dur);
+  animation-fill-mode: forwards, forwards;
+}
+@keyframes t-check-pop-up {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(calc(var(--check-hop, 3px) * -1));
+  }
+}
+@keyframes t-check-pop-down {
+  from {
+    transform: translateY(calc(var(--check-hop, 3px) * -1));
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.t-check-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: var(--check-ring-w) solid rgba(0, 0, 0, 0.1);
+  transition:
+    opacity var(--check-revert-dur) ease,
+    filter var(--check-revert-dur) ease;
+}
+.t-check-badge[data-state="done"] .t-check-ring {
+  opacity: 0;
+  transition: opacity calc(var(--check-fill-dur) * 0.7) ease;
+}
+
+.t-check-fill {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  background: var(--check-green);
+  box-shadow:
+    0 0 0 0.504px rgba(0, 0, 0, 0.05) inset,
+    0 0.504px 0.504px 0 rgba(0, 0, 0, 0.1),
+    0 0.504px 2.016px 0 rgba(0, 0, 0, 0.08),
+    0 -0.504px 0.504px 0 rgba(0, 0, 0, 0.09) inset;
+  box-shadow:
+    0 0 0 0.504px color(display-p3 0 0 0 / 0.05) inset,
+    0 0.504px 0.504px 0 color(display-p3 0 0 0 / 0.1),
+    0 0.504px 2.016px 0 color(display-p3 0 0 0 / 0.08),
+    0 -0.504px 0.504px 0 color(display-p3 0 0 0 / 0.09) inset;
+  opacity: 0;
+  transition: opacity var(--check-revert-dur) var(--check-revert-ease);
+  will-change: opacity;
+}
+.t-check-badge[data-state="done"] .t-check-fill {
+  opacity: 1;
+  transition: opacity var(--check-fill-dur) var(--check-fill-ease);
+}
+
+.t-check-arc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: var(--check-ring-w) solid transparent;
+  border-top-color: #7a7a7a;
+  animation-name: t-check-spin;
+  animation-duration: var(--check-spin-dur);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  transition: opacity var(--check-revert-dur) var(--check-revert-ease);
+  will-change: transform;
+}
+@keyframes t-check-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.t-check-badge[data-state="done"] .t-check-arc {
+  opacity: 0;
+  animation-play-state: paused;
+  transition: opacity calc(var(--check-fill-dur) * 0.5) ease;
+}
+
+.t-check-disc {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.t-check-disc svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.t-check-mark {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: var(--check-mark-w);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: var(--check-mark-len, 20);
+  stroke-dashoffset: var(--check-mark-len, 20);
+  transition: stroke-dashoffset var(--check-revert-dur) var(--check-revert-ease);
+}
+.t-check-badge[data-state="done"] .t-check-mark {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset var(--check-draw-dur) var(--check-draw-ease)
+    calc(var(--check-fill-dur) + var(--check-draw-delay) - 200ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-check-arc {
+    animation: none !important;
+  }
+  .t-check-blur-wrap,
+  .t-check-blur-wrap.is-crossing {
+    filter: none !important;
+    transition: none !important;
+  }
+  .t-check-ring,
+  .t-check-arc,
+  .t-check-fill {
+    transition: none !important;
+  }
+  .t-check-badge,
+  .t-check-mark {
+    transition: none !important;
+    animation: none !important;
+  }
+  .t-check-badge[data-state="done"] .t-check-mark {
+    stroke-dashoffset: 0;
+  }
+}

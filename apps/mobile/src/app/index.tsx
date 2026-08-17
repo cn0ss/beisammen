@@ -19,7 +19,7 @@ export default function IndexScreen() {
   }
 
   if (session) {
-    return <Redirect href={pendingInviteToken ? '/(app)/invite' : '/(app)/home'} />;
+    return <Redirect href={pendingInviteToken ? '/invite' : '/home'} />;
   }
 
   return <Redirect href="/(auth)/sign-in" />;

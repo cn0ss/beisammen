@@ -1,43 +1,25 @@
 import { httpRouter } from 'convex/server';
 import { isRateLimitError } from '@convex-dev/rate-limiter';
-import {
-  BILLING_RETURN_PATH,
-  INSTANCE_DISCOVERY_PATH,
-  normalizeBillingReturnSource,
-} from '@beisammen/contracts';
+import { INSTANCE_DISCOVERY_PATH } from '@beisammen/contracts';
 
 import { internal } from './_generated/api';
 import { httpAction } from './_generated/server';
 import {
-  authenticateWorkOSCode,
-  getWorkOSClientId,
-  refreshWorkOSSession,
-} from './lib/workos';
-import {
-  appendParamsToUrl,
-  buildBillingReturnAppUrl,
-  buildCallbackUrlFromEnv,
   buildPublicInstanceConfigFromEnv,
   isRecord,
-  normalizeWorkOSHttpSessionPayload,
 } from './lib/httpHelpers';
+import { revenuecat } from './revenuecat';
 import { isValidEmailAddress, normalizeEmailAddress } from './waitlist';
 
 const http = httpRouter();
 
 export const httpSurface = [
-  'auth.signIn',
-  'auth.callback',
-  'auth.nativeAuthenticate',
-  'auth.refresh',
-  'billing.return',
+  'billing.revenuecatWebhook',
   'healthz',
   'instance.discovery',
   'publicShare.preview',
   'waitlist.join',
 ] as const;
-
-const WORKOS_API_BASE_URL = 'https://api.workos.com';
 
 function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
@@ -211,14 +193,9 @@ http.route({
 });
 
 http.route({
-  path: BILLING_RETURN_PATH,
-  method: 'GET',
-  handler: httpAction(async (_ctx, request) => {
-    const url = new URL(request.url);
-    const source = normalizeBillingReturnSource(url.searchParams.get('source'));
-
-    return Response.redirect(buildBillingReturnAppUrl(process.env, source), 302);
-  }),
+  path: '/webhooks/revenuecat',
+  method: 'POST',
+  handler: revenuecat.httpHandler(),
 });
 
 http.route({
@@ -341,198 +318,6 @@ http.route({
       ok: true,
       ...result,
     });
-  }),
-});
-
-http.route({
-  path: '/auth/sign-in',
-  method: 'GET',
-  handler: httpAction(async (_ctx, request) => {
-    const url = new URL(request.url);
-    const appRedirectUri = url.searchParams.get('app_redirect_uri');
-    const state = url.searchParams.get('state') ?? '';
-
-    if (!appRedirectUri) {
-      return createJsonResponse(
-        { error: 'app_redirect_uri is required.' },
-        { status: 400 },
-      );
-    }
-
-    const authorizeUrl = new URL(`${WORKOS_API_BASE_URL}/user_management/authorize`);
-    authorizeUrl.searchParams.set('provider', 'authkit');
-    authorizeUrl.searchParams.set('response_type', 'code');
-    authorizeUrl.searchParams.set('client_id', getWorkOSClientId());
-    authorizeUrl.searchParams.set('redirect_uri', buildCallbackUrlFromEnv());
-    authorizeUrl.searchParams.set('screen_hint', 'sign-in');
-    authorizeUrl.searchParams.set(
-      'state',
-      JSON.stringify({
-        appRedirectUri,
-        appState: state,
-      }),
-    );
-
-    return Response.redirect(authorizeUrl.toString(), 302);
-  }),
-});
-
-http.route({
-  path: '/auth/callback',
-  method: 'GET',
-  handler: httpAction(async (_ctx, request) => {
-    const url = new URL(request.url);
-    const code = url.searchParams.get('code');
-    const stateParam = url.searchParams.get('state');
-
-    if (!stateParam) {
-      return createJsonResponse({ error: 'state is required.' }, { status: 400 });
-    }
-
-    let state: { appRedirectUri: string; appState?: string };
-
-    try {
-      state = JSON.parse(stateParam) as { appRedirectUri: string; appState?: string };
-    } catch {
-      return createJsonResponse({ error: 'state is invalid.' }, { status: 400 });
-    }
-
-    if (!code) {
-      return Response.redirect(
-        appendParamsToUrl(state.appRedirectUri, {
-          error: 'missing_code',
-          state: state.appState ?? '',
-        }),
-        302,
-      );
-    }
-
-    try {
-      const response = await authenticateWorkOSCode({
-        code,
-        request,
-      });
-      const normalized = normalizeWorkOSHttpSessionPayload(response);
-
-      const redirectTarget = appendParamsToUrl(state.appRedirectUri, {
-        state: state.appState ?? '',
-        access_token: normalized.accessToken,
-        refresh_token: normalized.refreshToken,
-        user_id: normalized.subject,
-        email: normalized.email,
-        first_name: normalized.firstName,
-        last_name: normalized.lastName,
-        display_name: normalized.displayName,
-        avatar_url: normalized.avatarUrl,
-      });
-
-      return Response.redirect(redirectTarget, 302);
-    } catch (error) {
-      return Response.redirect(
-        appendParamsToUrl(state.appRedirectUri, {
-          error: 'authentication_failed',
-          error_description:
-            error instanceof Error ? error.message : 'Authentication failed.',
-          state: state.appState ?? '',
-        }),
-        302,
-      );
-    }
-  }),
-});
-
-http.route({
-  path: '/auth/native/authenticate',
-  method: 'POST',
-  handler: httpAction(async (_ctx, request) => {
-    try {
-      const body: unknown = await request.json().catch(() => null);
-
-      if (!isRecord(body)) {
-        return createJsonResponse(
-          { error: 'Request body must be a JSON object.' },
-          { status: 400 },
-        );
-      }
-
-      const code = typeof body.code === 'string' ? body.code : null;
-      const codeVerifier =
-        typeof body.codeVerifier === 'string' ? body.codeVerifier : null;
-
-      if (!code || !codeVerifier) {
-        return createJsonResponse(
-          { error: 'code and codeVerifier are required.' },
-          { status: 400 },
-        );
-      }
-
-      const response = await authenticateWorkOSCode({
-        code,
-        codeVerifier,
-        request,
-      });
-      const normalized = normalizeWorkOSHttpSessionPayload(response);
-
-      return createJsonResponse({
-        accessToken: normalized.accessToken,
-        refreshToken: normalized.refreshToken,
-        subject: normalized.subject,
-        email: normalized.email,
-        firstName: normalized.firstName,
-        lastName: normalized.lastName,
-        displayName: normalized.displayName,
-        avatarUrl: normalized.avatarUrl,
-      });
-    } catch (error) {
-      return createJsonResponse(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Authentication failed.',
-        },
-        { status: 500 },
-      );
-    }
-  }),
-});
-
-http.route({
-  path: '/auth/refresh',
-  method: 'POST',
-  handler: httpAction(async (_ctx, request) => {
-    try {
-      const body = (await request.json()) as { refreshToken?: string };
-
-      if (!body?.refreshToken) {
-        return createJsonResponse(
-          { error: 'refreshToken is required.' },
-          { status: 400 },
-        );
-      }
-
-      const response = await refreshWorkOSSession({
-        refreshToken: body.refreshToken,
-        request,
-      });
-      const normalized = normalizeWorkOSHttpSessionPayload(response);
-
-      return createJsonResponse({
-        accessToken: normalized.accessToken,
-        refreshToken: normalized.refreshToken,
-        subject: normalized.subject,
-        email: normalized.email,
-        displayName: normalized.displayName,
-        avatarUrl: normalized.avatarUrl,
-      });
-    } catch (error) {
-      return createJsonResponse(
-        {
-          error: error instanceof Error ? error.message : 'Refresh failed.',
-        },
-        { status: 500 },
-      );
-    }
   }),
 });
 

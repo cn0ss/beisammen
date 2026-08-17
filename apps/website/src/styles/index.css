@@ -1,0 +1,253 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./reui-nova.css" layer(components);
+@import "./transitions.css" layer(components);
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Instrument Serif", "New York", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-paper: #f7f4ee;
+  --color-paper-deep: #efeae0;
+  --color-cream: #fdfbf5;
+  --color-ink: #0f0e0c;
+  --color-ember: #c4654a;
+  --color-ember-deep: #a44a32;
+  --color-blush: #f6d8ca;
+  --color-sage: #cfd6c6;
+  --color-moss: #3f7a43;
+
+  --ease-quiet: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-rise: rise 1000ms var(--ease-quiet) both;
+  --animate-drift: drift 14s ease-in-out infinite;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 18px;
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
+    }
+  }
+
+  @keyframes drift {
+    0%,
+    100% {
+      translate: 0 0;
+    }
+    50% {
+      translate: 12px -18px;
+    }
+  }
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: #f7f4ee;
+  --foreground: #0f0e0c;
+  --card: #fdfbf5;
+  --card-foreground: #0f0e0c;
+  --popover: #fdfbf5;
+  --popover-foreground: #0f0e0c;
+  --primary: #0f0e0c;
+  --primary-foreground: #fdfbf5;
+  --secondary: #efeae0;
+  --secondary-foreground: #0f0e0c;
+  --muted: #efeae0;
+  --muted-foreground: rgb(15 14 12 / 0.62);
+  --accent: rgb(196 101 74 / 0.08);
+  --accent-foreground: #0f0e0c;
+  --destructive: #a44a32;
+  --border: rgb(15 14 12 / 0.12);
+  --input: rgb(15 14 12 / 0.12);
+  --ring: #c4654a;
+  --chart-1: #c4654a;
+  --chart-2: #cfd6c6;
+  --chart-3: #f6d8ca;
+  --chart-4: #a44a32;
+  --chart-5: #0f0e0c;
+  --radius: 1rem;
+  --sidebar: #fdfbf5;
+  --sidebar-foreground: #0f0e0c;
+  --sidebar-primary: #0f0e0c;
+  --sidebar-primary-foreground: #fdfbf5;
+  --sidebar-accent: #efeae0;
+  --sidebar-accent-foreground: #0f0e0c;
+  --sidebar-border: rgb(15 14 12 / 0.12);
+  --sidebar-ring: #c4654a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply bg-paper font-sans text-ink antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  body {
+    @apply relative min-h-svh overflow-x-hidden text-base/7;
+    background:
+      radial-gradient(1200px 700px at 85% -10%, rgb(196 101 74 / 0.1), transparent 55%),
+      radial-gradient(900px 700px at -10% 20%, rgb(207 214 198 / 0.35), transparent 60%),
+      var(--color-paper);
+    background-attachment: fixed;
+  }
+
+  /* Paper grain overlay — part of the brand's tactile feel. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0.045;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  ::selection {
+    background: var(--color-ember);
+    color: var(--color-cream);
+  }
+
+  .cn-font-heading {
+    font-family: var(--font-heading);
+  }
+
+  /* The spinner-check badge sits on the cream waitlist button — tint the
+     recipe's track/arc toward ink so they stay visible there. */
+  .cn-button .t-check-ring {
+    border-color: rgb(15 14 12 / 0.18);
+  }
+  .cn-button .t-check-arc {
+    border-top-color: var(--color-ink);
+  }
+}
+
+/* Long-form policy content (privacy, delete account). */
+@utility prose {
+  color: --alpha(var(--color-ink) / 72%);
+  font-size: var(--text-base);
+  line-height: --spacing(7);
+
+  & > * + * {
+    margin-top: --spacing(4);
+  }
+
+  & h2 {
+    margin-top: --spacing(12);
+    color: var(--color-ink);
+    font-size: var(--text-2xl);
+    line-height: var(--text-2xl--line-height);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  & ul {
+    padding-left: --spacing(5);
+    list-style-type: disc;
+  }
+
+  & ol {
+    padding-left: --spacing(5);
+    list-style-type: decimal;
+  }
+
+  & li {
+    margin-top: --spacing(2);
+    padding-left: --spacing(1);
+  }
+
+  & a {
+    color: var(--color-ember);
+    border-bottom: 1px solid --alpha(var(--color-ember) / 40%);
+  }
+
+  @variant hover {
+    & a:hover {
+      border-bottom-color: var(--color-ember);
+    }
+  }
+
+  & strong {
+    color: var(--color-ink);
+    font-weight: var(--font-weight-semibold);
+  }
+}
+
+/* Scroll-reveal helper driven by the Reveal component. */
+@utility reveal {
+  opacity: 0;
+  translate: 0 22px;
+  transition:
+    opacity 800ms var(--ease-quiet),
+    translate 800ms var(--ease-quiet);
+
+  &[data-revealed] {
+    opacity: 1;
+    translate: 0 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    opacity: 1;
+    translate: 0 0;
+    transition: none;
+  }
+}

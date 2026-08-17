@@ -11,21 +11,23 @@ Private and noncommercial self-hosting is allowed under the repository license.
 
 ## Expectations
 
-- every self-hosted deployment uses WorkOS for authentication
-- you provide your own WorkOS tenant, client, and redirect/domain configuration
+- every self-hosted deployment uses Clerk for authentication
+- you provide your own Clerk application (JWT template named `convex`, Native
+  API enabled) and its publishable key
 - you bring your own S3-compatible storage credentials; new uploads require S3
 - you operate your own deployment and backups
-- billing is disabled; no Autumn, payment plans, upload-count limit, or video
-  duration limit is required for self-hosted instances
+- billing is disabled; no RevenueCat, payment plans, upload-count limit, or
+  video duration limit is required for self-hosted instances
 - support is best-effort only
 
 ## Supported self-hosted auth mode
 
-### `self-hosted-workos`
+### `self-hosted-clerk`
 
 - required for all current self-hosted installs
-- supports the same hosted-browser and native-client flows as the official app
-- requires your own WorkOS tenant and redirect/domain configuration
+- uses the same native in-app Clerk sign-in flow as the official app
+- requires your own Clerk application; set `CLERK_JWT_ISSUER_DOMAIN` on the
+  backend and serve the publishable key through the discovery manifest
 
 ## App connection model
 
@@ -34,9 +36,8 @@ Private and noncommercial self-hosting is allowed under the repository license.
   `beisammen://connect?instance=https://your-host`
 - the instance must serve a public discovery manifest at
   `https://your-host/.well-known/beisammen-instance.json`
-- the manifest tells the app which Convex client URL, auth mode, public WorkOS
-  client ID or hosted sign-in URL, deployment kind, billing mode, and storage
-  capabilities to use
+- the manifest tells the app which Convex client URL, Clerk publishable key,
+  deployment kind, billing mode, and storage capabilities to use
 - links with both `instance` and `invite` switch the active instance before
   storing the invite token locally
 

@@ -10,10 +10,10 @@
 
 - Convex stores app state and media metadata
 - original media files stay in user-managed storage
-- auth is standardized on WorkOS across official and self-hosted deployments
+- auth is standardized on Clerk across official and self-hosted deployments
 - mobile only receives public configuration through local app config
-- official cloud deployments use the Autumn Convex component for plans,
-  checkout, billing portal, and usage metering
+- official cloud deployments use RevenueCat (via the `convex-revenuecat`
+  component) for subscription entitlements; usage quotas are enforced by Convex
 - self-hosted deployments disable billing and app-enforced media limits
 
 ## Instance contract
@@ -24,7 +24,7 @@
 - the app resolves the bundled default instance locally for first launch
 - custom/self-hosted instances expose `/.well-known/beisammen-instance.json`
 - the discovery manifest contains only public client config: instance identity,
-  Convex client URL, auth mode, WorkOS public client ID or hosted sign-in URL,
+  Convex client URL, Clerk publishable key,
   storage provider capabilities, deployment kind, billing provider/plan
   summaries, and minimum app version
 - `beisammen://connect?instance=https://your-host` switches the active
@@ -98,23 +98,31 @@ page of signed media URLs.
 ## Billing model
 
 - `cloud`: `PUBLIC_DEPLOYMENT_KIND=cloud`; discovery advertises
-  `billing.enabled=true` with provider `autumn`; the default public plan list is
-  paid-only. Autumn customers are Beisammen users, and media usage for a circle
-  is charged to that circle's `billingOwnerId` only. Invited members consume the
-  owner's plan when they upload into that owner's circle; their own plan is not
-  used for circles they do not own. Autumn `entity_id` is the circle id so usage
-  can be attributed per circle while limits stay pooled across all circles owned
-  by the paying user.
+  `billing.enabled=true` with provider `revenuecat`; the default public plan
+  list is paid-only. RevenueCat `app_user_id` is the Convex user id
+  (`Purchases.logIn(viewerId)` on mobile). Media usage for a circle is charged
+  to that circle's `billingOwnerId` only. Invited members consume the owner's
+  plan when they upload into that owner's circle; their own plan is not used for
+  circles they do not own. Limits stay pooled across all circles owned by the
+  paying user.
+- Usage quotas are Convex-owned: RevenueCat only syncs subscription
+  entitlements (`cloud_plus`, `cloud_max` — entitlement ids equal plan
+  ids) through the `/webhooks/revenuecat` endpoint into component tables. Hard
+  caps per tier live in `convex/lib/billing/plans.ts`; monthly upload counters
+  (UTC calendar month, lazy `YYYY-MM` period rows in `billingUsage`) and a
+  lifetime storage gauge (`billingStorage`) are checked and adjusted by
+  `convex/lib/billing/quota.ts`. No overages.
 - `self-hosted`: `PUBLIC_DEPLOYMENT_KIND=self-hosted`; discovery advertises
   `billing.enabled=false`; upload count and video duration beta limits are not
   enforced, while file type validation still applies.
 - Plan labels shown in the mobile app come from `PUBLIC_BILLING_PLANS`, falling
-  back to the repository paid plan defaults. The billing product definition
-  lives in the root `autumn.config.ts`; `docs/billing/autumn.config.ts`
-  documents the CLI workflow.
-- Convex setup requires `app.use(autumn)` in `convex/convex.config.ts`,
-  `convex/autumn.ts` for user identification, and `AUTUMN_SECRET_KEY` set in the
-  Convex environment.
+  back to the repository paid plan defaults. Products, entitlements, and the
+  `default` offering are configured in the RevenueCat dashboard; purchases run
+  through native in-app purchases (`react-native-purchases`), and subscription
+  management uses the RevenueCat Customer Center.
+- Convex setup requires `app.use(revenuecat)` in `convex/convex.config.ts`,
+  the shared client in `convex/revenuecat.ts`, and `REVENUECAT_WEBHOOK_AUTH`
+  set in the Convex environment (matching the webhook Authorization header).
 
 ## Future services
 

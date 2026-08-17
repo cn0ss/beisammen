@@ -1,41 +1,35 @@
 import { v } from 'convex/values';
 
 import type {
-  BillingCheckoutResult,
-  BillingPortalSessionResult,
   BillingStatus,
+  CircleCreationReadiness,
   CircleUploadReadiness,
 } from '@beisammen/contracts';
 
-import { internal } from './_generated/api';
-import type { Doc, Id } from './_generated/dataModel';
-import { action, internalQuery } from './_generated/server';
+import type { Id } from './_generated/dataModel';
+import { internalQuery, query } from './_generated/server';
+import { countOwnedCircles } from './billingUsage';
+import { CLOUD_PLAN_QUOTAS } from './lib/billing/plans';
 import {
-  createCloudCheckout,
-  createCloudPortalSession,
-  getCloudBillingStatus,
-  isAutumnConfigured,
   BILLING_FEATURE_IDS,
-} from './lib/billing/autumn';
-import {
   CloudOwnerFeatureAccessError,
   type CircleBillingContext,
+  getCloudBillingStatus,
   getCloudOwnerBillingStatus,
+  isBillingConfigured,
   requireCloudOwnerFeatureAccess,
   resolveCircleBillingOwner,
-} from './lib/billing/owner';
-import { getDeploymentPolicyFromEnv, readCloudBillingPlansFromEnv } from './lib/instance';
-import { requireCircleMembership, requireViewer } from './lib/viewer';
+  resolveOwnerPlanTier,
+} from './lib/billing/quota';
+import { getDeploymentPolicyFromEnv } from './lib/instance';
+import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const billingFunctionSurface = [
   'billing.status',
   'billing.statusForCircle',
   'billing.uploadReadinessForCircle',
-  'billing.createCheckout',
-  'billing.createPortalSession',
+  'billing.circleCreationReadiness',
 ] as const;
-
-export type BillingViewer = Pick<Doc<'users'>, '_id' | 'displayName' | 'email'>;
 
 function selfHostedBillingStatus(): BillingStatus {
   return {
@@ -50,19 +44,6 @@ function selfHostedBillingStatus(): BillingStatus {
     balances: [],
   };
 }
-
-export const getViewerForBilling = internalQuery({
-  args: {},
-  handler: async (ctx): Promise<BillingViewer> => {
-    const viewer = await requireViewer(ctx);
-
-    return {
-      _id: viewer._id,
-      ...(viewer.displayName ? { displayName: viewer.displayName } : {}),
-      ...(viewer.email ? { email: viewer.email } : {}),
-    };
-  },
-});
 
 export const getCircleOwnerForBilling = internalQuery({
   args: {
@@ -82,7 +63,7 @@ export const getCircleOwnerForBilling = internalQuery({
   },
 });
 
-export const status = action({
+export const status = query({
   args: {},
   handler: async (ctx): Promise<BillingStatus> => {
     const policy = getDeploymentPolicyFromEnv();
@@ -91,13 +72,17 @@ export const status = action({
       return selfHostedBillingStatus();
     }
 
-    const viewer: BillingViewer = await ctx.runQuery(internal.billing.getViewerForBilling, {});
+    const viewer = await requireViewer(ctx);
 
-    return await getCloudBillingStatus(ctx, viewer);
+    return await getCloudBillingStatus(ctx, {
+      _id: viewer._id,
+      ...(viewer.displayName ? { displayName: viewer.displayName } : {}),
+      ...(viewer.email ? { email: viewer.email } : {}),
+    });
   },
 });
 
-export const statusForCircle = action({
+export const statusForCircle = query({
   args: {
     circleId: v.id('circles'),
   },
@@ -108,35 +93,143 @@ export const statusForCircle = action({
       return selfHostedBillingStatus();
     }
 
-    const billingContext: CircleBillingContext = await ctx.runQuery(
-      internal.billing.getCircleOwnerForBilling,
-      {
-        circleId: args.circleId,
-      },
-    );
+    const viewer = await requireViewer(ctx);
+    await requireCircleMembership(ctx, viewer._id, args.circleId);
+    const billingOwner = await resolveCircleBillingOwner(ctx, args.circleId);
 
-    if (billingContext.viewerId !== billingContext.billingOwner._id) {
+    if (viewer._id !== billingOwner._id) {
       throw new Error('Only the circle billing owner can view this billing status.');
     }
 
-    return await getCloudOwnerBillingStatus(ctx, billingContext.billingOwner);
+    return await getCloudOwnerBillingStatus(ctx, billingOwner);
   },
 });
 
-export const uploadReadinessForCircle = action({
+export const circleCreationReadiness = query({
+  args: {},
+  handler: async (ctx): Promise<CircleCreationReadiness | null> => {
+    const policy = getDeploymentPolicyFromEnv();
+    // Tolerate auth transitions while the client is subscribed.
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
+      return null;
+    }
+
+    const viewer = await findViewer(ctx);
+
+    if (!viewer) {
+      return null;
+    }
+
+    if (policy.isSelfHosted) {
+      return {
+        deployment: 'self-hosted',
+        canCreate: true,
+        billingRequired: false,
+        reason: 'self_hosted',
+        message: 'Self-hosted instances do not limit circle creation.',
+        usedCircles: null,
+        maxCircles: null,
+      };
+    }
+
+    if (!isBillingConfigured()) {
+      // Without billing there is nothing to meter; uploads are gated separately.
+      return {
+        deployment: 'cloud',
+        canCreate: true,
+        billingRequired: false,
+        reason: 'billing_not_configured',
+        message: 'Cloud billing is not configured; circle creation is not metered.',
+        usedCircles: null,
+        maxCircles: null,
+      };
+    }
+
+    const usedCircles = await countOwnedCircles(ctx, viewer._id);
+
+    try {
+      const tier = await resolveOwnerPlanTier(ctx, viewer._id);
+
+      if (!tier) {
+        return {
+          deployment: 'cloud',
+          canCreate: false,
+          billingRequired: true,
+          reason: 'plan_required',
+          message: 'An active cloud plan is required to create a circle.',
+          usedCircles,
+          maxCircles: null,
+        };
+      }
+
+      const maxCircles = CLOUD_PLAN_QUOTAS[tier].maxCircles;
+
+      if (usedCircles >= maxCircles) {
+        return {
+          deployment: 'cloud',
+          canCreate: false,
+          billingRequired: true,
+          reason: 'limit_reached',
+          message: 'The cloud plan circle limit is reached.',
+          usedCircles,
+          maxCircles,
+        };
+      }
+
+      return {
+        deployment: 'cloud',
+        canCreate: true,
+        billingRequired: true,
+        reason: 'ready',
+        message: 'The cloud plan has a free circle slot.',
+        usedCircles,
+        maxCircles,
+      };
+    } catch {
+      return {
+        deployment: 'cloud',
+        canCreate: false,
+        billingRequired: true,
+        reason: 'billing_check_failed',
+        message: 'Cloud billing could not be checked. Try again shortly.',
+        usedCircles,
+        maxCircles: null,
+      };
+    }
+  },
+});
+
+export const uploadReadinessForCircle = query({
   args: {
     circleId: v.id('circles'),
   },
-  handler: async (ctx, args): Promise<CircleUploadReadiness> => {
+  handler: async (ctx, args): Promise<CircleUploadReadiness | null> => {
     const policy = getDeploymentPolicyFromEnv();
-    const billingContext: CircleBillingContext = await ctx.runQuery(
-      internal.billing.getCircleOwnerForBilling,
-      {
-        circleId: args.circleId,
-      },
-    );
-    const viewerIsBillingOwner =
-      billingContext.viewerId === billingContext.billingOwner._id;
+    // Subscribed with a client-held circle id: tolerate auth transitions and
+    // circle deletion mid-subscription by returning null.
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
+      return null;
+    }
+
+    const viewer = await findViewer(ctx);
+
+    if (!viewer) {
+      return null;
+    }
+
+    const membership = await getViewerMembership(ctx, viewer._id, args.circleId);
+    const circle = await ctx.db.get(args.circleId);
+
+    if (!membership || !circle) {
+      return null;
+    }
+
+    const billingOwner = await resolveCircleBillingOwner(ctx, args.circleId);
+    const viewerIsBillingOwner = viewer._id === billingOwner._id;
 
     if (policy.isSelfHosted) {
       return {
@@ -149,7 +242,7 @@ export const uploadReadinessForCircle = action({
       };
     }
 
-    if (!isAutumnConfigured()) {
+    if (!isBillingConfigured()) {
       return {
         deployment: 'cloud',
         canUpload: false,
@@ -164,14 +257,10 @@ export const uploadReadinessForCircle = action({
 
     try {
       await requireCloudOwnerFeatureAccess(ctx, {
-        owner: billingContext.billingOwner,
-        entityId: billingContext.entityId,
-        featureId: BILLING_FEATURE_IDS.mediaUploads,
+        owner: billingOwner,
+        entityId: args.circleId,
+        featureId: BILLING_FEATURE_IDS.storageBytes,
         requiredBalance: 1,
-        properties: {
-          circleId: args.circleId,
-          readiness: true,
-        },
       });
 
       return {
@@ -183,77 +272,33 @@ export const uploadReadinessForCircle = action({
         message: 'Cloud billing is ready for media uploads.',
       };
     } catch (error) {
-      const planRequired =
-        error instanceof CloudOwnerFeatureAccessError && error.reason === 'not_allowed';
+      const accessError =
+        error instanceof CloudOwnerFeatureAccessError ? error : null;
+      const reason: CircleUploadReadiness['reason'] =
+        accessError?.reason === 'not_allowed'
+          ? 'plan_required'
+          : accessError?.reason === 'quota_exceeded'
+            ? 'quota_exceeded'
+            : 'billing_check_failed';
+      const message =
+        reason === 'plan_required'
+          ? viewerIsBillingOwner
+            ? 'Choose an active cloud plan before uploading media.'
+            : 'The circle billing owner needs an active cloud plan before members can upload.'
+          : reason === 'quota_exceeded'
+            ? viewerIsBillingOwner
+              ? 'Your cloud plan storage is full. Free up space or upgrade your plan.'
+              : 'The circle billing owner has no cloud storage left.'
+            : 'Cloud billing could not be checked. Try again before uploading media.';
 
       return {
         deployment: 'cloud',
         canUpload: false,
         viewerIsBillingOwner,
         billingRequired: true,
-        reason: planRequired ? 'plan_required' : 'billing_check_failed',
-        message: planRequired
-          ? viewerIsBillingOwner
-            ? 'Choose an active cloud plan before uploading media.'
-            : 'The circle billing owner needs an active cloud plan before members can upload.'
-          : 'Cloud billing could not be checked. Try again before uploading media.',
+        reason,
+        message,
       };
     }
-  },
-});
-
-export const createCheckout = action({
-  args: {
-    planId: v.string(),
-    successUrl: v.optional(v.string()),
-  },
-  handler: async (ctx, args): Promise<BillingCheckoutResult> => {
-    const policy = getDeploymentPolicyFromEnv();
-
-    if (policy.isSelfHosted) {
-      return {
-        billingEnabled: false,
-        checkoutUrl: null,
-      };
-    }
-
-    if (!isAutumnConfigured()) {
-      throw new Error('Autumn billing is not configured for this cloud deployment.');
-    }
-
-    const plans = readCloudBillingPlansFromEnv();
-
-    if (!plans.some((plan) => plan.id === args.planId)) {
-      throw new Error('Unknown billing plan.');
-    }
-
-    return await createCloudCheckout(ctx, {
-      planId: args.planId,
-      ...(args.successUrl ? { successUrl: args.successUrl } : {}),
-    });
-  },
-});
-
-export const createPortalSession = action({
-  args: {
-    returnUrl: v.optional(v.string()),
-  },
-  handler: async (ctx, args): Promise<BillingPortalSessionResult> => {
-    const policy = getDeploymentPolicyFromEnv();
-
-    if (policy.isSelfHosted) {
-      return {
-        billingEnabled: false,
-        portalUrl: null,
-      };
-    }
-
-    if (!isAutumnConfigured()) {
-      throw new Error('Autumn billing is not configured for this cloud deployment.');
-    }
-
-    return await createCloudPortalSession(ctx, {
-      ...(args.returnUrl ? { returnUrl: args.returnUrl } : {}),
-    });
   },
 });

@@ -32,13 +32,15 @@ const storageReference = v.union(
 export default defineSchema({
   users: defineTable({
     tokenIdentifier: v.string(),
-    authProvider: v.union(v.literal('workos'), v.literal('convex-auth')),
+    authProvider: v.literal('clerk'),
     authSubject: v.string(),
     email: v.optional(v.string()),
     displayName: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
     profileImageStorage: v.optional(storageReference),
     profileImageSizeBytes: v.optional(v.number()),
+    deletionRequestedAt: v.optional(v.number()),
+    deletionCompletedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index('by_token_identifier', ['tokenIdentifier'])
@@ -53,7 +55,37 @@ export default defineSchema({
     billingOwnerId: v.optional(v.id('users')),
     createdBy: v.id('users'),
     createdAt: v.number(),
-  }).index('by_created_by', ['createdBy']),
+  })
+    .index('by_created_by', ['createdBy'])
+    .index('by_billing_owner', ['billingOwnerId']),
+
+  // Convex-enforced usage quotas. Upload counters are per UTC calendar month
+  // ('YYYY-MM' period key); stale period rows are kept as audit history.
+  billingUsage: defineTable({
+    ownerId: v.id('users'),
+    periodKey: v.string(),
+    uploadCount: v.number(),
+  }).index('by_owner_and_period', ['ownerId', 'periodKey']),
+
+  // Lifetime storage gauge, one row per billing owner.
+  billingStorage: defineTable({
+    ownerId: v.id('users'),
+    totalBytes: v.number(),
+  }).index('by_owner', ['ownerId']),
+
+  // Retention state for billing owners whose plan lapsed while they still
+  // store data. Grace runs from detection; warnings are emailed after grace,
+  // and deletion stays a manual admin step (rows only mark eligibility).
+  billingRetention: defineTable({
+    ownerId: v.id('users'),
+    lapsedAt: v.number(),
+    warningCount: v.number(),
+    lastWarnedAt: v.optional(v.number()),
+    deletableAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('by_owner', ['ownerId'])
+    .index('by_deletable_at', ['deletableAt']),
 
   circleMembers: defineTable({
     circleId: v.id('circles'),
@@ -63,6 +95,7 @@ export default defineSchema({
   })
     .index('by_circle', ['circleId'])
     .index('by_user', ['userId'])
+    .index('by_user_and_role', ['userId', 'role'])
     .index('by_user_and_joined_at', ['userId', 'joinedAt'])
     .index('by_circle_and_user', ['circleId', 'userId'])
     .index('by_circle_and_role', ['circleId', 'role']),
@@ -97,6 +130,8 @@ export default defineSchema({
     .index('by_circle', ['circleId'])
     .index('by_circle_and_expires_at', ['circleId', 'expiresAt'])
     .index('by_invited_email', ['invitedEmail'])
+    .index('by_invited_by', ['invitedBy'])
+    .index('by_accepted_by', ['acceptedBy'])
     .index('by_token_hash', ['tokenHash']),
 
   publicCircleLinks: defineTable({
@@ -112,6 +147,7 @@ export default defineSchema({
   })
     .index('by_circle', ['circleId'])
     .index('by_circle_and_status', ['circleId', 'status'])
+    .index('by_created_by', ['createdBy'])
     .index('by_status_and_expires_at', ['status', 'expiresAt'])
     .index('by_token_hash', ['tokenHash']),
 
@@ -232,6 +268,7 @@ export default defineSchema({
     .index('by_status_and_created_at', ['status', 'createdAt'])
     .index('by_asset', ['assetId'])
     .index('by_share_batch', ['shareBatchId'])
+    .index('by_created_by', ['createdBy'])
     .index('by_share_batch_and_status', ['shareBatchId', 'status']),
 
   imageUploads: defineTable({
@@ -282,6 +319,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index('by_circle', ['circleId'])
+    .index('by_actor', ['actorId'])
     .index('by_share_batch', ['shareBatchId'])
     .index('by_circle_and_entity_id', ['circleId', 'entityId'])
     .index('by_circle_and_created_at', ['circleId', 'createdAt']),
@@ -299,6 +337,7 @@ export default defineSchema({
     readAt: v.optional(v.number()),
   })
     .index('by_user_and_created_at', ['userId', 'createdAt'])
+    .index('by_actor', ['actorId'])
     .index('by_user_and_status_and_created_at', ['userId', 'status', 'createdAt'])
     .index('by_activity_event_id', ['activityEventId'])
     .index('by_share_batch', ['shareBatchId']),
@@ -388,6 +427,7 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
   })
     .index('by_share_batch', ['shareBatchId'])
+    .index('by_author', ['authorId'])
     .index('by_asset', ['assetId'])
     .index('by_circle_and_share_batch', ['circleId', 'shareBatchId'])
     .index('by_share_batch_and_status', ['shareBatchId', 'status'])
@@ -397,6 +437,18 @@ export default defineSchema({
       'status',
       'createdAt',
     ]),
+
+  // Client compatibility gate, one singleton row (key 'default'), managed via
+  // `npx convex run appConfig:set`. An absent row (fresh or self-hosted
+  // instances) means no restrictions.
+  appConfig: defineTable({
+    key: v.string(),
+    minSupportedAppVersion: v.optional(v.string()),
+    forceUpdateMessage: v.optional(v.string()),
+    maintenanceMode: v.optional(v.boolean()),
+    maintenanceMessage: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index('by_key', ['key']),
 
   reactions: defineTable({
     shareBatchId: v.id('shareBatches'),
@@ -410,6 +462,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index('by_share_batch', ['shareBatchId'])
+    .index('by_user', ['userId'])
     .index('by_asset', ['assetId'])
     .index('by_circle_and_share_batch', ['circleId', 'shareBatchId'])
     .index('by_share_target', ['shareBatchId', 'targetKey'])

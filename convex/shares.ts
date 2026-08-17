@@ -3,21 +3,28 @@ import { v } from 'convex/values';
 import type { EngagementSummary } from '@beisammen/contracts';
 
 import type { Doc, Id } from './_generated/dataModel';
-import type { MutationCtx, QueryCtx } from './_generated/server';
-import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
+import type { ActionCtx, MutationCtx, QueryCtx } from './_generated/server';
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from './_generated/server';
 import { internal } from './_generated/api';
 import { adjustCircleStats, assetStatsDelta } from './circleStats';
-import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
+import {
+  BILLING_FEATURE_IDS,
+  type BillingOwner,
+  resolveCircleBillingOwner,
+  trackCloudOwnerUsage,
+} from './lib/billing/quota';
 import { createActivityEventWithInbox } from './lib/activity';
 import {
   createMemoryItemsForPublishedShare,
   removeMemoryItemFromDiscoverySummaries,
 } from './memories';
-import {
-  type BillingOwner,
-  resolveCircleBillingOwner,
-  trackCloudOwnerUsage,
-} from './lib/billing/owner';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { listShareAssetsForDisplay } from './lib/shareAssets';
 import {
@@ -32,7 +39,7 @@ import {
   engagementTargetKey,
   fallbackEngagementSummary,
 } from './lib/engagement';
-import { requireCircleMembership, requireViewer } from './lib/viewer';
+import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const shareFunctionSurface = [
   'shares.getOrCreateDraft',
@@ -262,8 +269,17 @@ export const getDraftForCircle = query({
     circleId: v.id('circles'),
   },
   handler: async (ctx, args) => {
-    const viewer = await requireViewer(ctx);
-    await requireCircleMembership(ctx, viewer._id, args.circleId);
+    // Subscribed draft lookup: tolerate auth transitions and circle deletion.
+    const identity = await ctx.auth.getUserIdentity();
+    const viewer = identity ? await findViewer(ctx) : null;
+    const membership = viewer
+      ? await getViewerMembership(ctx, viewer._id, args.circleId)
+      : null;
+
+    if (!viewer || !membership) {
+      return null;
+    }
+
     const [draft] = await ctx.db
       .query('shareBatches')
       .withIndex('by_circle_and_author_and_status', (q) =>
@@ -412,8 +428,16 @@ export const listForCircle = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
-    const viewer = await requireViewer(ctx);
-    await requireCircleMembership(ctx, viewer._id, args.circleId);
+    // Subscribed feed: tolerate auth transitions and circle deletion.
+    const identity = await ctx.auth.getUserIdentity();
+    const viewer = identity ? await findViewer(ctx) : null;
+    const membership = viewer
+      ? await getViewerMembership(ctx, viewer._id, args.circleId)
+      : null;
+
+    if (!viewer || !membership) {
+      return { page: [], isDone: true, continueCursor: '' };
+    }
 
     const shareBatches = await ctx.db
       .query('shareBatches')
@@ -436,19 +460,28 @@ export const listForCircle = query({
 export const getDeleteContext = internalQuery({
   args: {
     shareBatchId: v.id('shareBatches'),
+    deletingUserId: v.optional(v.id('users')),
   },
   handler: async (ctx, args) => {
-    const viewer = await requireViewer(ctx);
     const shareBatch = await ctx.db.get(args.shareBatchId);
 
     if (!shareBatch) {
       throw new Error('Share batch not found.');
     }
 
-    await requireCircleMembership(ctx, viewer._id, shareBatch.circleId);
+    const deletingUserId = args.deletingUserId;
 
-    if (shareBatch.authorId !== viewer._id) {
-      throw new Error('Only the author can delete this post.');
+    if (deletingUserId) {
+      if (shareBatch.authorId !== deletingUserId) {
+        throw new Error('The account does not own this post.');
+      }
+    } else {
+      const viewer = await requireViewer(ctx);
+      await requireCircleMembership(ctx, viewer._id, shareBatch.circleId);
+
+      if (shareBatch.authorId !== viewer._id) {
+        throw new Error('Only the author can delete this post.');
+      }
     }
 
     const assetsPage = await ctx.db
@@ -704,20 +737,17 @@ export const finalizeDelete = internalMutation({
   },
 });
 
-export const deleteShare = action({
-  args: {
-    shareBatchId: v.id('shareBatches'),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    shareBatchId: Id<'shareBatches'>;
-  }> => {
-    const policy = getDeploymentPolicyFromEnv();
-    let deletedShareBatchId: Id<'shareBatches'> | null = null;
+async function deleteShareData(
+  ctx: ActionCtx,
+  args: { shareBatchId: Id<'shareBatches'> },
+  deletingUserId?: Id<'users'>,
+): Promise<{
+  shareBatchId: Id<'shareBatches'>;
+}> {
+  const policy = getDeploymentPolicyFromEnv();
+  let deletedShareBatchId: Id<'shareBatches'> | null = null;
 
-    while (deletedShareBatchId === null) {
+  while (deletedShareBatchId === null) {
       const deleteContext: {
         shareBatchId: Id<'shareBatches'>;
         circleId: Id<'circles'>;
@@ -735,6 +765,7 @@ export const deleteShare = action({
         storageReferences: Doc<'assets'>['storage'][];
       } = await ctx.runQuery(internal.shares.getDeleteContext, {
         shareBatchId: args.shareBatchId,
+        ...(deletingUserId ? { deletingUserId } : {}),
       }) as unknown as {
         shareBatchId: Id<'shareBatches'>;
         circleId: Id<'circles'>;
@@ -827,7 +858,7 @@ export const deleteShare = action({
               },
             });
           } catch (refundError) {
-            console.error('Failed to refund Autumn storage credit after delete failure.', refundError);
+            console.error('Failed to refund storage credit after delete failure.', refundError);
           }
         }
 
@@ -835,8 +866,23 @@ export const deleteShare = action({
       }
     }
 
-    return {
-      shareBatchId: deletedShareBatchId,
-    };
+  return {
+    shareBatchId: deletedShareBatchId,
+  };
+}
+
+export const deleteShare = action({
+  args: {
+    shareBatchId: v.id('shareBatches'),
   },
+  handler: async (ctx, args) => await deleteShareData(ctx, args),
+});
+
+export const deleteShareForAccountDeletion = internalAction({
+  args: {
+    shareBatchId: v.id('shareBatches'),
+    userId: v.id('users'),
+  },
+  handler: async (ctx, args) =>
+    await deleteShareData(ctx, { shareBatchId: args.shareBatchId }, args.userId),
 });

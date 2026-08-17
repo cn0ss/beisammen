@@ -5,12 +5,12 @@ import type { QueryCtx } from './_generated/server';
 import { action, internalMutation, internalQuery, query } from './_generated/server';
 import { internal } from './_generated/api';
 import { adjustCircleStats, assetStatsDelta } from './circleStats';
-import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
 import {
+  BILLING_FEATURE_IDS,
   type BillingOwner,
   resolveCircleBillingOwner,
   trackCloudOwnerUsage,
-} from './lib/billing/owner';
+} from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { listShareAssetsForDisplay } from './lib/shareAssets';
 import { createS3ReadUrl } from './lib/storage/s3';
@@ -328,7 +328,7 @@ export const deleteDraftAsset = action({
             },
           });
         } catch (refundError) {
-          console.error('Failed to refund Autumn storage credit after asset delete failure.', refundError);
+          console.error('Failed to refund storage credit after asset delete failure.', refundError);
         }
       }
 

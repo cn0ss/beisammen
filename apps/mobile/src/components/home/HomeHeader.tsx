@@ -1,8 +1,10 @@
+import { T, useGT } from 'gt-react-native';
 import { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Fonts, FontSize, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
 import { Avatar } from '@/components/ui';
 
@@ -12,14 +14,14 @@ interface HomeHeaderProps {
   onOpenSettings: () => void;
 }
 
-const DATE_FORMATTER = new Intl.DateTimeFormat('de-DE', {
+const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
   day: '2-digit',
   month: 'short',
-});
+};
 
-function formatEditorialDate(now: Date): string {
-  const parts = DATE_FORMATTER.formatToParts(now);
+function formatEditorialDate(now: Date, format: Intl.DateTimeFormat): string {
+  const parts = format.formatToParts(now);
   const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
   const day = parts.find((p) => p.type === 'day')?.value ?? '';
   const month = parts.find((p) => p.type === 'month')?.value.replace('.', '') ?? '';
@@ -32,7 +34,9 @@ export const HomeHeader = memo(function HomeHeader({
   onOpenSettings,
 }: HomeHeaderProps) {
   const theme = useTheme();
-  const editorialDate = useMemo(() => formatEditorialDate(new Date()), []);
+  const gt = useGT();
+  const dateFormat = useDateFormat(DATE_FORMAT_OPTIONS);
+  const editorialDate = useMemo(() => formatEditorialDate(new Date(), dateFormat), [dateFormat]);
 
   return (
     <View style={styles.wrapper}>
@@ -50,7 +54,7 @@ export const HomeHeader = memo(function HomeHeader({
           onPress={onOpenSettings}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Einstellungen öffnen"
+          accessibilityLabel={gt('Einstellungen öffnen')}
           style={({ pressed }) => ({
             opacity: pressed ? 0.7 : 1,
           })}
@@ -74,12 +78,14 @@ export const HomeHeader = memo(function HomeHeader({
         </Text>
       </View>
 
-      <Text
-        allowFontScaling={false}
-        style={[styles.subtitle, { color: theme.textSecondary }]}
-      >
-        Geteilte Momente, für die Menschen, die zählen.
-      </Text>
+      <T>
+        <Text
+          allowFontScaling={false}
+          style={[styles.subtitle, { color: theme.textSecondary }]}
+        >
+          Geteilte Momente, für die Menschen, die zählen.
+        </Text>
+      </T>
     </View>
   );
 });

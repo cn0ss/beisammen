@@ -2,17 +2,19 @@ import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 
 import type { Doc, Id } from './_generated/dataModel';
-import type { ActionCtx } from './_generated/server';
+import type { ActionCtx, MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import { adjustCircleStats, getCircleStatsOrFallback } from './circleStats';
-import { BILLING_FEATURE_IDS } from './lib/billing/autumn';
 import {
+  BILLING_FEATURE_IDS,
   type BillingOwner,
+  CloudOwnerFeatureAccessError,
+  isBillingConfigured,
   requireCloudOwnerFeatureAccess,
   resolveCircleBillingOwner,
   trackCloudOwnerUsage,
-} from './lib/billing/owner';
+} from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { canManageCircle, isOwnerRole } from './lib/permissions';
 import { createS3ReadUrl, createS3UploadTarget, verifyS3ObjectExists } from './lib/storage/s3';
@@ -25,7 +27,7 @@ import {
   resolveConvexReadUrl,
   storageReferenceKey,
 } from './lib/storage/shared';
-import { requireCircleMembership, requireViewer } from './lib/viewer';
+import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const circleFunctionSurface = [
   'circles.create',
@@ -41,6 +43,7 @@ export const circleFunctionSurface = [
   'circles.completeImageUpload',
   'circles.removeImage',
   'circles.getImageReadUrl',
+  'circles.deleteOwn',
 ] as const;
 
 export const CIRCLE_MEMBER_LIST_LIMIT = 200;
@@ -92,8 +95,53 @@ async function refundCloudCircleImageUsage(input: {
         properties: input.properties,
       });
     } catch (error) {
-      console.error('Failed to refund Autumn circle image usage.', error);
+      console.error('Failed to refund circle image usage.', error);
     }
+  }
+}
+
+function billingOwnerFromUser(user: Doc<'users'>): BillingOwner {
+  return {
+    _id: user._id,
+    ...(user.displayName ? { displayName: user.displayName } : {}),
+    ...(user.email ? { email: user.email } : {}),
+  };
+}
+
+/**
+ * Becoming a circle's billing owner (creating one, or receiving ownership)
+ * consumes one of that user's plan circle slots. Self-hosted instances and
+ * cloud deployments without billing configured skip the check; existing
+ * circles are never affected — a downgrade only blocks taking on new ones.
+ */
+async function requireCircleBillingAllowance(
+  ctx: MutationCtx,
+  owner: BillingOwner,
+  messages: { planRequired: string; limitReached: string },
+): Promise<void> {
+  if (getDeploymentPolicyFromEnv().isSelfHosted || !isBillingConfigured()) {
+    return;
+  }
+
+  try {
+    await requireCloudOwnerFeatureAccess(ctx, {
+      owner,
+      entityId: owner._id,
+      featureId: BILLING_FEATURE_IDS.circles,
+      requiredBalance: 1,
+    });
+  } catch (error) {
+    if (error instanceof CloudOwnerFeatureAccessError) {
+      throw new Error(
+        error.reason === 'not_allowed'
+          ? messages.planRequired
+          : error.reason === 'quota_exceeded'
+            ? messages.limitReached
+            : 'Cloud billing could not be checked. Try again shortly.',
+      );
+    }
+
+    throw error;
   }
 }
 
@@ -147,6 +195,13 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
+
+    await requireCircleBillingAllowance(ctx, billingOwnerFromUser(viewer), {
+      planRequired: 'An active cloud plan is required to create a circle.',
+      limitReached:
+        'The cloud plan circle limit is reached. Upgrade the plan or delete a circle first.',
+    });
+
     const now = Date.now();
     const circleId = await ctx.db.insert('circles', {
       name: args.name.trim(),
@@ -209,17 +264,78 @@ export const getById = query({
     circleId: v.id('circles'),
   },
   handler: async (ctx, args) => {
-    const viewer = await requireViewer(ctx);
-    const membership = await requireCircleMembership(ctx, viewer._id, args.circleId);
+    // Subscribed with a client-held id: tolerate auth transitions and the
+    // circle disappearing mid-subscription (deletion) by returning null.
+    const identity = await ctx.auth.getUserIdentity();
+
+    if (!identity) {
+      return null;
+    }
+
+    const viewer = await findViewer(ctx);
+
+    if (!viewer) {
+      return null;
+    }
+
+    const membership = await getViewerMembership(ctx, viewer._id, args.circleId);
+
+    if (!membership) {
+      return null;
+    }
+
     const circle = await ctx.db.get(args.circleId);
 
     if (!circle) {
-      throw new Error('Circle not found.');
+      return null;
     }
 
     const stats = await getCircleStatsOrFallback(ctx, args.circleId);
 
-    return buildCircleSummary(circle, membership, stats.memberCount);
+    return {
+      ...buildCircleSummary(circle, membership, stats.memberCount),
+      imageCount: stats.imageCount,
+      videoCount: stats.videoCount,
+      totalSizeBytes: stats.totalSizeBytes,
+    };
+  },
+});
+
+export const requireOwnedCircleForDeletion = internalQuery({
+  args: {
+    circleId: v.id('circles'),
+  },
+  returns: v.object({
+    circleId: v.id('circles'),
+  }),
+  handler: async (ctx, args) => {
+    const viewer = await requireViewer(ctx);
+    const membership = await getViewerMembership(ctx, viewer._id, args.circleId);
+
+    if (!membership || !isOwnerRole(membership.role)) {
+      throw new Error('Only the circle owner can delete this circle.');
+    }
+
+    return { circleId: args.circleId };
+  },
+});
+
+export const deleteOwn = action({
+  args: {
+    circleId: v.id('circles'),
+  },
+  returns: v.object({
+    circleId: v.id('circles'),
+  }),
+  handler: async (ctx, args) => {
+    const authorized: { circleId: Id<'circles'> } = await ctx.runQuery(
+      internal.circles.requireOwnedCircleForDeletion,
+      { circleId: args.circleId },
+    );
+
+    await ctx.runAction(internal.admin.deleteCircle, { circleId: authorized.circleId });
+
+    return { circleId: authorized.circleId };
   },
 });
 
@@ -408,6 +524,19 @@ export const transferOwnership = mutation({
     if (isOwnerRole(targetMembership.role)) {
       throw new Error('That member already owns the circle.');
     }
+
+    const targetUser = await ctx.db.get(targetMembership.userId);
+
+    if (!targetUser) {
+      throw new Error('Target member not found.');
+    }
+
+    // Ownership transfer moves the bill: the new owner pays for this circle,
+    // so they need a plan with a free circle slot.
+    await requireCircleBillingAllowance(ctx, billingOwnerFromUser(targetUser), {
+      planRequired: 'The new owner needs an active cloud plan before taking over the circle.',
+      limitReached: 'The new owner has reached the circle limit of their cloud plan.',
+    });
 
     await ctx.db.patch(viewerMembership._id, {
       role: 'admin',
@@ -761,7 +890,7 @@ export const createImageTarget = action({
       await requireCloudOwnerFeatureAccess(ctx, {
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
-        featureId: BILLING_FEATURE_IDS.mediaUploads,
+        featureId: BILLING_FEATURE_IDS.storageBytes,
         properties: {
           circleId: args.circleId,
           targetKind: 'circle-image',
@@ -979,7 +1108,7 @@ export const removeImage = action({
             },
           });
         } catch (refundError) {
-          console.error('Failed to refund Autumn circle image storage credit.', refundError);
+          console.error('Failed to refund circle image storage credit.', refundError);
         }
       }
 

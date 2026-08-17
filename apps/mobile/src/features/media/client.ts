@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
+import { msg } from 'gt-react-native';
 import { Alert } from 'react-native';
 import {
   Image as CompressorImage,
@@ -215,7 +216,22 @@ function buildLocationLabel(fields: GeocodedLocationFields): string | undefined 
   return undefined;
 }
 
-async function confirmDeviceLocationFallback(): Promise<boolean> {
+const LOCATION_FALLBACK_COPY = {
+  title: msg('Ort ergänzen?'),
+  message: msg(
+    'Einige Medien enthalten keine GPS-Daten. Möchtest du einmalig deinen aktuellen Standort nutzen, um diese Medien mit einem Ort zu ergänzen?',
+  ),
+  decline: msg('Nicht jetzt'),
+  confirm: msg('Ort ergänzen'),
+};
+
+// Translates a msg()-registered string; components pass the useMessages()
+// function so alerts raised outside the React tree are still localized.
+export type TranslateMessage = (message: string) => string;
+
+const identityTranslate: TranslateMessage = (message) => message;
+
+async function confirmDeviceLocationFallback(translate: TranslateMessage): Promise<boolean> {
   return await new Promise((resolve) => {
     let didResolve = false;
 
@@ -227,16 +243,16 @@ async function confirmDeviceLocationFallback(): Promise<boolean> {
     };
 
     Alert.alert(
-      'Ort ergänzen?',
-      'Einige Medien enthalten keine GPS-Daten. Möchtest du einmalig deinen aktuellen Standort nutzen, um diese Medien mit einem Ort zu ergänzen?',
+      translate(LOCATION_FALLBACK_COPY.title),
+      translate(LOCATION_FALLBACK_COPY.message),
       [
         {
-          text: 'Nicht jetzt',
+          text: translate(LOCATION_FALLBACK_COPY.decline),
           style: 'cancel',
           onPress: () => finish(false),
         },
         {
-          text: 'Ort ergänzen',
+          text: translate(LOCATION_FALLBACK_COPY.confirm),
           onPress: () => finish(true),
         },
       ],
@@ -401,8 +417,9 @@ async function readEmbeddedMetadata(
 
 async function readDeviceFallbackLocation(
   cache: Map<string, GeocodedLocationFields | null>,
+  translate: TranslateMessage,
 ): Promise<MediaLocation | undefined> {
-  const shouldUseFallback = await confirmDeviceLocationFallback();
+  const shouldUseFallback = await confirmDeviceLocationFallback(translate);
 
   if (!shouldUseFallback) {
     return undefined;
@@ -441,14 +458,16 @@ async function readDeviceFallbackLocation(
 
 export async function resolvePickerAssetLocations(
   assets: ImagePicker.ImagePickerAsset[],
+  translate: TranslateMessage = identityTranslate,
 ): Promise<Array<MediaLocation | undefined>> {
-  const metadata = await resolvePickerAssetMetadata(assets);
+  const metadata = await resolvePickerAssetMetadata(assets, translate);
 
   return metadata.map((item) => item.location);
 }
 
 export async function resolvePickerAssetMetadata(
   assets: ImagePicker.ImagePickerAsset[],
+  translate: TranslateMessage = identityTranslate,
 ): Promise<PickerAssetMetadata[]> {
   const geocodeCache = new Map<string, GeocodedLocationFields | null>();
   const embeddedMetadata = await Promise.all(assets.map((asset) => readEmbeddedMetadata(asset)));
@@ -469,7 +488,7 @@ export async function resolvePickerAssetMetadata(
     return resolvedLocations.map(buildMetadata);
   }
 
-  const fallbackLocation = await readDeviceFallbackLocation(geocodeCache);
+  const fallbackLocation = await readDeviceFallbackLocation(geocodeCache, translate);
 
   if (!fallbackLocation) {
     return resolvedLocations.map(buildMetadata);
@@ -613,6 +632,46 @@ export async function optimizePickerAsset(
   return await processVideoAsset(asset, location, capturedAt);
 }
 
+const AVATAR_MAX_DIMENSION = 1024;
+const AVATAR_JPEG_QUALITY = 0.8;
+
+/**
+ * Prepares a picked image as an avatar upload (profile or circle image):
+ * always recompressed to a bounded JPEG so originals never leave the device.
+ */
+export async function optimizeAvatarImageAsset(
+  asset: ImagePicker.ImagePickerAsset,
+): Promise<PreparedUploadAsset> {
+  if (assetKind(asset) !== 'image') {
+    throw new Error('Nur Bilder können als Profilbild verwendet werden.');
+  }
+
+  const sourceUri = await resolvePickerUploadUri(asset);
+  const compressedUri = normalizeFileUri(
+    await CompressorImage.compress(sourceUri, {
+      maxWidth: AVATAR_MAX_DIMENSION,
+      maxHeight: AVATAR_MAX_DIMENSION,
+      quality: AVATAR_JPEG_QUALITY,
+    }),
+  );
+
+  const scale =
+    asset.width > 0 && asset.height > 0
+      ? Math.min(1, AVATAR_MAX_DIMENSION / Math.max(asset.width, asset.height))
+      : 1;
+
+  return {
+    uri: compressedUri,
+    previewUri: compressedUri,
+    fileName: `${sanitizeFileName(fileNameFromPickerAsset(asset)).replace(/\.[^.]+$/, '')}.jpg`,
+    mimeType: 'image/jpeg',
+    kind: 'image',
+    sizeBytes: await getFileSize(compressedUri),
+    width: asset.width > 0 ? Math.round(asset.width * scale) : undefined,
+    height: asset.height > 0 ? Math.round(asset.height * scale) : undefined,
+  };
+}
+
 export async function uploadPreparedFile(input: {
   target: UploadTarget;
   asset: PreparedUploadAsset;
@@ -714,7 +773,15 @@ export function formatBytes(sizeBytes?: number): string | null {
     return `${Math.round(sizeBytes / 1024)} KB`;
   }
 
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  const gigabyte = 1024 ** 3;
+
+  if (sizeBytes < gigabyte) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  const inGigabytes = sizeBytes / gigabyte;
+
+  return `${inGigabytes >= 10 ? Math.round(inGigabytes) : inGigabytes.toFixed(1)} GB`;
 }
 
 export async function createCompressedPreview(input: {

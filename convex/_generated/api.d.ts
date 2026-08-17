@@ -8,20 +8,24 @@
  * @module
  */
 
+import type * as accountDeletion from "../accountDeletion.js";
 import type * as activity from "../activity.js";
+import type * as admin from "../admin.js";
+import type * as appConfig from "../appConfig.js";
 import type * as assets from "../assets.js";
-import type * as autumn from "../autumn.js";
 import type * as billing from "../billing.js";
+import type * as billingRetention from "../billingRetention.js";
+import type * as billingUsage from "../billingUsage.js";
 import type * as circleStats from "../circleStats.js";
 import type * as circles from "../circles.js";
 import type * as comments from "../comments.js";
 import type * as crons from "../crons.js";
+import type * as email from "../email.js";
 import type * as http from "../http.js";
 import type * as invites from "../invites.js";
 import type * as lib_activity from "../lib/activity.js";
-import type * as lib_auth from "../lib/auth.js";
-import type * as lib_billing_autumn from "../lib/billing/autumn.js";
-import type * as lib_billing_owner from "../lib/billing/owner.js";
+import type * as lib_billing_plans from "../lib/billing/plans.js";
+import type * as lib_billing_quota from "../lib/billing/quota.js";
 import type * as lib_engagement from "../lib/engagement.js";
 import type * as lib_expoPush from "../lib/expoPush.js";
 import type * as lib_httpHelpers from "../lib/httpHelpers.js";
@@ -34,13 +38,13 @@ import type * as lib_storage_s3 from "../lib/storage/s3.js";
 import type * as lib_storage_shared from "../lib/storage/shared.js";
 import type * as lib_uploadLimits from "../lib/uploadLimits.js";
 import type * as lib_viewer from "../lib/viewer.js";
-import type * as lib_workos from "../lib/workos.js";
 import type * as mediaCleanup from "../mediaCleanup.js";
 import type * as memories from "../memories.js";
 import type * as notifications from "../notifications.js";
 import type * as publicLinks from "../publicLinks.js";
 import type * as rateLimit from "../rateLimit.js";
 import type * as reactions from "../reactions.js";
+import type * as revenuecat from "../revenuecat.js";
 import type * as shares from "../shares.js";
 import type * as storageStats from "../storageStats.js";
 import type * as uploads from "../uploads.js";
@@ -54,20 +58,24 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accountDeletion: typeof accountDeletion;
   activity: typeof activity;
+  admin: typeof admin;
+  appConfig: typeof appConfig;
   assets: typeof assets;
-  autumn: typeof autumn;
   billing: typeof billing;
+  billingRetention: typeof billingRetention;
+  billingUsage: typeof billingUsage;
   circleStats: typeof circleStats;
   circles: typeof circles;
   comments: typeof comments;
   crons: typeof crons;
+  email: typeof email;
   http: typeof http;
   invites: typeof invites;
   "lib/activity": typeof lib_activity;
-  "lib/auth": typeof lib_auth;
-  "lib/billing/autumn": typeof lib_billing_autumn;
-  "lib/billing/owner": typeof lib_billing_owner;
+  "lib/billing/plans": typeof lib_billing_plans;
+  "lib/billing/quota": typeof lib_billing_quota;
   "lib/engagement": typeof lib_engagement;
   "lib/expoPush": typeof lib_expoPush;
   "lib/httpHelpers": typeof lib_httpHelpers;
@@ -80,13 +88,13 @@ declare const fullApi: ApiFromModules<{
   "lib/storage/shared": typeof lib_storage_shared;
   "lib/uploadLimits": typeof lib_uploadLimits;
   "lib/viewer": typeof lib_viewer;
-  "lib/workos": typeof lib_workos;
   mediaCleanup: typeof mediaCleanup;
   memories: typeof memories;
   notifications: typeof notifications;
   publicLinks: typeof publicLinks;
   rateLimit: typeof rateLimit;
   reactions: typeof reactions;
+  revenuecat: typeof revenuecat;
   shares: typeof shares;
   storageStats: typeof storageStats;
   uploads: typeof uploads;
@@ -122,5 +130,6 @@ export declare const internal: FilterApi<
 
 export declare const components: {
   rateLimiter: import("@convex-dev/rate-limiter/_generated/component.js").ComponentApi<"rateLimiter">;
-  autumn: import("@useautumn/convex/_generated/component.js").ComponentApi<"autumn">;
+  resend: import("@convex-dev/resend/_generated/component.js").ComponentApi<"resend">;
+  revenuecat: import("convex-revenuecat/_generated/component.js").ComponentApi<"revenuecat">;
 };

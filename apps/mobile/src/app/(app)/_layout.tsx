@@ -1,9 +1,6 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { useConvexAuth, useQuery } from 'convex/react';
-import { Redirect, Tabs } from 'expo-router';
-import { Platform } from 'react-native';
+import { useConvexAuth } from 'convex/react';
+import { Redirect, Stack } from 'expo-router';
 
-import { api } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { usePushNotifications } from '@/features/notifications/use-push-notifications';
 import { useTheme } from '@/hooks/use-theme';
@@ -13,15 +10,6 @@ export default function AppLayout() {
   const convexAuth = useConvexAuth();
   const theme = useTheme();
   usePushNotifications();
-  const activitySummary = useQuery(
-    api.activity.summaryForViewer,
-    session && convexAuth.isAuthenticated ? {} : 'skip',
-  );
-  const activityBadge = activitySummary?.hasUnread
-    ? activitySummary.unreadCount >= 99
-      ? '99+'
-      : activitySummary.unreadCount
-    : undefined;
 
   if (!isReady || (session && (convexAuth.isLoading || !convexAuth.isAuthenticated))) {
     return null;
@@ -31,102 +19,23 @@ export default function AppLayout() {
     return <Redirect href="/(auth)/sign-in" />;
   }
 
+  // Detail screens live on this stack (not as hidden tabs) so iOS swipe-back
+  // works everywhere without visible back buttons.
   return (
-    <Tabs
+    <Stack
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.tabActive,
-        tabBarInactiveTintColor: theme.tabInactive,
-        tabBarStyle: {
-          backgroundColor: theme.tabBar,
-          borderTopColor: theme.tabBarBorder,
-          borderTopWidth: 0.5,
-          ...Platform.select({
-            ios: {
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: -2 },
-              shadowOpacity: 0.04,
-              shadowRadius: 8,
-            },
-            android: {
-              elevation: 8,
-            },
-          }),
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-          letterSpacing: 0.1,
-        },
+        animation: 'slide_from_right',
+        contentStyle: { backgroundColor: theme.background },
       }}
     >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="memories/index"
-        options={{
-          title: 'Erinnerungen',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="images-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="memories/viewer"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="activity"
-        options={{
-          title: 'Aktivität',
-          tabBarBadge: activityBadge,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="notifications-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="onboarding"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="share/[shareId]"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="circle/[circleId]"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="invite"
-        options={{
-          href: null,
-        }}
-      />
-    </Tabs>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="circle/[circleId]" />
+      <Stack.Screen name="circle/new" />
+      <Stack.Screen name="invite" />
+      <Stack.Screen name="share/[shareId]" />
+      <Stack.Screen name="memories/viewer" />
+      <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
+    </Stack>
   );
 }

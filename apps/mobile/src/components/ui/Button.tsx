@@ -1,9 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { memo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+
+import { AnimatedPressable } from './AnimatedPressable';
 
 interface ButtonProps {
   label: string;
@@ -49,17 +51,17 @@ export const Button = memo(function Button({
   }[variant];
 
   return (
-    <Pressable
+    <AnimatedPressable
+      accessibilityRole="button"
       onPress={onPress}
       disabled={isDisabled}
-      style={({ pressed }) => [
+      pressedScale={0.97}
+      style={[
         styles.button,
         {
           backgroundColor: variantStyles.bg,
           borderColor: variantStyles.border,
           borderWidth: variant === 'outline' ? 1.5 : 0,
-          opacity: pressed ? 0.85 : isDisabled ? 0.6 : 1,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
         },
       ]}
     >
@@ -69,7 +71,7 @@ export const Button = memo(function Button({
         <Ionicons name={icon} size={17} color={variantStyles.text} />
       ) : null}
       <Text style={[styles.label, { color: variantStyles.text }]}>{label}</Text>
-    </Pressable>
+    </AnimatedPressable>
   );
 });
 
@@ -80,8 +82,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.sm,
     borderRadius: Radius.lg,
-    paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
+    paddingVertical: 14,
   },
   label: {
     fontSize: FontSize.base,

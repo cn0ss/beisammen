@@ -1,10 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
+
+import { useGT } from 'gt-react-native';
 
 import { useAction, useConvexAuth, useQuery } from 'convex/react';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -22,6 +23,7 @@ import {
 } from '@/features/media/client';
 import { useSignedAssetUrl } from '@/features/media/use-signed-asset-url';
 import { useTheme } from '@/hooks/use-theme';
+import { useDateFormat } from '@/i18n/use-date-format';
 
 import { AssetThumbnail } from '@/components/media/AssetThumbnail';
 import { Button, FeedbackToast, LoadingBox } from '@/components/ui';
@@ -67,21 +69,25 @@ function formatDuration(durationSeconds?: number): string | null {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-const ASSET_DATE_FORMAT = new Intl.DateTimeFormat('de-DE', {
+const ASSET_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   dateStyle: 'medium',
-});
+};
 
-function formatCapturedDate(capturedAt?: number): string | null {
+function formatCapturedDate(
+  capturedAt: number | undefined,
+  format: Intl.DateTimeFormat,
+): string | null {
   if (!capturedAt || capturedAt <= 0) {
     return null;
   }
 
-  return ASSET_DATE_FORMAT.format(new Date(capturedAt));
+  return format.format(new Date(capturedAt));
 }
 
 function ShareAssetViewer({ asset }: { asset: ShareAssetRecord | null }) {
   const theme = useTheme();
-  const isFocused = useIsFocused();
+  const pathname = usePathname();
+  const isFocused = pathname.startsWith('/share/');
   const signedUrl = useSignedAssetUrl(asset?._id, 'original');
   const player = useVideoPlayer(asset?.kind === 'video' ? signedUrl : null, (instance) => {
     instance.pause();
@@ -148,6 +154,8 @@ export default function ShareDetailScreen() {
   const shareId = Array.isArray(params.shareId) ? params.shareId[0] : params.shareId;
   const requestedAssetId = Array.isArray(params.assetId) ? params.assetId[0] : params.assetId;
   const theme = useTheme();
+  const gt = useGT();
+  const assetDateFormat = useDateFormat(ASSET_DATE_FORMAT_OPTIONS);
 
   const [isDeleted, setIsDeleted] = useState(false);
   const viewerState = useQuery(api.users.viewerState, convexAuth.isAuthenticated ? {} : 'skip');
@@ -198,10 +206,6 @@ export default function ShareDetailScreen() {
   );
   const activeAssetUrl = useSignedAssetUrl(activeAsset?._id, 'original');
 
-  const handleBack = useCallback(() => {
-    router.back();
-  }, [router]);
-
   const handleSave = useCallback(async () => {
     if (!activeAsset) {
       return;
@@ -214,20 +218,22 @@ export default function ShareDetailScreen() {
           ? { url: activeAssetUrl }
           : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
       if (!signed.url) {
-        throw new Error('Datei ist nicht mehr im Speicher vorhanden.');
+        throw new Error(gt('Datei ist nicht mehr im Speicher vorhanden.'));
       }
       const localUri = await downloadAssetToCache({
         asset: activeAsset,
         url: signed.url,
       });
       await saveAssetToDeviceLibrary(localUri);
-      setFeedback('Medium wurde auf dem Gerät gespeichert.');
+      setFeedback(gt('Medium wurde auf dem Gerät gespeichert.'));
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Medium konnte nicht gespeichert werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Medium konnte nicht gespeichert werden.'),
+      );
     } finally {
       setIsSaving(false);
     }
-  }, [activeAsset, activeAssetUrl, getReadUrl]);
+  }, [activeAsset, activeAssetUrl, getReadUrl, gt]);
 
   const handleShare = useCallback(async () => {
     if (!activeAsset) {
@@ -241,7 +247,7 @@ export default function ShareDetailScreen() {
           ? { url: activeAssetUrl }
           : await getReadUrl({ assetId: activeAsset._id, variant: 'original' });
       if (!signed.url) {
-        throw new Error('Datei ist nicht mehr im Speicher vorhanden.');
+        throw new Error(gt('Datei ist nicht mehr im Speicher vorhanden.'));
       }
       const localUri = await downloadAssetToCache({
         asset: activeAsset,
@@ -249,11 +255,13 @@ export default function ShareDetailScreen() {
       });
       await shareLocalFile(localUri);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Medium konnte nicht geteilt werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Medium konnte nicht geteilt werden.'),
+      );
     } finally {
       setIsSharing(false);
     }
-  }, [activeAsset, activeAssetUrl, getReadUrl]);
+  }, [activeAsset, activeAssetUrl, getReadUrl, gt]);
 
   const performDelete = useCallback(async () => {
     if (!share) {
@@ -267,11 +275,13 @@ export default function ShareDetailScreen() {
       router.replace('/home');
     } catch (error) {
       setIsDeleted(false);
-      setFeedback(error instanceof Error ? error.message : 'Beitrag konnte nicht gelöscht werden.');
+      setFeedback(
+        error instanceof Error ? error.message : gt('Beitrag konnte nicht gelöscht werden.'),
+      );
     } finally {
       setIsDeleting(false);
     }
-  }, [deleteShare, router, share]);
+  }, [deleteShare, gt, router, share]);
 
   const handleDelete = useCallback(() => {
     if (!share?.canDelete) {
@@ -279,12 +289,12 @@ export default function ShareDetailScreen() {
     }
 
     Alert.alert(
-      'Beitrag löschen?',
-      'Dieser Beitrag und alle Medien werden dauerhaft entfernt.',
+      gt('Beitrag löschen?'),
+      gt('Dieser Beitrag und alle Medien werden dauerhaft entfernt.'),
       [
-        { text: 'Abbrechen', style: 'cancel' },
+        { text: gt('Abbrechen'), style: 'cancel' },
         {
-          text: 'Löschen',
+          text: gt('Löschen'),
           style: 'destructive',
           onPress: () => {
             void performDelete();
@@ -292,7 +302,7 @@ export default function ShareDetailScreen() {
         },
       ],
     );
-  }, [performDelete, share?.canDelete]);
+  }, [gt, performDelete, share?.canDelete]);
 
   if (isViewerBootstrapping || (shareId && hasViewer && share === undefined)) {
     return <LoadingBox />;
@@ -309,7 +319,7 @@ export default function ShareDetailScreen() {
   }
 
   const activeAssetMeta = [
-    formatCapturedDate(activeAsset?.capturedAt),
+    formatCapturedDate(activeAsset?.capturedAt, assetDateFormat),
     formatBytes(activeAsset?.sizeBytes),
     formatDuration(activeAsset?.durationSeconds),
   ]
@@ -326,18 +336,14 @@ export default function ShareDetailScreen() {
       >
         <View style={styles.headerRow}>
           <Pressable
-            onPress={handleBack}
-            style={({ pressed }) => [
-              styles.iconButton,
-              {
-                backgroundColor: theme.surface,
-                opacity: pressed ? 0.82 : 1,
-              },
-            ]}
+            accessibilityRole="button"
+            accessibilityLabel={gt('Zurück')}
+            hitSlop={12}
+            onPress={() => router.back()}
+            style={({ pressed }) => [styles.backChevron, { opacity: pressed ? 0.5 : 1 }]}
           >
-            <Ionicons name="arrow-back" size={18} color={theme.text} />
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
           </Pressable>
-
           {circle ? (
             <Text
               style={[styles.circleLabel, { color: theme.text }]}
@@ -415,7 +421,7 @@ export default function ShareDetailScreen() {
 
         <View style={styles.actionRow}>
           <Button
-            label={isSaving ? 'Speichert...' : 'Speichern'}
+            label={isSaving ? gt('Speichert...') : gt('Speichern')}
             icon="download-outline"
             loading={isSaving}
             onPress={() => {
@@ -423,7 +429,7 @@ export default function ShareDetailScreen() {
             }}
           />
           <Button
-            label={isSharing ? 'Teilt...' : 'Teilen'}
+            label={isSharing ? gt('Teilt...') : gt('Teilen')}
             icon="share-social-outline"
             variant="outline"
             loading={isSharing}
@@ -460,6 +466,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  backChevron: {
+    height: 40,
+    justifyContent: 'center',
+    marginLeft: -6,
   },
   iconButton: {
     width: 40,
