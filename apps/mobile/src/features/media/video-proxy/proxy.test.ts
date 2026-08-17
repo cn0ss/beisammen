@@ -284,6 +284,6 @@ describe('encrypted video proxy', () => {
       `Content-Range: bytes 0-${plaintext.length - 1}/${plaintext.length}`,
     );
     expect(response.body.length).toBe(plaintext.length);
-    expect(Buffer.compare(Buffer.from(response.body), Buffer.from(plaintext))).toBe(0);
+    expect(response.body.every((byte, index) => byte === plaintext[index])).toBe(true);
   });
 });
