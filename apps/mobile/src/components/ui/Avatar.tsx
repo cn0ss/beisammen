@@ -3,11 +3,13 @@ import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Fonts, FontSize, Radius } from '@/constants/theme';
+import type { AvatarImage } from '@/features/media/avatar-image-cache';
 import { useTheme } from '@/hooks/use-theme';
 
 interface AvatarProps {
   name: string;
-  imageUrl?: string | null;
+  /** Plain stable URL (e.g. Clerk avatar) or a cache-keyed resolved source. */
+  image?: AvatarImage;
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
@@ -27,9 +29,10 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-export const Avatar = memo(function Avatar({ name, imageUrl, size = 'md' }: AvatarProps) {
+export const Avatar = memo(function Avatar({ name, image, size = 'md' }: AvatarProps) {
   const theme = useTheme();
   const dim = sizeMap[size];
+  const source = typeof image === 'string' ? { uri: image } : image;
 
   return (
     <View
@@ -45,8 +48,8 @@ export const Avatar = memo(function Avatar({ name, imageUrl, size = 'md' }: Avat
         },
       ]}
     >
-      {imageUrl ? (
-        <Image source={{ uri: imageUrl }} style={styles.image} contentFit="cover" />
+      {source ? (
+        <Image source={source} style={styles.image} contentFit="cover" />
       ) : (
         <Text
           style={[

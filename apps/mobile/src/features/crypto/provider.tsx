@@ -21,6 +21,7 @@ import { getSodium } from './sodium';
 import {
   bootstrapUserKeys,
   recoverUserKeys,
+  resetUserKeys,
   revealRecoveryCode,
   type UnlockedUserKeys,
 } from './user-keys';
@@ -41,6 +42,12 @@ export interface CryptoContextValue {
   acknowledgeRecoveryCode: () => void;
   /** Redeems a typed recovery code on a new device. Throws on invalid codes. */
   recover: (code: string) => Promise<void>;
+  /**
+   * Last resort when the recovery code is lost: replaces the key material and
+   * shows the fresh recovery code via pendingRecoveryCode. The caller must
+   * confirm the consequences with the user first (see resetUserKeys).
+   */
+  resetKeys: () => Promise<void>;
   /** Re-derives the recovery code on an unlocked device (settings screen). */
   getRecoveryCode: () => Promise<string>;
   /** Re-runs the bootstrap after a transient failure ('unavailable'). */
@@ -187,6 +194,34 @@ export function CryptoProvider({ children }: PropsWithChildren) {
     [session],
   );
 
+  const resetKeys = useCallback(async () => {
+    if (!session) {
+      throw new Error('Not signed in.');
+    }
+
+    const [instanceUrl, subject] = [session.instanceUrl, session.subject];
+    const sodium = await getSodium();
+    const result = await resetUserKeys({
+      sodium,
+      resetKeys: (registration) => convex.mutation(keysApi.resetKeys, registration),
+      saveMasterKey: (masterKey) => saveMasterKey(instanceUrl, subject, masterKey),
+    });
+
+    // Reflect the replacement immediately so getRecoveryCode works before the
+    // reactive getMyKeys query catches up.
+    const now = Date.now();
+
+    serverKeysRef.current = { ...result.registration, createdAt: now, updatedAt: now };
+
+    // The fresh recovery code must be acknowledged like after first setup;
+    // CryptoGate picks it up from pendingRecoveryCode.
+    setState({
+      status: 'ready',
+      userKeys: result.keys,
+      pendingRecoveryCode: result.recoveryCode,
+    });
+  }, [convex, session]);
+
   const getRecoveryCode = useCallback(async () => {
     const record = serverKeysRef.current;
 
@@ -206,10 +241,11 @@ export function CryptoProvider({ children }: PropsWithChildren) {
       pendingRecoveryCode: state.pendingRecoveryCode,
       acknowledgeRecoveryCode,
       recover,
+      resetKeys,
       getRecoveryCode,
       retry,
     }),
-    [acknowledgeRecoveryCode, getRecoveryCode, recover, retry, state],
+    [acknowledgeRecoveryCode, getRecoveryCode, recover, resetKeys, retry, state],
   );
 
   return <CryptoContext.Provider value={value}>{children}</CryptoContext.Provider>;

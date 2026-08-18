@@ -11,6 +11,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -18,10 +19,16 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { T, useGT } from 'gt-react-native';
 
 import { useAction, useConvexAuth, usePaginatedQuery, useQuery } from 'convex/react';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { useEvent } from 'expo';
+import { VideoView, type VideoPlayer } from 'expo-video';
 
-import { AnimatedPressable, FeedbackToast, LoadingBox } from '@/components/ui';
-import { FontSize, Radius, Spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  FeedbackToast,
+  LoadingBox,
+  MediaLoadingIndicator,
+} from '@/components/ui';
+import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { MemoryFilterArgs, MemoryItemRecord } from '@/features/convex/api';
 import { api } from '@/features/convex/api';
 import { useCircleKeys } from '@/features/crypto/use-circle-keys';
@@ -34,6 +41,8 @@ import {
 } from '@/features/media/client';
 import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
 import { isVideoProxyUrl } from '@/features/media/video-proxy/server';
+import { useLivePhotoPlayback } from '@/features/media/use-live-photo-playback';
+import { useVideoPlayerSource } from '@/features/media/use-video-player-source';
 import { useDecryptedAssetLocation } from '@/features/media/use-decrypted-asset-location';
 import { normalizeMemoryFilter } from '@/features/memories/timeline';
 import { enterScreen, exitFade } from '@/lib/motion';
@@ -158,11 +167,145 @@ function ViewerAction({
   );
 }
 
+function formatPlaybackTime(seconds: number) {
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+
+  return `${minutes}:${rest.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Play/pause and a scrubbable progress bar for the active video. Replaces the
+ * native player UI so playback controls live in the chrome and hide with it.
+ */
+function VideoControls({ player }: { player: VideoPlayer }) {
+  const gt = useGT();
+  const [trackWidth, setTrackWidth] = useState(0);
+  const [scrubFraction, setScrubFraction] = useState<number | null>(null);
+  const isScrubbing = useRef(false);
+
+  // Native players can be released during fast swipes; every property read
+  // throws once the native object is gone, so read them all defensively.
+  let initialIsPlaying = false;
+  let initialCurrentTime = 0;
+  let duration = 0;
+  try {
+    initialIsPlaying = player.playing;
+    initialCurrentTime = player.currentTime;
+    duration = player.duration;
+  } catch {
+    // Released mid-render; the stale values only survive one frame.
+  }
+
+  const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: initialIsPlaying });
+  const timeUpdate = useEvent(player, 'timeUpdate', {
+    currentTime: initialCurrentTime,
+    currentLiveTimestamp: null,
+    currentOffsetFromLive: null,
+    bufferedPosition: 0,
+  });
+
+  // A committed seek keeps showing the target position until playback reports
+  // a fresh time; while paused no updates arrive and the target stays put.
+  useEffect(() => {
+    if (!isScrubbing.current) {
+      setScrubFraction(null);
+    }
+  }, [timeUpdate.currentTime]);
+
+  const fraction =
+    scrubFraction ??
+    (duration > 0 ? Math.min(Math.max(timeUpdate.currentTime / duration, 0), 1) : 0);
+  const bufferedFraction =
+    duration > 0 ? Math.min(Math.max(timeUpdate.bufferedPosition / duration, 0), 1) : 0;
+  const displayTime = scrubFraction !== null ? scrubFraction * duration : timeUpdate.currentTime;
+
+  const togglePlayback = () => {
+    try {
+      if (player.playing) {
+        player.pause();
+      } else if (duration > 0 && player.currentTime >= duration - 0.1) {
+        player.replay();
+      } else {
+        player.play();
+      }
+    } catch {
+      // Native players can be released during fast swipes.
+    }
+  };
+
+  const fractionForX = (x: number) =>
+    trackWidth > 0 ? Math.min(Math.max(x / trackWidth, 0), 1) : 0;
+
+  // minDistance(0) claims the touch immediately so dragging the scrubber never
+  // starts a page swipe in the surrounding pager.
+  const scrubGesture = Gesture.Pan()
+    .runOnJS(true)
+    .minDistance(0)
+    .onBegin((event) => {
+      isScrubbing.current = true;
+      setScrubFraction(fractionForX(event.x));
+    })
+    .onUpdate((event) => {
+      setScrubFraction(fractionForX(event.x));
+    })
+    .onFinalize((event) => {
+      const target = fractionForX(event.x);
+      setScrubFraction(target);
+      isScrubbing.current = false;
+
+      try {
+        if (duration > 0) {
+          player.currentTime = target * duration;
+        }
+      } catch {
+        // Native players can be released during fast swipes.
+      }
+    });
+
+  return (
+    <View style={styles.videoControls}>
+      <AnimatedPressable
+        accessibilityRole="button"
+        accessibilityLabel={isPlaying ? gt('Pausieren') : gt('Abspielen')}
+        hitSlop={8}
+        onPress={togglePlayback}
+        pressedScale={0.94}
+        style={styles.playButton}
+      >
+        <Ionicons name={isPlaying ? 'pause' : 'play'} size={16} color="#FFFFFF" />
+      </AnimatedPressable>
+
+      <Text style={styles.timeLabel}>{formatPlaybackTime(displayTime)}</Text>
+
+      <GestureDetector gesture={scrubGesture}>
+        <View
+          style={styles.trackTouchArea}
+          onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+        >
+          <View style={styles.track}>
+            <View style={[styles.trackBuffered, { width: `${bufferedFraction * 100}%` }]} />
+            <View style={[styles.trackFill, { width: `${fraction * 100}%` }]} />
+          </View>
+          {trackWidth > 0 ? (
+            <View style={[styles.trackKnob, { left: fraction * (trackWidth - 12) }]} />
+          ) : null}
+        </View>
+      </GestureDetector>
+
+      <Text style={styles.timeLabel}>{formatPlaybackTime(duration)}</Text>
+    </View>
+  );
+}
+
 function MemoryViewerSlide({
   height,
   isActive,
   isFocused,
   item,
+  onPlayerActive,
+  onPlayerInactive,
   onToggleChrome,
   width,
 }: {
@@ -170,23 +313,52 @@ function MemoryViewerSlide({
   isActive: boolean;
   isFocused: boolean;
   item: MemoryItemRecord;
+  onPlayerActive: (player: VideoPlayer) => void;
+  onPlayerInactive: (player: VideoPlayer) => void;
   onToggleChrome: () => void;
   width: number;
 }) {
   // Encrypted videos stream through the local range-decrypting proxy (or a
   // cached decrypted file); images resolve via the decrypted cache.
   const signedUrl = useAssetMediaUri(item.asset, 'original', item.circleId);
-  const player = useVideoPlayer(item.kind === 'video' ? signedUrl : null, (instance) => {
-    instance.pause();
+  // The preview variant is usually already in the decrypted cache from the
+  // timeline grid; it doubles as an instant poster while the original loads.
+  const previewUrl = useAssetMediaUri(item.asset, 'preview', item.circleId);
+  const { player, isSourceReady, hasFirstFrame, playerStatus, onFirstFrameRender } =
+    useVideoPlayerSource({
+      assetId: item.assetId,
+      kind: item.kind,
+      signedUrl,
+      setup: (instance) => {
+        // The chrome's scrubber needs frequent position updates.
+        instance.timeUpdateEventInterval = 0.25;
+      },
+    });
+  const livePhoto = useLivePhotoPlayback({
+    asset: item.asset,
+    circleId: item.circleId,
+    prefetch: isActive && isFocused && item.kind === 'image',
   });
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
+
+  // The chrome hosts the playback controls for whichever slide is active.
+  useEffect(() => {
+    if (item.kind !== 'video' || !isActive || !isSourceReady) {
+      return;
+    }
+
+    onPlayerActive(player);
+
+    return () => onPlayerInactive(player);
+  }, [isActive, isSourceReady, item.kind, onPlayerActive, onPlayerInactive, player]);
 
   useEffect(() => {
-    if (item.kind !== 'video') {
+    if (item.kind !== 'video' || !isSourceReady) {
       return;
     }
 
     try {
-      if (isActive && isFocused && signedUrl) {
+      if (isActive && isFocused) {
         player.play();
       } else {
         player.pause();
@@ -194,19 +366,42 @@ function MemoryViewerSlide({
     } catch {
       // Native players can be released during fast swipes.
     }
-  }, [isActive, isFocused, item.kind, player, signedUrl]);
+  }, [isActive, isFocused, isSourceReady, item.kind, player]);
 
   if (item.kind === 'video') {
+    // Loading covers the whole path to moving pictures (URL resolution,
+    // source load, initial buffer) plus later rebuffers, which flip the
+    // player status back to 'loading' mid-playback.
+    const isLoading = !hasFirstFrame || playerStatus === 'loading';
+
+    // No native controls: playback UI lives in the chrome (VideoControls), so
+    // a tap on the video toggles the chrome exactly like on photos.
     return (
-      <View style={[styles.slide, { height, width }]}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onToggleChrome}
+        style={[styles.slide, { height, width }]}
+      >
         {signedUrl ? (
-          <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />
-        ) : (
-          <View style={styles.fallback}>
-            <Ionicons name="play-circle-outline" size={44} color="rgba(255,255,255,0.6)" />
-          </View>
-        )}
-      </View>
+          <VideoView
+            player={player}
+            style={styles.media}
+            nativeControls={false}
+            contentFit="contain"
+            onFirstFrameRender={onFirstFrameRender}
+          />
+        ) : null}
+
+        {/* Poster: the cached preview shows instantly and crossfades away on
+            the first decoded frame. */}
+        {!hasFirstFrame && previewUrl ? (
+          <Animated.View exiting={exitFade()} style={StyleSheet.absoluteFill}>
+            <Image source={{ uri: previewUrl }} style={styles.media} contentFit="contain" />
+          </Animated.View>
+        ) : null}
+
+        <MediaLoadingIndicator visible={isLoading} />
+      </Pressable>
     );
   }
 
@@ -214,15 +409,46 @@ function MemoryViewerSlide({
     <Pressable
       accessibilityRole="imagebutton"
       onPress={onToggleChrome}
+      // Press-and-hold plays a Live Photo's companion clip; a plain tap still
+      // toggles the chrome (a fired long press suppresses onPress).
+      delayLongPress={220}
+      onLongPress={livePhoto.isLivePhoto ? livePhoto.start : undefined}
+      onPressOut={livePhoto.isLivePhoto ? livePhoto.stop : undefined}
       style={[styles.slide, { height, width }]}
     >
+      {!isImageLoaded && previewUrl ? (
+        <View style={StyleSheet.absoluteFill}>
+          <Image source={{ uri: previewUrl }} style={styles.media} contentFit="contain" />
+        </View>
+      ) : null}
+
       {signedUrl ? (
-        <Image source={{ uri: signedUrl }} style={styles.media} contentFit="contain" />
-      ) : (
+        <Image
+          source={{ uri: signedUrl }}
+          style={styles.media}
+          contentFit="contain"
+          onLoad={() => setIsImageLoaded(true)}
+        />
+      ) : null}
+
+      {livePhoto.isPlaying ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <VideoView
+            player={livePhoto.player}
+            style={styles.media}
+            nativeControls={false}
+            contentFit="contain"
+          />
+        </View>
+      ) : null}
+
+      {!signedUrl && !previewUrl ? (
         <View style={styles.fallback}>
           <Ionicons name="image-outline" size={38} color="rgba(255,255,255,0.6)" />
         </View>
-      )}
+      ) : null}
+
+      <MediaLoadingIndicator visible={!isImageLoaded || livePhoto.isLoading} />
     </Pressable>
   );
 }
@@ -259,6 +485,7 @@ export default function MemoryViewerScreen() {
   );
   const memories = hasViewer ? memoriesPage.results : [];
   const [activeIndex, setActiveIndex] = useState(0);
+  const [activeVideoPlayer, setActiveVideoPlayer] = useState<VideoPlayer | null>(null);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -379,6 +606,14 @@ export default function MemoryViewerScreen() {
     setChromeVisible((visible) => !visible);
   }, []);
 
+  const handlePlayerActive = useCallback((player: VideoPlayer) => {
+    setActiveVideoPlayer(player);
+  }, []);
+
+  const handlePlayerInactive = useCallback((player: VideoPlayer) => {
+    setActiveVideoPlayer((current) => (current === player ? null : current));
+  }, []);
+
   const renderSlide = useCallback(
     ({ index, item }: { index: number; item: MemoryItemRecord }) => (
       <MemoryViewerSlide
@@ -387,10 +622,12 @@ export default function MemoryViewerScreen() {
         height={height}
         isFocused={isFocused}
         isActive={index === activeIndex}
+        onPlayerActive={handlePlayerActive}
+        onPlayerInactive={handlePlayerInactive}
         onToggleChrome={toggleChrome}
       />
     ),
-    [activeIndex, height, isFocused, toggleChrome, width],
+    [activeIndex, handlePlayerActive, handlePlayerInactive, height, isFocused, toggleChrome, width],
   );
 
   if (!hasViewer || (hasViewer && memoriesPage.status === 'LoadingFirstPage')) {
@@ -470,6 +707,16 @@ export default function MemoryViewerScreen() {
               ) : null}
             </View>
 
+            <AnimatedPressable
+              accessibilityRole="button"
+              accessibilityLabel={gt('Oberfläche ausblenden')}
+              hitSlop={8}
+              onPress={toggleChrome}
+              pressedScale={0.94}
+              style={styles.backButton}
+            >
+              <Ionicons name="eye-off-outline" size={20} color="#FFFFFF" />
+            </AnimatedPressable>
           </View>
 
           {activeItem ? (
@@ -492,6 +739,10 @@ export default function MemoryViewerScreen() {
                     .join('  ·  ')}
                 </Text>
               </View>
+
+              {activeItem.kind === 'video' && activeVideoPlayer ? (
+                <VideoControls player={activeVideoPlayer} />
+              ) : null}
 
               <PageDots count={memories.length} index={activeIndex} />
 
@@ -619,6 +870,58 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.6)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 8,
+  },
+  videoControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  playButton: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  timeLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontFamily: Fonts.mono,
+    fontSize: FontSize.xs,
+    fontWeight: '600',
+    minWidth: 34,
+    textAlign: 'center',
+  },
+  trackTouchArea: {
+    flex: 1,
+    height: 28,
+    justifyContent: 'center',
+  },
+  track: {
+    height: 4,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    overflow: 'hidden',
+  },
+  trackBuffered: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(255,255,255,0.34)',
+  },
+  trackFill: {
+    height: '100%',
+    borderRadius: Radius.full,
+    backgroundColor: '#FFFFFF',
+  },
+  trackKnob: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: Radius.full,
+    backgroundColor: '#FFFFFF',
   },
   dotsRow: {
     flexDirection: 'row',

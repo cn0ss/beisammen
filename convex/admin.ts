@@ -119,14 +119,17 @@ export const purgeCircleBatch = internalMutation({
       const asset = doc as unknown as Doc<'assets'>;
       collectRef(state, asset.storage);
       collectRef(state, asset.previewStorage ?? null);
-      state.freedBytes += asset.sizeBytes ?? 0;
+      collectRef(state, asset.pairedVideoStorage ?? null);
+      state.freedBytes += (asset.sizeBytes ?? 0) + (asset.pairedVideoSizeBytes ?? 0);
     });
     await purgeByCircleIndex(ctx, state, 'uploads', 'by_circle', args.circleId, async (doc) => {
       const upload = doc as unknown as Doc<'uploads'>;
       collectRef(state, upload.pendingStorage ?? null);
       collectRef(state, upload.previewPendingStorage ?? null);
+      collectRef(state, upload.pairedVideoPendingStorage ?? null);
       collectRef(state, upload.storage ?? null);
       collectRef(state, upload.previewStorage ?? null);
+      collectRef(state, upload.pairedVideoStorage ?? null);
     });
     await purgeByCircleIndex(ctx, state, 'imageUploads', 'by_circle', args.circleId, async (doc) => {
       const upload = doc as unknown as Doc<'imageUploads'>;

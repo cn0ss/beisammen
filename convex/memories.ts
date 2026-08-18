@@ -4,6 +4,7 @@ import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internalMutation, query } from './_generated/server';
+import { imageCacheKey } from './lib/storage/shared';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const memoryFunctionSurface = [
@@ -160,6 +161,7 @@ async function mapMemoryItem(ctx: QueryCtx, item: MemoryItem) {
     authorName: author?.displayName ?? author?.email ?? 'Unbekannt',
     authorAvatarUrl: author?.avatarUrl,
     authorHasProfileImage: Boolean(author?.profileImageStorage),
+    authorProfileImageKey: imageCacheKey(author?.profileImageStorage),
     kind: item.kind,
     caption: shareBatch.caption ?? '',
     timelineAt: item.timelineAt,
@@ -177,6 +179,9 @@ async function mapMemoryItem(ctx: QueryCtx, item: MemoryItem) {
       mimeType: asset.mimeType,
       sizeBytes: asset.sizeBytes,
       previewStorage: asset.previewStorage,
+      pairedVideoStorage: asset.pairedVideoStorage,
+      pairedVideoMimeType: asset.pairedVideoMimeType,
+      pairedVideoDurationSeconds: asset.pairedVideoDurationSeconds,
       width: asset.width,
       height: asset.height,
       durationSeconds: asset.durationSeconds,

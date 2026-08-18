@@ -10,7 +10,7 @@ import { v } from 'convex/values';
 import { action, query } from './_generated/server';
 import { getCircleStatsOrFallback } from './circleStats';
 import { validateCurrentS3Configuration } from './lib/storage/s3';
-import { getCurrentInstanceStorage } from './lib/storage/shared';
+import { getCurrentInstanceStorage, imageCacheKey } from './lib/storage/shared';
 import { requireViewer } from './lib/viewer';
 
 const STORAGE_STATS_CIRCLE_LIMIT = 100;
@@ -58,6 +58,7 @@ export const perCircleForViewer = query({
         circleId: v.string(),
         name: v.string(),
         hasImage: v.boolean(),
+        imageKey: v.optional(v.string()),
         isOwner: v.boolean(),
         memberCount: v.number(),
         imageCount: v.number(),
@@ -91,6 +92,7 @@ export const perCircleForViewer = query({
         circleId: circle._id,
         name: circle.name,
         hasImage: Boolean(circle.imageStorage),
+        imageKey: imageCacheKey(circle.imageStorage),
         isOwner: membership.role === 'owner',
         memberCount: stats.memberCount,
         imageCount: stats.imageCount,

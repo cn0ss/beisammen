@@ -11,7 +11,7 @@ import { Fonts, FontSize, Spacing } from '@/constants/theme';
 import { enterSection } from '@/lib/motion';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
-import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
+import { useProfileImage } from '@/features/media/use-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 import { AnimatedPressable, Avatar, Card } from '@/components/ui';
@@ -30,8 +30,8 @@ export default function SettingsScreen() {
   const hasViewer = viewerState?.isAuthenticated === true && viewer !== null;
   const billingStatus = useQuery(api.billing.status, hasViewer ? {} : 'skip');
 
-  const customProfileImageUrl = useProfileImageUrl(Boolean(viewer?.hasProfileImage));
-  const profileImageUrl = customProfileImageUrl ?? session?.avatarUrl ?? null;
+  const customProfileImage = useProfileImage(viewer?.profileImageKey);
+  const profileImage = customProfileImage ?? session?.avatarUrl ?? null;
   const accountLabel = session?.email ?? session?.displayName ?? gt('Angemeldet');
   const profileName = viewer?.displayName ?? session?.displayName ?? accountLabel;
 
@@ -64,7 +64,7 @@ export default function SettingsScreen() {
             pressedScale={0.98}
           >
             <Card style={styles.profileCard}>
-              <Avatar name={profileName} imageUrl={profileImageUrl} size="lg" />
+              <Avatar name={profileName} image={profileImage} size="lg" />
               <View style={styles.profileCopy}>
                 <Text style={[styles.profileName, { color: theme.text }]} numberOfLines={1}>
                   {profileName}

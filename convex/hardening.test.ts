@@ -3659,7 +3659,7 @@ describe('shares, uploads, and feed', () => {
     expect(activity.page.every((event) => event.displayText.length > 0)).toBe(true);
   });
 
-  test('activity inbox creates unread recipient rows and excludes actor self-events', async () => {
+  test('activity inbox creates unread recipient rows and pre-read actor self-events', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
     const invite = await owner.user.mutation(api.invites.create, {
@@ -3700,7 +3700,7 @@ describe('shares, uploads, and feed', () => {
       paginationOpts: { numItems: 10, cursor: null },
     });
 
-    expect(memberInbox.page).toHaveLength(2);
+    expect(memberInbox.page).toHaveLength(3);
     expect(memberInbox.page).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3717,23 +3717,43 @@ describe('shares, uploads, and feed', () => {
           assetId: null,
           status: 'unread',
         }),
+        // Own action shows in the full history, but never as unread.
+        expect.objectContaining({
+          actorId: member.viewer._id,
+          type: 'comment.created',
+          shareBatchId: published.shareBatchId,
+          assetId: published.assetId,
+          status: 'read',
+        }),
       ]),
     );
-    expect(memberInbox.page.map((event) => event.type)).not.toContain('comment.created');
 
     const ownerInbox = await owner.user.query(activityApi.listInboxForViewer, {
       paginationOpts: { numItems: 10, cursor: null },
     });
 
-    expect(ownerInbox.page).toEqual([
-      expect.objectContaining({
-        actorId: member.viewer._id,
-        type: 'comment.created',
-        shareBatchId: published.shareBatchId,
-        assetId: published.assetId,
-        status: 'unread',
-      }),
-    ]);
+    expect(ownerInbox.page).toHaveLength(3);
+    expect(ownerInbox.page).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: member.viewer._id,
+          type: 'comment.created',
+          shareBatchId: published.shareBatchId,
+          assetId: published.assetId,
+          status: 'unread',
+        }),
+        expect.objectContaining({
+          actorId: owner.viewer._id,
+          type: 'share.published',
+          status: 'read',
+        }),
+        expect.objectContaining({
+          actorId: owner.viewer._id,
+          type: 'reaction.set',
+          status: 'read',
+        }),
+      ]),
+    );
   });
 
   test('notification device registration is scoped by instance URL', async () => {

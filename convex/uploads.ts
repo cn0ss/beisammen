@@ -19,12 +19,14 @@ import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { createS3UploadTarget, deleteS3Object, verifyS3ObjectExists } from './lib/storage/s3';
 import {
   buildS3ObjectKey,
+  buildS3PairedVideoObjectKey,
   buildS3PreviewObjectKey,
   buildS3StorageReference,
   getCurrentInstanceStorage,
 } from './lib/storage/shared';
 import {
   assertUploadTargetWithinBetaLimits,
+  assertValidDeclaredPairedVideo,
   assertValidDeclaredUploadSizes,
 } from './lib/uploadLimits';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
@@ -55,8 +57,11 @@ interface PreparedUploadContext {
   circleId: Id<'circles'>;
   declaredSizeBytes: number;
   declaredPreviewSizeBytes: number;
+  declaredPairedVideoSizeBytes?: number;
+  pairedVideoMimeType?: string;
   pendingStorage: S3PendingStorage;
   previewPendingStorage?: S3PendingStorage;
+  pairedVideoPendingStorage?: S3PendingStorage;
 }
 
 interface AuthorizedCreateTargetContext {
@@ -71,6 +76,7 @@ interface AuthorizedRetryContext {
   billingOwner: BillingOwner;
   declaredSizeBytes: number;
   declaredPreviewSizeBytes: number;
+  declaredPairedVideoSizeBytes?: number;
 }
 
 interface CompleteUploadContext {
@@ -83,8 +89,10 @@ interface CompleteUploadContext {
   // Optional only for legacy rows created before size enforcement.
   declaredSizeBytes?: number;
   declaredPreviewSizeBytes?: number;
+  declaredPairedVideoSizeBytes?: number;
   pendingStorage: S3PendingStorage;
   previewPendingStorage?: S3PendingStorage;
+  pairedVideoPendingStorage?: S3PendingStorage;
 }
 
 async function refundCloudUsage(input: {
@@ -158,6 +166,8 @@ async function authorizeCreateTargetRequest(
     fileName: string;
     sizeBytes: number;
     previewSizeBytes: number;
+    pairedVideoSizeBytes?: number;
+    pairedVideoMimeType?: string;
   },
 ): Promise<AuthorizedCreateTargetContext> {
   const viewer = await requireViewer(ctx);
@@ -186,6 +196,19 @@ async function authorizeCreateTargetRequest(
     mimeType: args.mimeType,
     fileName: args.fileName,
   });
+
+  if (args.pairedVideoSizeBytes !== undefined || args.pairedVideoMimeType !== undefined) {
+    if (args.pairedVideoSizeBytes === undefined) {
+      throw new Error('pairedVideoSizeBytes is required when a paired video is declared.');
+    }
+
+    assertValidDeclaredPairedVideo({
+      kind: args.kind,
+      fileName: args.fileName,
+      pairedVideoSizeBytes: args.pairedVideoSizeBytes,
+      pairedVideoMimeType: args.pairedVideoMimeType,
+    });
+  }
 
   return {
     circleId: args.circleId,
@@ -253,6 +276,9 @@ async function authorizeRetryRequest(
     billingOwner: await resolveCircleBillingOwner(ctx, upload.circleId),
     declaredSizeBytes: upload.declaredSizeBytes,
     declaredPreviewSizeBytes: upload.declaredPreviewSizeBytes,
+    ...(upload.declaredPairedVideoSizeBytes !== undefined
+      ? { declaredPairedVideoSizeBytes: upload.declaredPairedVideoSizeBytes }
+      : {}),
   };
 }
 
@@ -265,6 +291,8 @@ export const authorizeCreateTarget = internalQuery({
     fileName: v.string(),
     sizeBytes: v.number(),
     previewSizeBytes: v.number(),
+    pairedVideoSizeBytes: v.optional(v.number()),
+    pairedVideoMimeType: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<AuthorizedCreateTargetContext> => {
     return await authorizeCreateTargetRequest(ctx, args);
@@ -289,11 +317,15 @@ export const prepareCreateTarget = internalMutation({
     fileName: v.string(),
     sizeBytes: v.number(),
     previewSizeBytes: v.number(),
+    pairedVideoSizeBytes: v.optional(v.number()),
+    pairedVideoMimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
     await authorizeCreateTargetRequest(ctx, args);
 
+    const pairedVideoMimeType =
+      args.pairedVideoSizeBytes !== undefined ? args.pairedVideoMimeType?.trim() : undefined;
     const storageMode = getCurrentInstanceStorage();
     const uploadId = await ctx.db.insert('uploads', {
       shareBatchId: args.shareBatchId,
@@ -303,8 +335,12 @@ export const prepareCreateTarget = internalMutation({
       kind: args.kind,
       fileName: args.fileName.trim(),
       mimeType: args.mimeType.trim(),
+      ...(pairedVideoMimeType ? { pairedVideoMimeType } : {}),
       declaredSizeBytes: args.sizeBytes,
       declaredPreviewSizeBytes: args.previewSizeBytes,
+      ...(args.pairedVideoSizeBytes !== undefined
+        ? { declaredPairedVideoSizeBytes: args.pairedVideoSizeBytes }
+        : {}),
       status: 'uploading',
       createdAt: Date.now(),
     });
@@ -323,10 +359,17 @@ export const prepareCreateTarget = internalMutation({
     const previewPendingStorage = buildS3StorageReference({
       objectKey: buildS3PreviewObjectKey(objectKey),
     });
+    const pairedVideoPendingStorage =
+      args.pairedVideoSizeBytes !== undefined
+        ? buildS3StorageReference({
+            objectKey: buildS3PairedVideoObjectKey(objectKey, pairedVideoMimeType ?? 'video/mp4'),
+          })
+        : undefined;
 
     await ctx.db.patch(uploadId, {
       pendingStorage,
       previewPendingStorage,
+      ...(pairedVideoPendingStorage ? { pairedVideoPendingStorage } : {}),
     });
 
     return {
@@ -339,8 +382,13 @@ export const prepareCreateTarget = internalMutation({
       circleId: args.circleId,
       declaredSizeBytes: args.sizeBytes,
       declaredPreviewSizeBytes: args.previewSizeBytes,
+      ...(args.pairedVideoSizeBytes !== undefined
+        ? { declaredPairedVideoSizeBytes: args.pairedVideoSizeBytes }
+        : {}),
+      ...(pairedVideoMimeType ? { pairedVideoMimeType } : {}),
       pendingStorage,
       previewPendingStorage,
+      ...(pairedVideoPendingStorage ? { pairedVideoPendingStorage } : {}),
     };
   },
 });
@@ -377,9 +425,16 @@ export const prepareRetry = internalMutation({
       circleId: upload.circleId,
       declaredSizeBytes: retryContext.declaredSizeBytes,
       declaredPreviewSizeBytes: retryContext.declaredPreviewSizeBytes,
+      ...(retryContext.declaredPairedVideoSizeBytes !== undefined
+        ? { declaredPairedVideoSizeBytes: retryContext.declaredPairedVideoSizeBytes }
+        : {}),
+      ...(upload.pairedVideoMimeType ? { pairedVideoMimeType: upload.pairedVideoMimeType } : {}),
       pendingStorage: upload.pendingStorage,
       ...(upload.previewPendingStorage && upload.previewPendingStorage.provider === 's3'
         ? { previewPendingStorage: upload.previewPendingStorage }
+        : {}),
+      ...(upload.pairedVideoPendingStorage && upload.pairedVideoPendingStorage.provider === 's3'
+        ? { pairedVideoPendingStorage: upload.pairedVideoPendingStorage }
         : {}),
     };
   },
@@ -394,6 +449,8 @@ export const createTarget = action({
     fileName: v.string(),
     sizeBytes: v.number(),
     previewSizeBytes: v.number(),
+    pairedVideoSizeBytes: v.optional(v.number()),
+    pairedVideoMimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const policy = getDeploymentPolicyFromEnv();
@@ -410,7 +467,8 @@ export const createTarget = action({
         owner: billingContext.billingOwner,
         entityId: billingContext.circleId,
         featureId: BILLING_FEATURE_IDS.storageBytes,
-        requiredBalance: args.sizeBytes + args.previewSizeBytes,
+        requiredBalance:
+          args.sizeBytes + args.previewSizeBytes + (args.pairedVideoSizeBytes ?? 0),
       });
     }
 
@@ -436,11 +494,22 @@ export const createTarget = action({
             sizeBytes: prepared.declaredPreviewSizeBytes,
           })
         : null;
+    const pairedVideoTarget =
+      prepared.pairedVideoPendingStorage &&
+      prepared.pairedVideoPendingStorage.provider === 's3' &&
+      prepared.declaredPairedVideoSizeBytes !== undefined
+        ? await createS3UploadTarget({
+            storage: prepared.pairedVideoPendingStorage,
+            mimeType: prepared.pairedVideoMimeType ?? 'video/mp4',
+            sizeBytes: prepared.declaredPairedVideoSizeBytes,
+          })
+        : null;
 
     return {
       uploadId: prepared.uploadId,
       target,
       ...(previewTarget ? { previewTarget } : {}),
+      ...(pairedVideoTarget ? { pairedVideoTarget } : {}),
     };
   },
 });
@@ -462,7 +531,9 @@ export const retry = action({
         entityId: billingContext.circleId,
         featureId: BILLING_FEATURE_IDS.storageBytes,
         requiredBalance:
-          billingContext.declaredSizeBytes + billingContext.declaredPreviewSizeBytes,
+          billingContext.declaredSizeBytes +
+          billingContext.declaredPreviewSizeBytes +
+          (billingContext.declaredPairedVideoSizeBytes ?? 0),
       });
     }
 
@@ -490,11 +561,22 @@ export const retry = action({
             sizeBytes: prepared.declaredPreviewSizeBytes,
           })
         : null;
+    const pairedVideoTarget =
+      prepared.pairedVideoPendingStorage &&
+      prepared.pairedVideoPendingStorage.provider === 's3' &&
+      prepared.declaredPairedVideoSizeBytes !== undefined
+        ? await createS3UploadTarget({
+            storage: prepared.pairedVideoPendingStorage,
+            mimeType: prepared.pairedVideoMimeType ?? 'video/mp4',
+            sizeBytes: prepared.declaredPairedVideoSizeBytes,
+          })
+        : null;
 
     return {
       uploadId: prepared.uploadId,
       target,
       ...(previewTarget ? { previewTarget } : {}),
+      ...(pairedVideoTarget ? { pairedVideoTarget } : {}),
     };
   },
 });
@@ -534,12 +616,21 @@ export const getCompleteContext = internalQuery({
       circleId: upload.circleId,
       billingOwner,
       hasAsset: Boolean(upload.assetId),
-      existingAssetSizeBytes: existingAsset?.sizeBytes ?? 0,
+      // Includes the paired video: on re-completion the storage delta must be
+      // computed against everything the existing asset already occupies.
+      existingAssetSizeBytes:
+        (existingAsset?.sizeBytes ?? 0) + (existingAsset?.pairedVideoSizeBytes ?? 0),
       declaredSizeBytes: upload.declaredSizeBytes,
       declaredPreviewSizeBytes: upload.declaredPreviewSizeBytes,
+      ...(upload.declaredPairedVideoSizeBytes !== undefined
+        ? { declaredPairedVideoSizeBytes: upload.declaredPairedVideoSizeBytes }
+        : {}),
       pendingStorage: upload.pendingStorage,
       ...(upload.previewPendingStorage && upload.previewPendingStorage.provider === 's3'
         ? { previewPendingStorage: upload.previewPendingStorage }
+        : {}),
+      ...(upload.pairedVideoPendingStorage && upload.pairedVideoPendingStorage.provider === 's3'
+        ? { pairedVideoPendingStorage: upload.pairedVideoPendingStorage }
         : {}),
     };
   },
@@ -593,14 +684,41 @@ async function assertValidAssetEncryption(
   if (!epochRow) {
     throw new Error('Encrypted upload references an unknown circle key epoch.');
   }
+
+  // New media must be sealed under the newest epoch only: any older epoch may
+  // still be held by since-departed members, which would break post-removal
+  // confidentiality. This runs in the same transaction as membership changes,
+  // so there is no window between a removal and this check.
+  const currentEpoch = await ctx.db
+    .query('circleKeyEpochs')
+    .withIndex('by_circle_and_epoch', (q) => q.eq('circleId', upload.circleId))
+    .order('desc')
+    .first();
+
+  if (currentEpoch && encryption.circleEpoch !== currentEpoch.epoch) {
+    throw new Error(
+      'Encrypted upload references a stale circle key epoch. Re-encrypt with the current circle key and retry.',
+    );
+  }
+
+  const circle = await ctx.db.get(upload.circleId);
+
+  if (circle?.keyRotationPendingAt !== undefined) {
+    throw new Error(
+      'The circle key must be rotated after a member departure before new encrypted media can be published.',
+    );
+  }
 }
 
 export const finalizeComplete = internalMutation({
   args: {
     uploadId: v.id('uploads'),
     previewObjectKey: v.optional(v.string()),
+    pairedVideoObjectKey: v.optional(v.string()),
     fileName: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
+    pairedVideoSizeBytes: v.optional(v.number()),
+    pairedVideoDurationSeconds: v.optional(v.number()),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
@@ -660,6 +778,12 @@ export const finalizeComplete = internalMutation({
       upload.previewPendingStorage.provider === 's3'
         ? upload.previewPendingStorage
         : null;
+    const pairedVideoStorage =
+      args.pairedVideoObjectKey &&
+      upload.pairedVideoPendingStorage &&
+      upload.pairedVideoPendingStorage.provider === 's3'
+        ? upload.pairedVideoPendingStorage
+        : null;
 
     if (!storage) {
       throw new Error('Completed upload is missing its storage reference.');
@@ -676,6 +800,17 @@ export const finalizeComplete = internalMutation({
       location: args.location,
       encryption: args.encryption,
     };
+    const pairedVideoFields = pairedVideoStorage
+      ? {
+          pairedVideoStorage,
+          pairedVideoSizeBytes: args.pairedVideoSizeBytes,
+          pairedVideoMimeType: upload.pairedVideoMimeType,
+          pairedVideoDurationSeconds: args.pairedVideoDurationSeconds,
+        }
+      : {};
+    const nextTotalSizeBytes =
+      (nextAssetFields.sizeBytes ?? 0) +
+      (pairedVideoStorage ? args.pairedVideoSizeBytes ?? 0 : 0);
 
     if (upload.assetId) {
       const existingAsset = await ctx.db.get(upload.assetId);
@@ -683,6 +818,7 @@ export const finalizeComplete = internalMutation({
         storage,
         ...nextAssetFields,
         ...(previewStorage ? { previewStorage } : {}),
+        ...pairedVideoFields,
       });
       await ctx.db.patch(upload.shareBatchId, {
         updatedAt: now,
@@ -690,13 +826,17 @@ export const finalizeComplete = internalMutation({
       await ctx.db.patch(upload._id, {
         storage,
         ...(previewStorage ? { previewStorage } : {}),
+        ...(pairedVideoStorage ? { pairedVideoStorage } : {}),
         status: 'uploaded',
         completedAt: now,
       });
 
       if (existingAsset) {
         await adjustCircleStats(ctx, upload.circleId, {
-          totalSizeBytes: (nextAssetFields.sizeBytes ?? 0) - (existingAsset.sizeBytes ?? 0),
+          totalSizeBytes:
+            nextTotalSizeBytes -
+            (existingAsset.sizeBytes ?? 0) -
+            (existingAsset.pairedVideoSizeBytes ?? 0),
         });
       }
 
@@ -714,6 +854,7 @@ export const finalizeComplete = internalMutation({
       sizeBytes: nextAssetFields.sizeBytes,
       storage,
       ...(previewStorage ? { previewStorage } : {}),
+      ...pairedVideoFields,
       createdAt: now,
       width: nextAssetFields.width,
       height: nextAssetFields.height,
@@ -727,6 +868,7 @@ export const finalizeComplete = internalMutation({
       assetId,
       storage,
       ...(previewStorage ? { previewStorage } : {}),
+      ...(pairedVideoStorage ? { pairedVideoStorage } : {}),
       status: 'uploaded',
       completedAt: now,
     });
@@ -737,6 +879,7 @@ export const finalizeComplete = internalMutation({
     await adjustCircleStats(ctx, upload.circleId, assetStatsDelta({
       kind: upload.kind,
       sizeBytes: nextAssetFields.sizeBytes,
+      pairedVideoSizeBytes: pairedVideoStorage ? args.pairedVideoSizeBytes : undefined,
     }, 1));
 
     return {
@@ -750,11 +893,13 @@ export const complete = action({
     uploadId: v.id('uploads'),
     objectKey: v.optional(v.string()),
     previewObjectKey: v.optional(v.string()),
+    pairedVideoObjectKey: v.optional(v.string()),
     fileName: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
+    pairedVideoDurationSeconds: v.optional(v.number()),
     capturedAt: v.optional(v.number()),
     encryption: v.optional(assetEncryptionValidator),
     location: v.optional(
@@ -804,6 +949,12 @@ export const complete = action({
         await deleteS3Object({ storage: previewStorage });
       }
 
+      const pairedVideoStorage = completeContext.pairedVideoPendingStorage;
+
+      if (pairedVideoStorage && pairedVideoStorage.provider === 's3') {
+        await deleteS3Object({ storage: pairedVideoStorage });
+      }
+
       await ctx.runMutation(internal.uploads.markFailed, {
         uploadId: args.uploadId,
         failureReason,
@@ -845,11 +996,50 @@ export const complete = action({
       }
     }
 
+    // A target that declared a paired video must complete with one: otherwise
+    // the asset would silently lose its Live Photo clip while the object may
+    // still sit (unbilled) in the bucket.
+    if (completeContext.declaredPairedVideoSizeBytes !== undefined && !args.pairedVideoObjectKey) {
+      throw new Error('Completed upload is missing its paired video object key.');
+    }
+
+    let completedPairedVideoSizeBytes: number | undefined;
+
+    if (args.pairedVideoObjectKey) {
+      const pairedVideoPendingStorage = completeContext.pairedVideoPendingStorage;
+
+      if (!pairedVideoPendingStorage || pairedVideoPendingStorage.provider !== 's3') {
+        throw new Error('Completed upload is missing its S3 paired video storage reference.');
+      }
+
+      if (args.pairedVideoObjectKey !== pairedVideoPendingStorage.objectKey) {
+        throw new Error('Completed paired video object key does not match the prepared target.');
+      }
+
+      const verifiedPairedVideo = await verifyS3ObjectExists({
+        storage: pairedVideoPendingStorage,
+      });
+
+      if (
+        completeContext.declaredPairedVideoSizeBytes !== undefined &&
+        verifiedPairedVideo.sizeBytes !== completeContext.declaredPairedVideoSizeBytes
+      ) {
+        await rejectSizeMismatch(
+          'Uploaded paired video size does not match the declared paired video size.',
+        );
+      }
+
+      completedPairedVideoSizeBytes = verifiedPairedVideo.sizeBytes;
+    }
+
     const policy = getDeploymentPolicyFromEnv();
     const mediaUploadsDelta = completeContext.hasAsset ? 0 : 1;
     // The server-observed S3 size is authoritative for billing and metadata.
     const completedSizeBytes = verifiedOriginal.sizeBytes;
-    const storageBytesDelta = (completedSizeBytes ?? 0) - completeContext.existingAssetSizeBytes;
+    const storageBytesDelta =
+      (completedSizeBytes ?? 0) +
+      (completedPairedVideoSizeBytes ?? 0) -
+      completeContext.existingAssetSizeBytes;
     const chargedUsage = {
       mediaUploads: 0,
       storageBytes: 0,
@@ -910,11 +1100,20 @@ export const complete = action({
       finalized = await ctx.runMutation(internal.uploads.finalizeComplete, {
         uploadId: args.uploadId,
         ...(args.previewObjectKey ? { previewObjectKey: args.previewObjectKey } : {}),
+        ...(args.pairedVideoObjectKey
+          ? { pairedVideoObjectKey: args.pairedVideoObjectKey }
+          : {}),
         ...(args.fileName !== undefined ? { fileName: args.fileName } : {}),
         sizeBytes: completedSizeBytes,
+        ...(completedPairedVideoSizeBytes !== undefined
+          ? { pairedVideoSizeBytes: completedPairedVideoSizeBytes }
+          : {}),
         ...(args.width !== undefined ? { width: args.width } : {}),
         ...(args.height !== undefined ? { height: args.height } : {}),
         ...(args.durationSeconds !== undefined ? { durationSeconds: args.durationSeconds } : {}),
+        ...(args.pairedVideoDurationSeconds !== undefined
+          ? { pairedVideoDurationSeconds: args.pairedVideoDurationSeconds }
+          : {}),
         ...(args.capturedAt !== undefined ? { capturedAt: args.capturedAt } : {}),
         ...(args.encryption !== undefined ? { encryption: args.encryption } : {}),
         ...(args.location !== undefined ? { location: args.location } : {}),
@@ -1015,8 +1214,10 @@ export const getDiscardContext = internalQuery({
       storageReferences: [
         ...(upload.storage ? [upload.storage] : []),
         ...(upload.previewStorage ? [upload.previewStorage] : []),
+        ...(upload.pairedVideoStorage ? [upload.pairedVideoStorage] : []),
         ...(upload.pendingStorage ? [upload.pendingStorage] : []),
         ...(upload.previewPendingStorage ? [upload.previewPendingStorage] : []),
+        ...(upload.pairedVideoPendingStorage ? [upload.pairedVideoPendingStorage] : []),
       ],
     };
   },

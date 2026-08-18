@@ -133,7 +133,14 @@ export function createLegacyFileSystemMock() {
     FileSystemUploadType: { BINARY_CONTENT: 'BINARY_CONTENT' },
     makeDirectoryAsync: async () => undefined,
     getInfoAsync: async (uri: string) => {
-      if (uri.endsWith('/')) {
+      // Directories exist implicitly once any file lives under them, matching
+      // how the real API reports them (with or without a trailing slash).
+      const dirPrefix = uri.endsWith('/') ? uri : `${uri}/`;
+      const isDirectory =
+        uri.endsWith('/') ||
+        [...fakeFsState.files.keys()].some((key) => key.startsWith(dirPrefix));
+
+      if (isDirectory) {
         return { exists: true, isDirectory: true, uri };
       }
 
@@ -152,16 +159,41 @@ export function createLegacyFileSystemMock() {
       };
     },
     readDirectoryAsync: async (dir: string) => {
+      // Direct file children plus (deduplicated) subdirectory names, like the
+      // real API.
       const prefix = dir.endsWith('/') ? dir : `${dir}/`;
+      const names = new Set<string>();
 
-      return [...fakeFsState.files.keys()]
-        .filter((uri) => uri.startsWith(prefix))
-        .map((uri) => uri.slice(prefix.length))
-        .filter((rest) => rest.length > 0 && !rest.includes('/'));
+      for (const uri of fakeFsState.files.keys()) {
+        if (!uri.startsWith(prefix)) {
+          continue;
+        }
+
+        const rest = uri.slice(prefix.length);
+
+        if (rest.length === 0) {
+          continue;
+        }
+
+        const slashIndex = rest.indexOf('/');
+
+        names.add(slashIndex === -1 ? rest : rest.slice(0, slashIndex));
+      }
+
+      return [...names];
     },
     deleteAsync: async (uri: string, options?: { idempotent?: boolean }) => {
-      if (!fakeFsState.files.has(uri) && !options?.idempotent) {
+      // Directories delete recursively, like the real API.
+      const dirPrefix = uri.endsWith('/') ? uri : `${uri}/`;
+      const children = [...fakeFsState.files.keys()].filter((key) => key.startsWith(dirPrefix));
+
+      if (children.length === 0 && !fakeFsState.files.has(uri) && !options?.idempotent) {
         throw new Error(`File not found: ${uri}`);
+      }
+
+      for (const child of children) {
+        fakeFsState.files.delete(child);
+        fakeFsState.modifiedAt.delete(child);
       }
 
       fakeFsState.files.delete(uri);

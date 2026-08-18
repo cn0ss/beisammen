@@ -41,6 +41,22 @@ const DECLARED_SIZE_BYTES = 4096;
 const DECLARED_PREVIEW_SIZE_BYTES = 512;
 const CLERK_TEST_ISSUER = 'https://test.clerk.accounts.dev';
 
+/** Deterministic base64 of exactly `byteLength` bytes, varying with `seed`. */
+function base64OfBytes(byteLength: number, seed: string): string {
+  let hash = 7;
+
+  for (const char of seed) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  const bytes = Array.from({ length: byteLength }, (_, index) => (hash + index * 13) % 256);
+
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/** Valid-shaped sealed circle key (48-byte seal overhead + 32-byte key). */
+const fakeSealedKey = (seed: string) => base64OfBytes(80, seed);
+
 function clerkIdentity(email: string): Partial<UserIdentity> {
   const subject = `user_${email.replace(/[^a-z0-9]+/gi, '_')}`;
 
@@ -177,7 +193,7 @@ describe('asset encryption envelope', () => {
 
       await prepared.user.mutation(api.keys.initializeCircleKey, {
         circleId: prepared.circleId,
-        sealedCircleKey: 'sealed_owner_e1',
+        sealedCircleKey: fakeSealedKey('owner_e1'),
       });
       mockS3Fetch();
 
@@ -209,7 +225,7 @@ describe('asset encryption envelope', () => {
 
       await prepared.user.mutation(api.keys.initializeCircleKey, {
         circleId: prepared.circleId,
-        sealedCircleKey: 'sealed_owner_e1',
+        sealedCircleKey: fakeSealedKey('owner_e1'),
       });
       mockS3Fetch();
 
@@ -245,7 +261,7 @@ describe('asset encryption envelope', () => {
 
       await prepared.user.mutation(api.keys.initializeCircleKey, {
         circleId: prepared.circleId,
-        sealedCircleKey: 'sealed_owner_e1',
+        sealedCircleKey: fakeSealedKey('owner_e1'),
       });
 
       await expect(
@@ -278,7 +294,7 @@ describe('asset encryption envelope', () => {
       });
       await prepared.user.mutation(api.keys.initializeCircleKey, {
         circleId: prepared.circleId,
-        sealedCircleKey: 'sealed_owner_e1',
+        sealedCircleKey: fakeSealedKey('owner_e1'),
       });
       mockS3Fetch();
       await prepared.user.action(api.uploads.complete, {
@@ -310,6 +326,91 @@ describe('asset encryption envelope', () => {
       expect(ownerView.page).toHaveLength(1);
       expect(ownerView.page[0]).toMatchObject({ encryption: encryptionEnvelope() });
       expect(ownerView.page[0]?.location).toBeUndefined();
+    });
+  });
+
+  test('complete rejects stale epochs after a rotation', async () => {
+    await withSelfHostedS3Env(async () => {
+      const t = convexTest(schema, modules);
+      const prepared = await prepareUpload(t, 'owner@example.com');
+
+      await prepared.user.mutation(api.keys.initializeCircleKey, {
+        circleId: prepared.circleId,
+        sealedCircleKey: fakeSealedKey('owner_e1'),
+      });
+      await prepared.user.mutation(api.keys.rotateCircleKey, {
+        circleId: prepared.circleId,
+        grants: [{ userId: prepared.viewer._id, sealedCircleKey: fakeSealedKey('owner_e2') }],
+      });
+      mockS3Fetch();
+
+      // Epoch 1 still exists for old assets, but new media must use epoch 2:
+      // an older epoch may be held by since-departed members.
+      await expect(
+        prepared.user.action(api.uploads.complete, {
+          uploadId: prepared.uploadId,
+          previewObjectKey: prepared.previewObjectKey,
+          encryption: encryptionEnvelope({ circleEpoch: 1 }),
+        }),
+      ).rejects.toThrow(/stale circle key epoch/i);
+
+      const completed = await prepared.user.action(api.uploads.complete, {
+        uploadId: prepared.uploadId,
+        previewObjectKey: prepared.previewObjectKey,
+        encryption: encryptionEnvelope({ circleEpoch: 2 }),
+      });
+
+      expect(completed.assetId).toBeDefined();
+    });
+  });
+
+  test('complete is blocked while a departure keeps rotation pending', async () => {
+    await withSelfHostedS3Env(async () => {
+      const t = convexTest(schema, modules);
+      const prepared = await prepareUpload(t, 'owner@example.com');
+      const { viewer: memberViewer } = await upsertViewer(t, 'member@example.com');
+
+      const membershipId = await t.run(async (ctx) => {
+        return await ctx.db.insert('circleMembers', {
+          circleId: prepared.circleId,
+          userId: memberViewer._id,
+          role: 'member',
+          joinedAt: Date.now(),
+        });
+      });
+
+      await prepared.user.mutation(api.keys.initializeCircleKey, {
+        circleId: prepared.circleId,
+        sealedCircleKey: fakeSealedKey('owner_e1'),
+      });
+      await prepared.user.mutation(api.circles.removeMember, {
+        circleId: prepared.circleId,
+        memberId: membershipId,
+      });
+      mockS3Fetch();
+
+      // The removed member may still hold epoch 1; encrypted publishing stays
+      // blocked until a fresh epoch is committed.
+      await expect(
+        prepared.user.action(api.uploads.complete, {
+          uploadId: prepared.uploadId,
+          previewObjectKey: prepared.previewObjectKey,
+          encryption: encryptionEnvelope(),
+        }),
+      ).rejects.toThrow(/rotated after a member departure/i);
+
+      await prepared.user.mutation(api.keys.rotateCircleKey, {
+        circleId: prepared.circleId,
+        grants: [{ userId: prepared.viewer._id, sealedCircleKey: fakeSealedKey('owner_e2') }],
+      });
+
+      const completed = await prepared.user.action(api.uploads.complete, {
+        uploadId: prepared.uploadId,
+        previewObjectKey: prepared.previewObjectKey,
+        encryption: encryptionEnvelope({ circleEpoch: 2 }),
+      });
+
+      expect(completed.assetId).toBeDefined();
     });
   });
 });

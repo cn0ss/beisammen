@@ -39,6 +39,12 @@ export const AssetThumbnail = memo(function AssetThumbnail({
   return (
     <Container
       onPress={onPress}
+      {...(onPress
+        ? {
+            accessibilityRole: 'imagebutton' as const,
+            accessibilityLabel: gt('Medium im Vollbild ansehen'),
+          }
+        : {})}
       style={[
         styles.tile,
         {

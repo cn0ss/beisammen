@@ -286,4 +286,81 @@ describe('encrypted video proxy', () => {
     expect(response.body.length).toBe(plaintext.length);
     expect(response.body.every((byte, index) => byte === plaintext[index])).toBe(true);
   });
+
+  test.each([64 * 1024 * 1024, 1024 ** 3, 0xffffffff])(
+    'rejects a crafted header chunkSize of %s before any large range request',
+    async (chunkSize) => {
+      const store = makeCiphertextStore(randomPlaintext(200), 100);
+
+      // The chunkSize field sits at header offset 8 and is read before any
+      // chunk is authenticated; a crafted value must fail parsing instead of
+      // driving a multi-gigabyte range request and allocation.
+      new DataView(store.ciphertext.buffer, store.ciphertext.byteOffset).setUint32(
+        8,
+        chunkSize,
+        true,
+      );
+
+      const session = makeSession({ store });
+      const response = await performRequest(
+        session,
+        'GET /v/tok1 HTTP/1.1\r\nRange: bytes=0-99\r\n\r\n',
+      );
+
+      expect(response.head).toContain('500 Internal Server Error');
+      // Only the 36-byte header bootstrap fetch happened; no data ranges.
+      expect(store.fetchCalls).toHaveLength(1);
+    },
+  );
+
+  test('the session refuses ranges beyond the fetch cap outright', async () => {
+    const store = makeCiphertextStore(randomPlaintext(100), 100);
+    const session = makeSession({ store });
+
+    await expect(session.fetchCiphertextRange(0, 65 * 1024 * 1024)).rejects.toThrow(
+      /exceeds the allowed fetch size/i,
+    );
+    await expect(session.fetchCiphertextRange(10, 10)).rejects.toThrow(/invalid ciphertext range/i);
+    expect(store.fetchCalls).toHaveLength(0);
+  });
+
+  test('dedupes concurrent chunk fetches and serves repeats from cache', async () => {
+    const plaintext = randomPlaintext(300);
+    const store = makeCiphertextStore(plaintext, 100);
+    const session = makeSession({ store });
+    const header = await session.ensureHeader();
+    const afterHeader = store.fetchCalls.length;
+
+    const [firstSpan, secondSpan] = await Promise.all([
+      session.decryptChunkSpan(header, 0, 1),
+      session.decryptChunkSpan(header, 0, 2),
+    ]);
+
+    // Chunks 0-1 downloaded once (in-flight fetch shared with the second
+    // caller); only chunk 2 needed an additional range request.
+    expect(store.fetchCalls).toHaveLength(afterHeader + 2);
+    expect(firstSpan[0]).toEqual(plaintext.subarray(0, 100));
+    expect(firstSpan[1]).toEqual(plaintext.subarray(100, 200));
+    expect(secondSpan[2]).toEqual(plaintext.subarray(200, 300));
+
+    // A repeated span is served entirely from the LRU cache.
+    await session.decryptChunkSpan(header, 0, 2);
+    expect(store.fetchCalls).toHaveLength(afterHeader + 2);
+  });
+
+  test('warmUp preloads the header plus head and tail chunks', async () => {
+    const plaintext = randomPlaintext(300);
+    const store = makeCiphertextStore(plaintext, 100);
+    const session = makeSession({ store });
+
+    await session.warmUp();
+
+    const afterWarmUp = store.fetchCalls.length;
+    const header = await session.ensureHeader();
+
+    expect(await session.decryptChunkAt(header, 0)).toEqual(plaintext.subarray(0, 100));
+    expect(await session.decryptChunkAt(header, 2)).toEqual(plaintext.subarray(200, 300));
+    // Both probe targets were already warm; no fetches beyond the warm-up.
+    expect(store.fetchCalls).toHaveLength(afterWarmUp);
+  });
 });

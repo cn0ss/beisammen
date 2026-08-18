@@ -33,6 +33,7 @@ export interface ViewerRecord {
   avatarUrl?: string;
   createdAt: number;
   hasProfileImage: boolean;
+  profileImageKey?: string;
   deletionRequestedAt?: number;
   deletionCompletedAt?: number;
 }
@@ -51,6 +52,7 @@ export interface CircleListItem {
   memberCount: number;
   createdAt: number;
   hasImage: boolean;
+  imageKey?: string;
   canManage: boolean;
   canEdit: boolean;
   canInvite: boolean;
@@ -127,6 +129,9 @@ export interface ShareAssetRecord {
   sizeBytes?: number;
   storage: StorageReference;
   previewStorage?: StorageReference;
+  pairedVideoStorage?: StorageReference;
+  pairedVideoMimeType?: string;
+  pairedVideoDurationSeconds?: number;
   width?: number;
   height?: number;
   durationSeconds?: number;
@@ -146,6 +151,7 @@ export interface ShareFeedItem {
   authorName: string;
   authorAvatarUrl?: string;
   authorHasProfileImage: boolean;
+  authorProfileImageKey?: string;
   createdAtLabel: string;
   publishedAt: number;
   canDelete: boolean;
@@ -163,6 +169,7 @@ export interface ShareBatchRecord {
   authorName: string;
   authorAvatarUrl?: string;
   authorHasProfileImage: boolean;
+  authorProfileImageKey?: string;
   createdAtLabel: string;
   publishedAt: number;
   canDelete: boolean;
@@ -182,6 +189,7 @@ export interface CommentRecord {
   authorName: string;
   authorAvatarUrl?: string;
   authorHasProfileImage: boolean;
+  authorProfileImageKey?: string;
   body: string;
   createdAt: number;
   updatedAt: number;
@@ -205,6 +213,7 @@ export interface ActivityEventRecord {
   actorName: string;
   actorAvatarUrl?: string;
   actorHasProfileImage: boolean;
+  actorProfileImageKey?: string;
   type: 'share.published' | 'comment.created' | 'reaction.set' | string;
   shareBatchId: string;
   assetId: string | null;
@@ -228,6 +237,7 @@ export interface ActivityInboxItemRecord {
   actorName: string;
   actorAvatarUrl?: string;
   actorHasProfileImage: boolean;
+  actorProfileImageKey?: string;
   type: 'share.published' | 'comment.created' | 'reaction.set' | string;
   shareBatchId: string;
   assetId: string | null;
@@ -249,6 +259,7 @@ export interface MemoryItemRecord {
   authorName: string;
   authorAvatarUrl?: string;
   authorHasProfileImage: boolean;
+  authorProfileImageKey?: string;
   kind: 'image' | 'video';
   caption: string;
   timelineAt: number;
@@ -266,6 +277,9 @@ export interface MemoryItemRecord {
     mimeType: string;
     sizeBytes?: number;
     previewStorage?: StorageReference;
+    pairedVideoStorage?: StorageReference;
+    pairedVideoMimeType?: string;
+    pairedVideoDurationSeconds?: number;
     width?: number;
     height?: number;
     durationSeconds?: number;
@@ -428,6 +442,8 @@ export type CreateUploadTargetArgs = {
   fileName: string;
   sizeBytes: number;
   previewSizeBytes: number;
+  pairedVideoSizeBytes?: number;
+  pairedVideoMimeType?: string;
 };
 
 export type PaginationOpts = {
@@ -445,6 +461,7 @@ export type PreparedUploadTarget = {
   uploadId: string;
   target: UploadTarget;
   previewTarget?: UploadTarget;
+  pairedVideoTarget?: UploadTarget;
 };
 
 export type PreparedImageUploadTarget = PreparedUploadTarget;
@@ -453,11 +470,13 @@ export type CompleteUploadArgs = {
   uploadId: string;
   objectKey?: string;
   previewObjectKey?: string;
+  pairedVideoObjectKey?: string;
   fileName?: string;
   sizeBytes?: number;
   width?: number;
   height?: number;
   durationSeconds?: number;
+  pairedVideoDurationSeconds?: number;
   location?: MediaLocation;
   capturedAt?: number;
 };
@@ -652,7 +671,7 @@ export const api = {
     ),
     getReadUrl: makeFunctionReference<
       'action',
-      { assetId: string; variant?: 'preview' | 'original' },
+      { assetId: string; variant?: 'preview' | 'original' | 'pairedVideo' },
       SignedReadUrl
     >(
       'assets:getReadUrl',

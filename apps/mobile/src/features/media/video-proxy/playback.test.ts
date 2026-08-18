@@ -1,6 +1,15 @@
 import _sodium from 'libsodium-wrappers';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
+vi.mock('@/lib/logger', () => ({
+  createLogger: () => ({
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
 vi.mock('expo-file-system', async () =>
   (await import('@/test/fake-file-system')).createModernFileSystemMock(),
 );
@@ -87,11 +96,12 @@ function makeEncryptedVideoAsset() {
 describe('openEncryptedVideoStream', () => {
   test('prefers a fully decrypted cache file over the proxy', async () => {
     const { asset, keysByEpoch } = makeEncryptedVideoAsset();
-    const cachedUri = `${DECRYPTED_CACHE_DIRECTORY}asset1-original.mp4`;
+    const cachedUri = `${DECRYPTED_CACHE_DIRECTORY}circle1/asset1-original.mp4`;
 
     seedFile(cachedUri, new Uint8Array([1, 2, 3]));
 
     const stream = await openEncryptedVideoStream({
+      circleId: 'circle1',
       asset,
       keysByEpoch,
       getSignedUrl: async () => ({ url: 'https://r2.example/cipher', expiresAt: null }),
@@ -129,6 +139,7 @@ describe('openEncryptedVideoStream', () => {
     );
 
     const stream = await openEncryptedVideoStream({
+      circleId: 'circle1',
       asset,
       keysByEpoch,
       getSignedUrl: async () => ({ url: 'https://r2.example/cipher', expiresAt: null }),
@@ -151,11 +162,44 @@ describe('openEncryptedVideoStream', () => {
     expect(proxyServer.unregistered).toEqual(['tok1']);
   });
 
+  test('concurrent opens of the same asset share one proxy session', async () => {
+    const { asset, keysByEpoch } = makeEncryptedVideoAsset();
+    const getSignedUrl = async () => ({ url: 'https://r2.example/cipher', expiresAt: null });
+
+    const [first, second] = await Promise.all([
+      openEncryptedVideoStream({ circleId: 'circle1', asset, keysByEpoch, getSignedUrl }),
+      openEncryptedVideoStream({ circleId: 'circle1', asset, keysByEpoch, getSignedUrl }),
+    ]);
+
+    expect(proxyServer.registered).toHaveLength(1);
+    expect(second.uri).toBe(first.uri);
+
+    // The session stays registered until the last consumer closes.
+    first.close();
+    first.close();
+    expect(proxyServer.unregistered).toHaveLength(0);
+
+    second.close();
+    expect(proxyServer.unregistered).toEqual(['tok1']);
+
+    // After full release, a new open registers a fresh session.
+    const third = await openEncryptedVideoStream({
+      circleId: 'circle1',
+      asset,
+      keysByEpoch,
+      getSignedUrl,
+    });
+
+    expect(proxyServer.registered).toHaveLength(2);
+    third.close();
+  });
+
   test('rejects when no circle key covers the asset epoch', async () => {
     const { asset } = makeEncryptedVideoAsset();
 
     await expect(
       openEncryptedVideoStream({
+        circleId: 'circle1',
         asset,
         keysByEpoch: new Map(),
         getSignedUrl: async () => ({ url: 'https://r2.example/cipher', expiresAt: null }),

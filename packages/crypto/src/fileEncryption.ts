@@ -23,6 +23,14 @@ export const FILE_ALGORITHM_XCHACHA_CHUNKED = 1;
 export const FILE_HEADER_BYTES = 36;
 export const FILE_NONCE_BYTES = 16;
 export const DEFAULT_CHUNK_SIZE = 1024 * 1024;
+/**
+ * Hard ceiling for the header's chunkSize field. The field is read before any
+ * chunk is authenticated, and readers size buffers and byte ranges from it, so
+ * an attacker-controlled value must never be able to force multi-gigabyte
+ * allocations. Every writer uses DEFAULT_CHUNK_SIZE; the headroom only exists
+ * so the format can grow without breaking old readers.
+ */
+export const MAX_CHUNK_SIZE = 8 * 1024 * 1024;
 export const CHUNK_OVERHEAD_BYTES = XCHACHA_TAG_BYTES;
 
 export interface FileHeader {
@@ -42,7 +50,7 @@ export function createFileHeader(
     throw new Error('Invalid plaintext length.');
   }
 
-  if (!Number.isInteger(chunkSize) || chunkSize <= 0 || chunkSize > 0xffffffff) {
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE) {
     throw new Error('Invalid chunk size.');
   }
 
@@ -86,7 +94,7 @@ export function parseFileHeader(bytes: Uint8Array): FileHeader {
   const chunkSize = view.getUint32(8, true);
   const plaintextLength = getUint64(view, 12);
 
-  if (chunkSize <= 0) {
+  if (chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE) {
     throw new Error('Invalid chunk size in encrypted file header.');
   }
 

@@ -227,8 +227,10 @@ export function useShareUploadFlow({
       uploadId?: string;
       cacheUri?: string;
       previewCacheUri?: string;
+      pairedVideoCacheUri?: string;
       encryptedCacheUri?: string;
       encryptedPreviewCacheUri?: string;
+      encryptedPairedVideoCacheUri?: string;
       encryption?: UploadEncryptionEnvelope;
     }) => {
       assertPreparedAssetAllowed(input.preparedAsset);
@@ -281,6 +283,12 @@ export function useShareUploadFlow({
         },
         sourceUri: input.preparedAsset.uri,
         previewUri: previewAsset.uri,
+        ...(input.preparedAsset.pairedVideoUri
+          ? {
+              pairedVideoSourceUri: input.preparedAsset.pairedVideoUri,
+              encryptedPairedVideoTargetUri: encryptionTargets.encryptedPairedVideoUri,
+            }
+          : {}),
         encryptedTargetUri: encryptionTargets.encryptedUri,
         encryptedPreviewTargetUri: encryptionTargets.encryptedPreviewUri,
         persisted: {
@@ -288,9 +296,15 @@ export function useShareUploadFlow({
           ...(input.encryptedPreviewCacheUri
             ? { encryptedPreviewCacheUri: input.encryptedPreviewCacheUri }
             : {}),
+          ...(input.encryptedPairedVideoCacheUri
+            ? { encryptedPairedVideoCacheUri: input.encryptedPairedVideoCacheUri }
+            : {}),
           ...(input.encryption ? { encryption: input.encryption } : {}),
         },
       });
+      const hasPairedVideo =
+        encrypted.encryptedPairedVideoUri !== undefined &&
+        encrypted.encryptedPairedVideoSizeBytes !== undefined;
 
       setUploadQueue((state) =>
         patchUploadQueueItem(state, input.queueId, {
@@ -300,6 +314,12 @@ export function useShareUploadFlow({
           previewSizeBytes: encrypted.encryptedPreviewSizeBytes,
           encryptedCacheUri: encrypted.encryptedUri,
           encryptedPreviewCacheUri: encrypted.encryptedPreviewUri,
+          ...(hasPairedVideo
+            ? {
+                pairedVideoSizeBytes: encrypted.encryptedPairedVideoSizeBytes,
+                encryptedPairedVideoCacheUri: encrypted.encryptedPairedVideoUri,
+              }
+            : {}),
           encryption: encrypted.envelope,
         }),
       );
@@ -319,6 +339,13 @@ export function useShareUploadFlow({
             ),
             sizeBytes: encrypted.encryptedSizeBytes,
             previewSizeBytes: encrypted.encryptedPreviewSizeBytes,
+            ...(hasPairedVideo
+              ? {
+                  pairedVideoSizeBytes: encrypted.encryptedPairedVideoSizeBytes,
+                  pairedVideoMimeType:
+                    input.preparedAsset.pairedVideoMimeType ?? 'video/mp4',
+                }
+              : {}),
           });
 
       setUploadQueue((state) =>
@@ -361,12 +388,33 @@ export function useShareUploadFlow({
         };
       }
 
+      let pairedVideoUploaded: {
+        pairedVideoObjectKey?: string;
+      } = {};
+
+      if (prepared.pairedVideoTarget && encrypted.encryptedPairedVideoUri !== undefined) {
+        const uploadedPairedVideo = await uploadPreparedFile({
+          target: prepared.pairedVideoTarget,
+          asset: {
+            ...input.preparedAsset,
+            uri: encrypted.encryptedPairedVideoUri,
+            mimeType: input.preparedAsset.pairedVideoMimeType ?? 'video/mp4',
+            sizeBytes: encrypted.encryptedPairedVideoSizeBytes,
+          },
+        });
+
+        pairedVideoUploaded = {
+          pairedVideoObjectKey: uploadedPairedVideo.objectKey,
+        };
+      }
+
       // No plaintext location: the server rejects it next to `encryption`.
       // Name and location live in the envelope's encMetadata instead.
       await completeUpload({
         uploadId: prepared.uploadId,
         objectKey: uploaded.objectKey,
         ...previewUploaded,
+        ...pairedVideoUploaded,
         ...encryptedCompletionFields({
           fileName: input.preparedAsset.fileName,
           kind: input.preparedAsset.kind,
@@ -375,6 +423,12 @@ export function useShareUploadFlow({
             width: input.preparedAsset.width,
             height: input.preparedAsset.height,
             durationSeconds: input.preparedAsset.durationSeconds,
+            ...(pairedVideoUploaded.pairedVideoObjectKey
+              ? {
+                  pairedVideoDurationSeconds:
+                    input.preparedAsset.pairedVideoDurationSeconds,
+                }
+              : {}),
             capturedAt: input.preparedAsset.capturedAt,
           },
         }),
@@ -384,8 +438,10 @@ export function useShareUploadFlow({
         await uploadRecoveryStore.clearItemFiles({
           cacheUri: input.cacheUri,
           previewCacheUri,
+          pairedVideoCacheUri: input.pairedVideoCacheUri,
           encryptedCacheUri: encrypted.encryptedUri,
           encryptedPreviewCacheUri: encrypted.encryptedPreviewUri,
+          encryptedPairedVideoCacheUri: encrypted.encryptedPairedVideoUri,
         });
       } catch (error) {
         // The upload is already committed at this point. Some picker-provided
@@ -414,7 +470,9 @@ export function useShareUploadFlow({
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
+      // 'livePhotos' delivers the paired video of iOS Live Photos alongside
+      // the still; Android and web ignore the entry.
+      mediaTypes: ['images', 'videos', 'livePhotos'],
       allowsMultipleSelection: true,
       exif: true,
       quality: 1,
@@ -460,8 +518,39 @@ export function useShareUploadFlow({
           });
         }
 
+        // Live Photo companion clip: cached next to the still so retries can
+        // re-encrypt it after the picker's temporary file is gone.
+        const pairedVideoAsset = asset.pairedVideoAsset;
+        let pairedVideoCacheUri: string | null = null;
+
+        if (pairedVideoAsset?.uri) {
+          try {
+            pairedVideoCacheUri = await cacheUploadRecoveryFile({
+              instanceUrl,
+              shareBatchId: draft.shareBatchId,
+              queueId,
+              uri: pairedVideoAsset.uri,
+              fileName: `paired-${fileNameFromPickerAsset(pairedVideoAsset)}`,
+            });
+          } catch (error) {
+            logger.warn('Upload recovery paired video cache failed', {
+              queueId,
+              circleId: selectedCircle._id,
+              shareBatchId: draft.shareBatchId,
+              fileName,
+              error,
+            });
+          }
+        }
+
         const uploadUri = cacheUri ?? asset.uri;
-        const uploadAsset = cacheUri ? { ...asset, uri: cacheUri } : asset;
+        const uploadAsset: ImagePicker.ImagePickerAsset = {
+          ...asset,
+          ...(cacheUri ? { uri: cacheUri } : {}),
+          ...(pairedVideoAsset && pairedVideoCacheUri
+            ? { pairedVideoAsset: { ...pairedVideoAsset, uri: pairedVideoCacheUri } }
+            : {}),
+        };
         const durationSeconds =
           asset.duration !== null && asset.duration !== undefined
             ? asset.duration / 1000
@@ -479,6 +568,16 @@ export function useShareUploadFlow({
             fileUri: uploadUri,
             previewUri: uploadUri,
             ...(cacheUri ? { cacheUri } : {}),
+            ...(pairedVideoAsset?.uri
+              ? { pairedVideoUri: pairedVideoCacheUri ?? pairedVideoAsset.uri }
+              : {}),
+            ...(pairedVideoCacheUri ? { pairedVideoCacheUri } : {}),
+            ...(pairedVideoAsset?.mimeType
+              ? { pairedVideoMimeType: pairedVideoAsset.mimeType }
+              : {}),
+            ...(pairedVideoAsset?.duration !== null && pairedVideoAsset?.duration !== undefined
+              ? { pairedVideoDurationSeconds: pairedVideoAsset.duration / 1000 }
+              : {}),
             recoverable: Boolean(cacheUri),
             prepared: Boolean(cacheUri),
             sizeBytes: asset.fileSize ?? undefined,
@@ -509,6 +608,9 @@ export function useShareUploadFlow({
               width: preparedAsset.width,
               height: preparedAsset.height,
               durationSeconds: preparedAsset.durationSeconds,
+              pairedVideoUri: preparedAsset.pairedVideoUri,
+              pairedVideoMimeType: preparedAsset.pairedVideoMimeType,
+              pairedVideoDurationSeconds: preparedAsset.pairedVideoDurationSeconds,
               location: preparedAsset.location,
               capturedAt: preparedAsset.capturedAt,
               locationLabel: formatMediaLocation(preparedAsset.location) ?? undefined,
@@ -522,6 +624,7 @@ export function useShareUploadFlow({
             shareBatchId: draft.shareBatchId,
             preparedAsset,
             ...(cacheUri ? { cacheUri } : {}),
+            ...(pairedVideoCacheUri ? { pairedVideoCacheUri } : {}),
           });
 
           successCount += 1;
@@ -619,6 +722,9 @@ export function useShareUploadFlow({
               width: preparedAsset.width,
               height: preparedAsset.height,
               durationSeconds: preparedAsset.durationSeconds,
+              pairedVideoUri: preparedAsset.pairedVideoUri,
+              pairedVideoMimeType: preparedAsset.pairedVideoMimeType,
+              pairedVideoDurationSeconds: preparedAsset.pairedVideoDurationSeconds,
               location: preparedAsset.location,
               capturedAt: preparedAsset.capturedAt,
               locationLabel: formatMediaLocation(preparedAsset.location) ?? undefined,
@@ -635,8 +741,10 @@ export function useShareUploadFlow({
           uploadId: queueItem.uploadId,
           cacheUri: queueItem.cacheUri,
           previewCacheUri: queueItem.previewCacheUri,
+          pairedVideoCacheUri: queueItem.pairedVideoCacheUri,
           encryptedCacheUri: queueItem.encryptedCacheUri,
           encryptedPreviewCacheUri: queueItem.encryptedPreviewCacheUri,
+          encryptedPairedVideoCacheUri: queueItem.encryptedPairedVideoCacheUri,
           encryption: queueItem.encryption,
         });
 

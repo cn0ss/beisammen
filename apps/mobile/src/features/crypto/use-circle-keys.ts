@@ -5,8 +5,9 @@ import { useConvex, useQuery } from 'convex/react';
 import { createLogger } from '@/lib/logger';
 
 import { keysApi } from './api';
-import { buildMissingGrantPayload, ensureCircleKey } from './circle-keys';
+import { buildMissingGrantPayloadsByEpoch, ensureCircleKey } from './circle-keys';
 import { useCrypto } from './provider';
+import { rotateCircleKeyNow } from './rotation';
 import { getSodium } from './sodium';
 
 const logger = createLogger('crypto.circleKeys');
@@ -34,6 +35,10 @@ export function useCircleKeys(circleId: string | null | undefined): CircleKeysSt
   // One grant top-up per (mount, circle): failures are expected races with
   // other members and must not retry in a loop.
   const grantAttemptedFor = useRef<string | null>(null);
+  // Same guard for the post-departure rotation: at most one attempt per
+  // (mount, circle); a success clears rotationPending server-side, so the
+  // subscription settles instead of looping.
+  const rotationAttemptedFor = useRef<string | null>(null);
 
   const userKeys = crypto.status === 'ready' ? crypto.userKeys : null;
   // Reactive subscription so a granted key or a rotation re-resolves without
@@ -43,7 +48,9 @@ export function useCircleKeys(circleId: string | null | undefined): CircleKeysSt
     circleId && userKeys ? { circleId } : 'skip',
   );
   const subscriptionKey = myCircleKeys
-    ? `${myCircleKeys.currentEpoch ?? 'none'}:${myCircleKeys.grants.length}`
+    ? `${myCircleKeys.currentEpoch ?? 'none'}:${myCircleKeys.grants.length}:${
+        myCircleKeys.rotationPending ? 'rotate' : 'stable'
+      }`
     : null;
 
   useEffect(() => {
@@ -54,6 +61,18 @@ export function useCircleKeys(circleId: string | null | undefined): CircleKeysSt
 
     let cancelled = false;
 
+    // A departed member may still hold the current key; the server gates
+    // encrypted uploads until a manage-role member commits a fresh epoch.
+    // Trigger that rotation from whichever eligible client comes online first.
+    if (
+      myCircleKeys.rotationPending &&
+      myCircleKeys.canRotate &&
+      rotationAttemptedFor.current !== circleId
+    ) {
+      rotationAttemptedFor.current = circleId;
+      void rotateCircleKeyNow({ convex, circleId });
+    }
+
     void (async () => {
       try {
         const sodium = await getSodium();
@@ -63,6 +82,8 @@ export function useCircleKeys(circleId: string | null | undefined): CircleKeysSt
           getMyCircleKeys: () => convex.query(keysApi.getMyCircleKeys, { circleId }),
           initializeCircleKey: (sealedCircleKey) =>
             convex.mutation(keysApi.initializeCircleKey, { circleId, sealedCircleKey }),
+          rejectKeyGrant: (epoch) =>
+            convex.mutation(keysApi.rejectMyKeyGrant, { circleId, epoch }),
         });
 
         if (cancelled) {
@@ -81,7 +102,9 @@ export function useCircleKeys(circleId: string | null | undefined): CircleKeysSt
           keysByEpoch: result.keysByEpoch,
         });
 
-        // Opportunistic top-up: seal the key to members without a grant.
+        // Opportunistic top-up: seal every held epoch key (current and older)
+        // to members without a grant, so new joiners and key-reset users can
+        // also read media from before the latest rotation.
         const attemptKey = circleId;
 
         if (grantAttemptedFor.current === attemptKey) {
@@ -91,19 +114,27 @@ export function useCircleKeys(circleId: string | null | undefined): CircleKeysSt
         grantAttemptedFor.current = attemptKey;
 
         try {
-          const missing = await convex.query(keysApi.listMissingKeyGrants, { circleId });
+          const heldEpochs = [...result.keysByEpoch.keys()].sort((a, b) => b - a);
+          const missing = await convex.query(keysApi.listMissingKeyGrants, {
+            circleId,
+            epochs: heldEpochs,
+          });
 
-          if (missing.currentEpoch !== result.epoch || missing.missing.length === 0) {
+          if (missing.currentEpoch !== result.epoch) {
             return;
           }
 
-          const grants = buildMissingGrantPayload(sodium, result.circleKey, missing.missing);
+          const payloads = buildMissingGrantPayloadsByEpoch(
+            sodium,
+            result.keysByEpoch,
+            missing.missingByEpoch,
+          );
 
-          if (grants.length > 0) {
+          for (const payload of payloads) {
             await convex.mutation(keysApi.grantCircleKeys, {
               circleId,
-              epoch: result.epoch,
-              grants,
+              epoch: payload.epoch,
+              grants: payload.grants,
             });
           }
         } catch {

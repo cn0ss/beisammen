@@ -17,7 +17,7 @@ import { api } from '@/features/convex/api';
 import { optimizeAvatarImageAsset, uploadPreparedFile } from '@/features/media/client';
 import { clearUploadRecoveryForInstance } from '@/features/media/upload-recovery-runtime';
 import { userFacingErrorMessage } from '@/lib/user-facing-error';
-import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
+import { useProfileImage } from '@/features/media/use-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 import { Avatar, Button, Card, FeedbackToast, SectionHeader } from '@/components/ui';
@@ -66,8 +66,8 @@ export default function AccountScreen() {
   const [isProfileImageBusy, setIsProfileImageBusy] = useState(false);
   const [isAccountDeletionBusy, setIsAccountDeletionBusy] = useState(false);
 
-  const customProfileImageUrl = useProfileImageUrl(Boolean(viewer?.hasProfileImage));
-  const profileImageUrl = customProfileImageUrl ?? session?.avatarUrl ?? null;
+  const customProfileImage = useProfileImage(viewer?.profileImageKey);
+  const profileImage = customProfileImage ?? session?.avatarUrl ?? null;
   const accountLabel = session?.email ?? session?.displayName ?? gt('Angemeldet');
   const profileName = viewer?.displayName ?? session?.displayName ?? accountLabel;
   const hasProfileImage = Boolean(viewer?.hasProfileImage);
@@ -227,7 +227,7 @@ export default function AccountScreen() {
 
         <Animated.View entering={enterSection(1)} style={styles.section}>
           <Card style={styles.heroCard}>
-            <Avatar name={profileName} imageUrl={profileImageUrl} size="xl" />
+            <Avatar name={profileName} image={profileImage} size="xl" />
             <View style={styles.heroCopy}>
               <Text style={[styles.heroName, { color: theme.text }]} numberOfLines={1}>
                 {profileName}

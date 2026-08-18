@@ -112,6 +112,37 @@ describe('upload recovery store', () => {
     ).resolves.toEqual([encrypted]);
   });
 
+  test('round-trips Live Photo paired video fields and clears their files', async () => {
+    const driver = createMemoryDriver();
+    const store = createUploadRecoveryStore(driver);
+    const livePhoto = recoverableItem({
+      pairedVideoUri: 'file:///cache/item-1-paired.mov',
+      pairedVideoCacheUri: 'file:///cache/item-1-paired.mov',
+      pairedVideoMimeType: 'video/quicktime',
+      pairedVideoSizeBytes: 2048,
+      pairedVideoDurationSeconds: 2.8,
+      encryptedPairedVideoCacheUri: 'file:///recovery/item-1-encrypted-paired.bin',
+    });
+
+    await store.saveQueue({
+      instanceUrl: 'https://one.example.com',
+      shareBatchId: 'share-1',
+      items: [livePhoto],
+    });
+
+    await expect(
+      store.loadQueue({
+        instanceUrl: 'https://one.example.com',
+        shareBatchId: 'share-1',
+      }),
+    ).resolves.toEqual([livePhoto]);
+
+    await store.clearItemFiles(livePhoto);
+
+    expect(driver.deletedUris).toContain('file:///cache/item-1-paired.mov');
+    expect(driver.deletedUris).toContain('file:///recovery/item-1-encrypted-paired.bin');
+  });
+
   test('drops malformed persisted envelopes instead of retrying with them', async () => {
     const driver = createMemoryDriver();
     const store = createUploadRecoveryStore(driver);

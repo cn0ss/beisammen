@@ -71,7 +71,7 @@ export async function computeCircleStatsSnapshot(
       snapshot.videoCount += 1;
     }
 
-    snapshot.totalSizeBytes += asset.sizeBytes ?? 0;
+    snapshot.totalSizeBytes += (asset.sizeBytes ?? 0) + (asset.pairedVideoSizeBytes ?? 0);
   }
 
   return snapshot;
@@ -136,13 +136,13 @@ export async function adjustCircleStats(
 }
 
 export function assetStatsDelta(
-  asset: Pick<Doc<'assets'>, 'kind' | 'sizeBytes'>,
+  asset: Pick<Doc<'assets'>, 'kind' | 'sizeBytes' | 'pairedVideoSizeBytes'>,
   direction: 1 | -1,
 ): CircleStatsDelta {
   return {
     imageCount: asset.kind === 'image' ? direction : 0,
     videoCount: asset.kind === 'video' ? direction : 0,
-    totalSizeBytes: direction * (asset.sizeBytes ?? 0),
+    totalSizeBytes: direction * ((asset.sizeBytes ?? 0) + (asset.pairedVideoSizeBytes ?? 0)),
   };
 }
 

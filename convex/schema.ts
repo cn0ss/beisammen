@@ -112,6 +112,10 @@ export default defineSchema({
     billingOwnerId: v.optional(v.id('users')),
     createdBy: v.id('users'),
     createdAt: v.number(),
+    // Set when a member departs while the circle has a key; encrypted upload
+    // completion is blocked until an admin commits a fresh key epoch, so
+    // departed members can never decrypt post-departure media.
+    keyRotationPendingAt: v.optional(v.number()),
   })
     .index('by_created_by', ['createdBy'])
     .index('by_billing_owner', ['billingOwnerId']),
@@ -234,6 +238,13 @@ export default defineSchema({
     sizeBytes: v.optional(v.number()),
     storage: storageReference,
     previewStorage: v.optional(storageReference),
+    // Live Photo / Motion Photo companion clip: a short video paired with an
+    // image asset (kind stays 'image'). Encrypted under the same file key as
+    // the still, so `encryption` covers all three objects.
+    pairedVideoStorage: v.optional(storageReference),
+    pairedVideoSizeBytes: v.optional(v.number()),
+    pairedVideoMimeType: v.optional(v.string()),
+    pairedVideoDurationSeconds: v.optional(v.number()),
     encryption: v.optional(assetEncryption),
     createdAt: v.number(),
     width: v.optional(v.number()),
@@ -308,16 +319,22 @@ export default defineSchema({
     providerKind: storageProviderKind,
     pendingStorage: v.optional(storageReference),
     previewPendingStorage: v.optional(storageReference),
+    // Live Photo companion clip; only present on image uploads that declared
+    // a paired video at target creation.
+    pairedVideoPendingStorage: v.optional(storageReference),
     kind: v.union(v.literal('image'), v.literal('video')),
     fileName: v.string(),
     mimeType: v.string(),
+    pairedVideoMimeType: v.optional(v.string()),
     // Client-declared byte sizes, enforced by signing content-length into the
     // presigned PUT and re-checked against the S3 HEAD at completion.
     // Optional only for legacy in-flight rows created before enforcement.
     declaredSizeBytes: v.optional(v.number()),
     declaredPreviewSizeBytes: v.optional(v.number()),
+    declaredPairedVideoSizeBytes: v.optional(v.number()),
     storage: v.optional(storageReference),
     previewStorage: v.optional(storageReference),
+    pairedVideoStorage: v.optional(storageReference),
     status: v.union(
       v.literal('draft'),
       v.literal('uploading'),

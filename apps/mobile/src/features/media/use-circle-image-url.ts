@@ -1,39 +1,28 @@
-import { useEffect, useState } from 'react';
-
 import { useAction } from 'convex/react';
 
 import { api } from '@/features/convex/api';
 
-export function useCircleImageUrl(circleId?: string | null, enabled = true) {
+import type { AvatarImageSource } from './avatar-image-cache';
+import { useAvatarImageSource } from './use-avatar-image-source';
+
+/**
+ * Resolves a circle's image. `imageKey` comes from the circle summary and
+ * doubles as the expo-image cache key, so a cached image renders without any
+ * network round-trip.
+ */
+export function useCircleImage(
+  circleId: string | null | undefined,
+  imageKey: string | null | undefined,
+): AvatarImageSource | null {
   const getReadUrl = useAction(api.circles.getImageReadUrl);
-  const [url, setUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (!enabled || !circleId) {
-      setUrl(null);
-      return () => {
-        isCancelled = true;
-      };
+  return useAvatarImageSource(circleId ? imageKey : null, async () => {
+    if (!circleId) {
+      return null;
     }
 
-    void getReadUrl({ circleId })
-      .then((result) => {
-        if (!isCancelled) {
-          setUrl(result.url ?? null);
-        }
-      })
-      .catch(() => {
-        if (!isCancelled) {
-          setUrl(null);
-        }
-      });
+    const result = await getReadUrl({ circleId });
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [circleId, enabled, getReadUrl]);
-
-  return url;
+    return result.url ?? null;
+  });
 }

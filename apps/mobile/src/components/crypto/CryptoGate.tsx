@@ -10,20 +10,23 @@ import { useTheme } from '@/hooks/use-theme';
 import { Button, Card, FeedbackToast } from '@/components/ui';
 import { RecoveryCodeBlock } from './RecoveryCodeBlock';
 import { RecoveryCodeEntryForm } from './RecoveryCodeEntryForm';
+import { ResetKeysSection } from './ResetKeysSection';
 
 /**
  * Blocking overlays for the E2EE key lifecycle: the one-time recovery code
- * after fresh key generation (must be acknowledged) and the recovery entry
- * for devices without the master key (dismissible; also reachable via
- * Einstellungen > Wiederherstellungscode).
+ * after fresh key generation (must be acknowledged), the recovery entry for
+ * devices without the master key (dismissible; also reachable via
+ * Einstellungen > Wiederherstellungscode, with a key reset as last resort),
+ * and a retry screen when the key bootstrap failed.
  */
 export function CryptoGate() {
   const theme = useTheme();
   const gt = useGT();
   const insets = useSafeAreaInsets();
-  const { status, pendingRecoveryCode, acknowledgeRecoveryCode } = useCrypto();
+  const { status, pendingRecoveryCode, acknowledgeRecoveryCode, retry } = useCrypto();
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isRecoveryDismissed, setIsRecoveryDismissed] = useState(false);
+  const [isUnavailableDismissed, setIsUnavailableDismissed] = useState(false);
 
   if (pendingRecoveryCode) {
     return (
@@ -86,10 +89,45 @@ export function CryptoGate() {
               </T>
               <RecoveryCodeEntryForm />
             </Card>
+            <Card style={styles.card}>
+              <ResetKeysSection />
+            </Card>
             <Button
               label={gt('Später')}
               variant="ghost"
               onPress={() => setIsRecoveryDismissed(true)}
+            />
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (status === 'unavailable' && !isUnavailableDismissed) {
+    return (
+      <View style={[styles.overlay, { backgroundColor: theme.background }]}>
+        <SafeAreaView style={styles.safeArea}>
+          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+            <T>
+              <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>Verschlüsselung</Text>
+              <Text style={[styles.title, { color: theme.text }]}>
+                Verschlüsselung nicht bereit
+              </Text>
+            </T>
+            <Card style={styles.card}>
+              <T>
+                <Text style={[styles.body, { color: theme.textSecondary }]}>
+                  Deine Verschlüsselungsschlüssel konnten gerade nicht geladen werden, zum
+                  Beispiel wegen einer fehlenden Internetverbindung. Ohne sie lassen sich Fotos
+                  weder anzeigen noch teilen.
+                </Text>
+              </T>
+              <Button label={gt('Erneut versuchen')} icon="refresh-outline" onPress={retry} />
+            </Card>
+            <Button
+              label={gt('Später')}
+              variant="ghost"
+              onPress={() => setIsUnavailableDismissed(true)}
             />
           </ScrollView>
         </SafeAreaView>

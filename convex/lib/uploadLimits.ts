@@ -31,6 +31,38 @@ export function assertValidDeclaredUploadSizes(input: {
   );
 }
 
+/**
+ * Validates the paired-video declaration of a Live Photo upload target. The
+ * companion clip is a short video, so it shares the video size ceiling and
+ * mime allowlist; it can only accompany an image upload.
+ */
+export function assertValidDeclaredPairedVideo(input: {
+  kind: MediaKind;
+  fileName: string;
+  pairedVideoSizeBytes: number;
+  pairedVideoMimeType: string | undefined;
+}): void {
+  if (input.kind !== 'image') {
+    throw new Error('A paired video can only accompany an image upload.');
+  }
+
+  assertPositiveIntegerSize(
+    input.pairedVideoSizeBytes,
+    'Declared paired video size',
+    MAX_UPLOAD_SIZE_BYTES,
+  );
+
+  if (!input.pairedVideoMimeType?.trim()) {
+    throw new Error('pairedVideoMimeType is required when a paired video is declared.');
+  }
+
+  assertUploadTargetWithinBetaLimits({
+    kind: 'video',
+    mimeType: input.pairedVideoMimeType,
+    fileName: input.fileName,
+  });
+}
+
 /** Validates the client-declared size for an avatar or circle image upload. */
 export function assertValidDeclaredImageSize(sizeBytes: number): void {
   assertPositiveIntegerSize(sizeBytes, 'Declared image size', MAX_IMAGE_UPLOAD_SIZE_BYTES);

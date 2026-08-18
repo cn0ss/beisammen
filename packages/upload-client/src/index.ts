@@ -21,6 +21,11 @@ export interface PreparedUploadQueueAsset {
   durationSeconds?: number;
   location?: MediaLocation;
   capturedAt?: number;
+  /** Live Photo companion clip (image assets only). */
+  pairedVideoUri?: string;
+  pairedVideoMimeType?: string;
+  pairedVideoSizeBytes?: number;
+  pairedVideoDurationSeconds?: number;
 }
 
 export function assertPreparedUploadAssetMimeTypeSupported(
@@ -63,6 +68,7 @@ export interface UploadQueueItem<SourceAsset = unknown> {
    */
   encryptedCacheUri?: string;
   encryptedPreviewCacheUri?: string;
+  encryptedPairedVideoCacheUri?: string;
   encryption?: UploadEncryptionEnvelope;
   recoveryKey?: string;
   recoverable?: boolean;
@@ -76,6 +82,12 @@ export interface UploadQueueItem<SourceAsset = unknown> {
   sizeBytes?: number;
   /** Byte size of the generated preview, declared to the server at createTarget. */
   previewSizeBytes?: number;
+  /** Live Photo companion clip; the cache URI mirrors `cacheUri` for retries. */
+  pairedVideoUri?: string;
+  pairedVideoCacheUri?: string;
+  pairedVideoMimeType?: string;
+  pairedVideoSizeBytes?: number;
+  pairedVideoDurationSeconds?: number;
   width?: number;
   height?: number;
   durationSeconds?: number;
@@ -219,6 +231,14 @@ export function uploadQueueItemToPreparedAsset(
     durationSeconds: item.durationSeconds,
     location: item.location,
     capturedAt: item.capturedAt,
+    ...(item.pairedVideoCacheUri ?? item.pairedVideoUri
+      ? {
+          pairedVideoUri: item.pairedVideoCacheUri ?? item.pairedVideoUri,
+          pairedVideoMimeType: item.pairedVideoMimeType,
+          pairedVideoSizeBytes: item.pairedVideoSizeBytes,
+          pairedVideoDurationSeconds: item.pairedVideoDurationSeconds,
+        }
+      : {}),
   };
 }
 

@@ -16,7 +16,12 @@ export interface UploadRecoveryStore {
   clearItemFiles(
     item: Pick<
       UploadQueueItem,
-      'cacheUri' | 'previewCacheUri' | 'encryptedCacheUri' | 'encryptedPreviewCacheUri'
+      | 'cacheUri'
+      | 'previewCacheUri'
+      | 'pairedVideoCacheUri'
+      | 'encryptedCacheUri'
+      | 'encryptedPreviewCacheUri'
+      | 'encryptedPairedVideoCacheUri'
     >,
   ): Promise<void>;
 }
@@ -175,6 +180,24 @@ function parseItem(value: unknown): UploadQueueItem | null {
     ...(optionalString(value.encryptedPreviewCacheUri)
       ? { encryptedPreviewCacheUri: optionalString(value.encryptedPreviewCacheUri) }
       : {}),
+    ...(optionalString(value.encryptedPairedVideoCacheUri)
+      ? { encryptedPairedVideoCacheUri: optionalString(value.encryptedPairedVideoCacheUri) }
+      : {}),
+    ...(optionalString(value.pairedVideoUri)
+      ? { pairedVideoUri: optionalString(value.pairedVideoUri) }
+      : {}),
+    ...(optionalString(value.pairedVideoCacheUri)
+      ? { pairedVideoCacheUri: optionalString(value.pairedVideoCacheUri) }
+      : {}),
+    ...(optionalString(value.pairedVideoMimeType)
+      ? { pairedVideoMimeType: optionalString(value.pairedVideoMimeType) }
+      : {}),
+    ...(optionalNumber(value.pairedVideoSizeBytes) !== undefined
+      ? { pairedVideoSizeBytes: optionalNumber(value.pairedVideoSizeBytes) }
+      : {}),
+    ...(optionalNumber(value.pairedVideoDurationSeconds) !== undefined
+      ? { pairedVideoDurationSeconds: optionalNumber(value.pairedVideoDurationSeconds) }
+      : {}),
     ...(optionalEncryption(value.encryption)
       ? { encryption: optionalEncryption(value.encryption) }
       : {}),
@@ -204,13 +227,24 @@ function parseItem(value: unknown): UploadQueueItem | null {
 function uniqueUris(
   item: Pick<
     UploadQueueItem,
-    'cacheUri' | 'previewCacheUri' | 'encryptedCacheUri' | 'encryptedPreviewCacheUri'
+    | 'cacheUri'
+    | 'previewCacheUri'
+    | 'pairedVideoCacheUri'
+    | 'encryptedCacheUri'
+    | 'encryptedPreviewCacheUri'
+    | 'encryptedPairedVideoCacheUri'
   >,
 ): string[] {
   return Array.from(
     new Set(
-      [item.cacheUri, item.previewCacheUri, item.encryptedCacheUri, item.encryptedPreviewCacheUri]
-        .filter((uri): uri is string => Boolean(uri)),
+      [
+        item.cacheUri,
+        item.previewCacheUri,
+        item.pairedVideoCacheUri,
+        item.encryptedCacheUri,
+        item.encryptedPreviewCacheUri,
+        item.encryptedPairedVideoCacheUri,
+      ].filter((uri): uri is string => Boolean(uri)),
     ),
   );
 }

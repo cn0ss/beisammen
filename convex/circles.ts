@@ -6,7 +6,7 @@ import type { ActionCtx, MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import { adjustCircleStats, getCircleStatsOrFallback } from './circleStats';
-import { deleteCircleKeyGrantsForMember } from './keys';
+import { deleteCircleKeyGrantsForMember, markCircleKeyRotationPending } from './keys';
 import {
   BILLING_FEATURE_IDS,
   type BillingOwner,
@@ -30,6 +30,7 @@ import {
   buildImageUploadObjectKey,
   buildS3StorageReference,
   getCurrentInstanceStorage,
+  imageCacheKey,
   requireS3StorageProvider,
 } from './lib/storage/shared';
 import { assertValidDeclaredImageSize } from './lib/uploadLimits';
@@ -170,6 +171,7 @@ function buildCircleSummary(
     memberCount,
     createdAt: circle.createdAt,
     hasImage: Boolean(circle.imageStorage),
+    imageKey: imageCacheKey(circle.imageStorage),
     canManage,
     canEdit: canManage,
     canInvite: canManage,
@@ -498,6 +500,7 @@ export const removeMember = mutation({
 
     await ctx.db.delete(targetMembership._id);
     await deleteCircleKeyGrantsForMember(ctx, args.circleId, targetMembership.userId);
+    await markCircleKeyRotationPending(ctx, args.circleId);
     await adjustCircleStats(ctx, args.circleId, {
       memberCount: -1,
     });
@@ -579,6 +582,7 @@ export const leave = mutation({
 
     await ctx.db.delete(membership._id);
     await deleteCircleKeyGrantsForMember(ctx, args.circleId, viewer._id);
+    await markCircleKeyRotationPending(ctx, args.circleId);
     await adjustCircleStats(ctx, args.circleId, {
       memberCount: -1,
     });

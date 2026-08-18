@@ -27,6 +27,7 @@ import {
 } from './memories';
 import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
+import { imageCacheKey } from './lib/storage/shared';
 import { listShareAssetsForDisplay } from './lib/shareAssets';
 import { formatFeedTimestamp } from './lib/storage/shared';
 import {
@@ -66,6 +67,9 @@ function mapAsset(asset: Doc<'assets'>, engagement?: EngagementSummary) {
     sizeBytes: asset.sizeBytes,
     storage: asset.storage,
     previewStorage: asset.previewStorage,
+    pairedVideoStorage: asset.pairedVideoStorage,
+    pairedVideoMimeType: asset.pairedVideoMimeType,
+    pairedVideoDurationSeconds: asset.pairedVideoDurationSeconds,
     width: asset.width,
     height: asset.height,
     durationSeconds: asset.durationSeconds,
@@ -188,6 +192,7 @@ async function buildPublishedShareRecord(
     authorName: author?.displayName ?? author?.email ?? 'Unbekannt',
     authorAvatarUrl: author?.avatarUrl,
     authorHasProfileImage: Boolean(author?.profileImageStorage),
+    authorProfileImageKey: imageCacheKey(author?.profileImageStorage),
     createdAtLabel: formatFeedTimestamp(shareBatch.publishedAt ?? shareBatch.createdAt),
     publishedAt: shareBatch.publishedAt ?? shareBatch.createdAt,
     canDelete: shareBatch.authorId === viewerId,
@@ -216,6 +221,7 @@ async function buildFeedShareRecord(
     authorName: author?.displayName ?? author?.email ?? 'Unbekannt',
     authorAvatarUrl: author?.avatarUrl,
     authorHasProfileImage: Boolean(author?.profileImageStorage),
+    authorProfileImageKey: imageCacheKey(author?.profileImageStorage),
     createdAtLabel: formatFeedTimestamp(shareBatch.publishedAt ?? shareBatch.createdAt),
     publishedAt: shareBatch.publishedAt ?? shareBatch.createdAt,
     canDelete: shareBatch.authorId === viewerId,
@@ -538,7 +544,10 @@ export const getDeleteContext = internalQuery({
         ? activityEventsByShareBatchPage
         : legacyActivityEventsPage
     ).slice(0, SHARE_DELETE_BATCH_SIZE);
-    const storageBytesDelta = -assets.reduce((total, asset) => total + (asset.sizeBytes ?? 0), 0);
+    const storageBytesDelta = -assets.reduce(
+      (total, asset) => total + (asset.sizeBytes ?? 0) + (asset.pairedVideoSizeBytes ?? 0),
+      0,
+    );
     const billingOwner = await resolveCircleBillingOwner(ctx, shareBatch.circleId);
 
     return {
@@ -568,12 +577,19 @@ export const getDeleteContext = internalQuery({
         ...assets.flatMap((asset) => [
           asset.storage,
           ...(asset.previewStorage ? [asset.previewStorage] : []),
+          ...(asset.pairedVideoStorage ? [asset.pairedVideoStorage] : []),
         ]),
         ...uploads.flatMap((upload) => (upload.storage ? [upload.storage] : [])),
         ...uploads.flatMap((upload) => (upload.previewStorage ? [upload.previewStorage] : [])),
+        ...uploads.flatMap((upload) =>
+          upload.pairedVideoStorage ? [upload.pairedVideoStorage] : [],
+        ),
         ...uploads.flatMap((upload) => (upload.pendingStorage ? [upload.pendingStorage] : [])),
         ...uploads.flatMap((upload) =>
           upload.previewPendingStorage ? [upload.previewPendingStorage] : [],
+        ),
+        ...uploads.flatMap((upload) =>
+          upload.pairedVideoPendingStorage ? [upload.pairedVideoPendingStorage] : [],
         ),
       ],
     };

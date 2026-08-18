@@ -27,7 +27,7 @@ import {
   encryptionReadinessNotice,
   uploadReadinessNotice,
 } from '@/features/media/upload-readiness';
-import { useProfileImageUrl } from '@/features/media/use-profile-image-url';
+import { useProfileImage } from '@/features/media/use-profile-image-url';
 import { useShareUploadFlow } from '@/features/media/use-share-upload-flow';
 import { useMarkInteractive } from '@/features/observe/interactive';
 import { shouldRedirectToOnboarding } from '@/features/onboarding/routing';
@@ -109,7 +109,7 @@ export default function HomeScreen() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isDraftSheetOpen, setIsDraftSheetOpen] = useState(false);
   const [publishBurstKey, setPublishBurstKey] = useState(0);
-  const customProfileImageUrl = useProfileImageUrl(Boolean(viewer?.hasProfileImage));
+  const customProfileImage = useProfileImage(viewer?.profileImageKey);
   const {
     selectedQueueItems,
     hasUnresolvedUploads,
@@ -176,7 +176,7 @@ export default function HomeScreen() {
   // ---------------------------------------------------------------------------
 
   const displayName = session?.displayName ?? session?.email ?? 'beisammen';
-  const profileImageUrl = customProfileImageUrl ?? session?.avatarUrl ?? null;
+  const profileImage = customProfileImage ?? session?.avatarUrl ?? null;
   const hasCircles = Boolean(circles && circles.length > 0);
   const isCirclesLoading = hasViewer && circlesPage.status === 'LoadingFirstPage';
   const isLoadingMoreCircles = circlesPage.status === 'LoadingMore';
@@ -443,7 +443,7 @@ export default function HomeScreen() {
           <Animated.View entering={enterSection(0)} style={styles.headerPad}>
             <HomeHeader
               displayName={displayName}
-              profileImageUrl={profileImageUrl}
+              profileImage={profileImage}
               onOpenSettings={handleOpenSettings}
             />
           </Animated.View>
@@ -487,7 +487,7 @@ export default function HomeScreen() {
                 activities={activityItems}
                 status={activityFeed.status}
                 onOpenShare={handleOpenShare}
-                onLoadMore={() => activityFeed.loadMore(6)}
+                onOpenActivityTab={() => router.push('/activity' as never)}
               />
             </Animated.View>
           ) : null}
@@ -542,7 +542,7 @@ export default function HomeScreen() {
                       <FeedCard
                         share={share}
                         currentUserId={viewer?._id ?? null}
-                        currentProfileImageUrl={profileImageUrl}
+                        currentProfileImage={profileImage}
                         isDeleting={deletingShareId === share._id}
                         onOpenShare={handleOpenShare}
                         onDeleteShare={handleDeletePublishedShare}

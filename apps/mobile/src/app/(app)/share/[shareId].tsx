@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useGT } from 'gt-react-native';
 
 import { useAction, useConvexAuth, useQuery } from 'convex/react';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { VideoView } from 'expo-video';
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ShareAssetRecord } from '@/features/convex/api';
@@ -33,13 +33,22 @@ import {
 } from '@/features/media/client';
 import { useCircleKeys } from '@/features/crypto/use-circle-keys';
 import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
+import { useLivePhotoPlayback } from '@/features/media/use-live-photo-playback';
+import { useVideoPlayerSource } from '@/features/media/use-video-player-source';
 import { isVideoProxyUrl } from '@/features/media/video-proxy/server';
-import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
+import { useUserProfileImage } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
-import { enterSection } from '@/lib/motion';
+import { enterSection, exitFade } from '@/lib/motion';
 
-import { AnimatedPressable, Avatar, FeedbackToast, LoadingBox } from '@/components/ui';
+import {
+  AnimatedPressable,
+  Avatar,
+  FeedbackToast,
+  LivePhotoBadge,
+  LoadingBox,
+  MediaLoadingIndicator,
+} from '@/components/ui';
 import { EngagementPanel } from '@/components/share/EngagementPanel';
 import { FullscreenMediaViewer } from '@/components/share/FullscreenMediaViewer';
 import { ReactionBar } from '@/components/share/ReactionBar';
@@ -133,8 +142,16 @@ function MediaSlide({
   const theme = useTheme();
   const gt = useGT();
   const signedUrl = useAssetMediaUri(asset, 'original', circleId);
-  const player = useVideoPlayer(asset.kind === 'video' ? signedUrl : null, (instance) => {
-    instance.pause();
+  const previewUrl = useAssetMediaUri(asset, 'preview', circleId);
+  const { player, hasFirstFrame, playerStatus, onFirstFrameRender } = useVideoPlayerSource({
+    assetId: asset._id,
+    kind: asset.kind,
+    signedUrl,
+  });
+  const livePhoto = useLivePhotoPlayback({
+    asset,
+    circleId,
+    prefetch: isActive && isFocused && asset.kind === 'image',
   });
 
   useEffect(() => {
@@ -142,21 +159,31 @@ function MediaSlide({
       try {
         player.pause();
       } catch {
-        // useVideoPlayer releases the native object on unmount; ignore stale cleanup calls.
+        // Native players can be released during fast swipes.
       }
     }
-  }, [asset.kind, isActive, isFocused, player, signedUrl]);
+  }, [asset.kind, isActive, isFocused, player]);
 
   if (asset.kind === 'video') {
     return (
       <View style={[styles.slide, { width, height, backgroundColor: '#050505' }]}>
         {signedUrl ? (
-          <VideoView player={player} style={styles.slideMedia} nativeControls contentFit="contain" />
-        ) : (
-          <View style={styles.slideFallback}>
-            <Ionicons name="play-circle-outline" size={44} color="rgba(255,255,255,0.6)" />
-          </View>
-        )}
+          <VideoView
+            player={player}
+            style={styles.slideMedia}
+            nativeControls
+            contentFit="contain"
+            onFirstFrameRender={onFirstFrameRender}
+          />
+        ) : null}
+
+        {!hasFirstFrame && previewUrl ? (
+          <Animated.View exiting={exitFade()} style={styles.slideMediaFill}>
+            <Image source={{ uri: previewUrl }} style={styles.slideMedia} contentFit="contain" />
+          </Animated.View>
+        ) : null}
+
+        <MediaLoadingIndicator visible={!hasFirstFrame || playerStatus === 'loading'} />
         {/* Top-right so it never overlaps the native controls' bottom bar. */}
         <AnimatedPressable
           accessibilityRole="button"
@@ -174,8 +201,17 @@ function MediaSlide({
   return (
     <AnimatedPressable
       accessibilityRole="imagebutton"
-      accessibilityLabel={gt('Foto im Vollbild öffnen')}
+      accessibilityLabel={
+        livePhoto.isLivePhoto
+          ? gt('Live-Foto: Antippen für Vollbild, gedrückt halten zum Abspielen')
+          : gt('Foto im Vollbild öffnen')
+      }
       onPress={onExpand}
+      // Press-and-hold plays a Live Photo's companion clip; a plain tap still
+      // expands (a fired long press suppresses onPress).
+      delayLongPress={220}
+      onLongPress={livePhoto.isLivePhoto ? livePhoto.start : undefined}
+      onPressOut={livePhoto.isLivePhoto ? livePhoto.stop : undefined}
       pressedScale={0.99}
       pressedOpacity={0.97}
       style={[styles.slide, { width, height, backgroundColor: theme.surfacePressed }]}
@@ -188,11 +224,30 @@ function MediaSlide({
           transition={280}
           recyclingKey={asset._id}
         />
+      ) : previewUrl ? (
+        <Image
+          source={{ uri: previewUrl }}
+          style={styles.slideMedia}
+          contentFit="cover"
+          recyclingKey={`${asset._id}-preview`}
+        />
       ) : (
         <View style={styles.slideFallback}>
           <Ionicons name="image-outline" size={32} color={theme.textTertiary} />
         </View>
       )}
+      {livePhoto.isPlaying ? (
+        <View style={styles.slideMediaFill} pointerEvents="none">
+          <VideoView
+            player={livePhoto.player}
+            style={styles.slideMedia}
+            nativeControls={false}
+            contentFit="cover"
+          />
+        </View>
+      ) : null}
+      <MediaLoadingIndicator visible={livePhoto.isLoading} />
+      {livePhoto.isLivePhoto ? <LivePhotoBadge style={styles.liveBadge} /> : null}
       <View style={styles.expandBadge} pointerEvents="none">
         <Ionicons name="expand-outline" size={16} color="#FFFFFF" />
       </View>
@@ -311,11 +366,8 @@ export default function ShareDetailScreen() {
   // Save/share need the circle keys to decrypt encrypted assets imperatively.
   const circleKeys = useCircleKeys(activeAsset?.encryption ? share?.circleId : null);
   const keysByEpoch = circleKeys.status === 'ready' ? circleKeys.keysByEpoch : undefined;
-  const customAuthorImageUrl = useUserProfileImageUrl(
-    share?.authorId,
-    share?.authorHasProfileImage ?? false,
-  );
-  const authorImageUrl = customAuthorImageUrl ?? share?.authorAvatarUrl ?? null;
+  const customAuthorImage = useUserProfileImage(share?.authorId, share?.authorProfileImageKey);
+  const authorImage = customAuthorImage ?? share?.authorAvatarUrl ?? null;
 
   // Keep the pager in sync when the active asset changes elsewhere
   // (deep link with assetId, swiping inside the fullscreen viewer).
@@ -586,7 +638,7 @@ export default function ShareDetailScreen() {
 
         <Animated.View entering={enterSection(2)} style={styles.storyBlock}>
           <View style={styles.authorRow}>
-            <Avatar name={share.authorName ?? '?'} imageUrl={authorImageUrl} size="md" />
+            <Avatar name={share.authorName ?? '?'} image={authorImage} size="md" />
             <View style={styles.authorInfo}>
               <Text style={[styles.authorName, { color: theme.text }]} numberOfLines={1}>
                 {share.authorName}
@@ -699,10 +751,22 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  slideMediaFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   slideFallback: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  liveBadge: {
+    position: 'absolute',
+    left: Spacing.md,
+    bottom: Spacing.md,
   },
   expandBadge: {
     position: 'absolute',

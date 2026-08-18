@@ -47,12 +47,42 @@ export function buildS3ObjectKey(
   ].join('/');
 }
 
+/**
+ * Stable client-side cache key for an image behind a storage reference. The
+ * S3 object key embeds the uploadId, so it changes with every new upload but
+ * never with URL re-signing — exactly the identity an image cache needs.
+ * Legacy convex-files rows have no stable key and return undefined.
+ */
+export function imageCacheKey(
+  storage:
+    | { provider: 'convex-files' }
+    | { provider: 's3'; objectKey: string }
+    | null
+    | undefined,
+): string | undefined {
+  return storage?.provider === 's3' ? storage.objectKey : undefined;
+}
+
 export function buildS3PreviewObjectKey(objectKey: string): string {
   const parts = objectKey.split('/').filter(Boolean);
   const fileName = parts.pop() ?? 'preview';
   const baseName = fileName.replace(/\.[^.]+$/, '') || 'preview';
 
   return [...parts, 'previews', `${baseName}-preview.jpg`].join('/');
+}
+
+/**
+ * Object key for a Live Photo's companion clip, derived from the still's key
+ * the same way preview keys are: stable per upload, no original-name leakage
+ * beyond what the main key already carries.
+ */
+export function buildS3PairedVideoObjectKey(objectKey: string, mimeType: string): string {
+  const parts = objectKey.split('/').filter(Boolean);
+  const fileName = parts.pop() ?? 'paired';
+  const baseName = fileName.replace(/\.[^.]+$/, '') || 'paired';
+  const extension = mimeType.toLowerCase().includes('quicktime') ? 'mov' : 'mp4';
+
+  return [...parts, 'paired', `${baseName}-paired.${extension}`].join('/');
 }
 
 export function buildImageUploadObjectKey(input: {

@@ -89,6 +89,38 @@ export async function bootstrapUserKeys(deps: BootstrapDeps): Promise<UserKeyBoo
   };
 }
 
+/**
+ * Last-resort reset when the recovery code is lost: generates a fresh key
+ * hierarchy, replaces the server registration, and stores the new master key
+ * locally. Old grants become unreadable and are deleted server-side; circle
+ * access is restored by other members' automatic grant top-up. Returns the
+ * new recovery code, which must be shown to the user exactly once.
+ */
+export async function resetUserKeys(deps: {
+  sodium: SodiumApi;
+  resetKeys: (registration: UserKeyRegistration) => Promise<{ created: boolean }>;
+  saveMasterKey: (masterKey: Uint8Array) => Promise<void>;
+}): Promise<{
+  keys: UnlockedUserKeys;
+  recoveryCode: string;
+  registration: UserKeyRegistration;
+}> {
+  const bundle = generateUserKeyBundle(deps.sodium);
+
+  await deps.resetKeys(bundle.registration);
+  await deps.saveMasterKey(bundle.masterKey);
+
+  return {
+    keys: {
+      masterKey: bundle.masterKey,
+      publicKey: bundle.publicKey,
+      privateKey: bundle.privateKey,
+    },
+    recoveryCode: encodeRecoveryCode(deps.sodium, bundle.recoveryKey),
+    registration: bundle.registration,
+  };
+}
+
 /** Redeems a typed recovery code on a new device and stores the master key locally. */
 export async function recoverUserKeys(deps: {
   sodium: SodiumApi;

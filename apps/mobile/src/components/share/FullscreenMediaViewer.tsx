@@ -22,10 +22,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { VideoView, useVideoPlayer } from 'expo-video';
 
-import { AnimatedPressable } from '@/components/ui';
+import { AnimatedPressable, LivePhotoBadge, MediaLoadingIndicator } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ShareAssetRecord } from '@/features/convex/api';
 import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
+import {
+  isLivePhotoAsset,
+  useLivePhotoPlayback,
+} from '@/features/media/use-live-photo-playback';
+import { useVideoPlayerSource } from '@/features/media/use-video-player-source';
 import { MotionDuration, enterScreen, exitFade, motionEasing } from '@/lib/motion';
 
 const MAX_ZOOM = 5;
@@ -57,18 +62,23 @@ function Scrim({ height }: { height: number }) {
 function ZoomableImageSlide({
   height,
   isActive,
+  livePhoto,
   onToggleChrome,
   onZoomChange,
+  previewUri,
   uri,
   width,
 }: {
   height: number;
   isActive: boolean;
+  livePhoto: ReturnType<typeof useLivePhotoPlayback>;
   onToggleChrome: () => void;
   onZoomChange: (zoomed: boolean) => void;
+  previewUri: string | null;
   uri: string | null;
   width: number;
 }) {
+  const [isLoaded, setIsLoaded] = useState(false);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -160,10 +170,26 @@ function ZoomableImageSlide({
       runOnJS(onToggleChrome)();
     });
 
+  // Press-and-hold plays a Live Photo's companion clip, like iOS Photos. The
+  // hold itself triggers loading when needed, so it is never gated on the
+  // clip already being resolved.
+  const { start: startLivePhoto, stop: stopLivePhoto } = livePhoto;
+  const longPress = Gesture.LongPress()
+    .minDuration(220)
+    .maxDistance(40)
+    .enabled(livePhoto.isLivePhoto)
+    .onStart(() => {
+      runOnJS(startLivePhoto)();
+    })
+    .onFinalize(() => {
+      runOnJS(stopLivePhoto)();
+    });
+
   const composed = Gesture.Simultaneous(
     Gesture.Exclusive(doubleTap, singleTap),
     pinch,
     pan,
+    longPress,
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -177,15 +203,40 @@ function ZoomableImageSlide({
   return (
     <GestureDetector gesture={composed}>
       <Animated.View style={[{ width, height }, styles.slide]}>
-        {uri ? (
-          <Animated.View style={[styles.media, animatedStyle]}>
-            <Image source={{ uri }} style={styles.media} contentFit="contain" />
-          </Animated.View>
-        ) : (
+        <Animated.View style={[styles.media, animatedStyle]}>
+          {/* The cached preview stands in until the full-resolution original
+              decodes, so a zoomable photo is never a blank slide. */}
+          {!isLoaded && previewUri ? (
+            <Image source={{ uri: previewUri }} style={styles.mediaFill} contentFit="contain" />
+          ) : null}
+          {uri ? (
+            <Image
+              source={{ uri }}
+              style={styles.media}
+              contentFit="contain"
+              onLoad={() => setIsLoaded(true)}
+            />
+          ) : null}
+
+          {livePhoto.isPlaying ? (
+            <View style={styles.mediaFill} pointerEvents="none">
+              <VideoView
+                player={livePhoto.player}
+                style={styles.media}
+                nativeControls={false}
+                contentFit="contain"
+              />
+            </View>
+          ) : null}
+        </Animated.View>
+
+        {!uri && !previewUri ? (
           <View style={styles.fallback}>
             <Ionicons name="image-outline" size={38} color="rgba(255,255,255,0.6)" />
           </View>
-        )}
+        ) : null}
+
+        <MediaLoadingIndicator visible={!isLoaded || livePhoto.isLoading} />
       </Animated.View>
     </GestureDetector>
   );
@@ -209,17 +260,22 @@ function ViewerSlide({
   width: number;
 }) {
   const signedUrl = useAssetMediaUri(asset, 'original', circleId);
-  const player = useVideoPlayer(asset.kind === 'video' ? signedUrl : null, (instance) => {
-    instance.pause();
+  const previewUrl = useAssetMediaUri(asset, 'preview', circleId);
+  const { player, isSourceReady, hasFirstFrame, playerStatus, onFirstFrameRender } =
+    useVideoPlayerSource({ assetId: asset._id, kind: asset.kind, signedUrl });
+  const livePhoto = useLivePhotoPlayback({
+    asset,
+    circleId,
+    prefetch: isActive && asset.kind === 'image',
   });
 
   useEffect(() => {
-    if (asset.kind !== 'video') {
+    if (asset.kind !== 'video' || !isSourceReady) {
       return;
     }
 
     try {
-      if (isActive && signedUrl) {
+      if (isActive) {
         player.play();
       } else {
         player.pause();
@@ -227,18 +283,28 @@ function ViewerSlide({
     } catch {
       // Native players can be released during fast swipes.
     }
-  }, [asset.kind, isActive, player, signedUrl]);
+  }, [asset.kind, isActive, isSourceReady, player]);
 
   if (asset.kind === 'video') {
     return (
       <View style={[{ width, height }, styles.slide]}>
         {signedUrl ? (
-          <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />
-        ) : (
-          <View style={styles.fallback}>
-            <Ionicons name="play-circle-outline" size={44} color="rgba(255,255,255,0.6)" />
-          </View>
-        )}
+          <VideoView
+            player={player}
+            style={styles.media}
+            nativeControls
+            contentFit="contain"
+            onFirstFrameRender={onFirstFrameRender}
+          />
+        ) : null}
+
+        {!hasFirstFrame && previewUrl ? (
+          <Animated.View exiting={exitFade()} style={styles.posterFill}>
+            <Image source={{ uri: previewUrl }} style={styles.media} contentFit="contain" />
+          </Animated.View>
+        ) : null}
+
+        <MediaLoadingIndicator visible={!hasFirstFrame || playerStatus === 'loading'} />
       </View>
     );
   }
@@ -246,9 +312,11 @@ function ViewerSlide({
   return (
     <ZoomableImageSlide
       uri={signedUrl}
+      previewUri={previewUrl}
       width={width}
       height={height}
       isActive={isActive}
+      livePhoto={livePhoto}
       onToggleChrome={onToggleChrome}
       onZoomChange={onZoomChange}
     />
@@ -395,6 +463,12 @@ export const FullscreenMediaViewer = memo(function FullscreenMediaViewer({
 
               <View style={styles.topBarSpacer} />
             </View>
+
+            {isLivePhotoAsset(assets[activeIndex]) ? (
+              <LivePhotoBadge
+                style={[styles.liveBadge, { top: insets.top + Spacing.sm + 48 }]}
+              />
+            ) : null}
           </Animated.View>
         ) : null}
       </GestureHandlerRootView>
@@ -413,6 +487,20 @@ const styles = StyleSheet.create({
   },
   media: {
     flex: 1,
+  },
+  mediaFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  posterFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   fallback: {
     flex: 1,
@@ -451,5 +539,9 @@ const styles = StyleSheet.create({
   },
   topBarSpacer: {
     width: 40,
+  },
+  liveBadge: {
+    position: 'absolute',
+    left: Spacing.lg,
   },
 });

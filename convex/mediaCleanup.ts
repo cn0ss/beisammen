@@ -59,8 +59,10 @@ function uploadStorageReferences(upload: Doc<'uploads'>): CleanupStorageReferenc
   return [
     ...(upload.pendingStorage ? [upload.pendingStorage] : []),
     ...(upload.previewPendingStorage ? [upload.previewPendingStorage] : []),
+    ...(upload.pairedVideoPendingStorage ? [upload.pairedVideoPendingStorage] : []),
     ...(upload.storage ? [upload.storage] : []),
     ...(upload.previewStorage ? [upload.previewStorage] : []),
+    ...(upload.pairedVideoStorage ? [upload.pairedVideoStorage] : []),
   ];
 }
 

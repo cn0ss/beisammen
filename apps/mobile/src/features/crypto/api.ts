@@ -19,6 +19,10 @@ export interface CircleKeyGrantRecord {
 
 export interface MyCircleKeys {
   currentEpoch: number | null;
+  /** A member departed and no fresh epoch was committed yet; uploads are gated. */
+  rotationPending: boolean;
+  /** The viewer's role allows committing a rotation. */
+  canRotate: boolean;
   grants: CircleKeyGrantRecord[];
 }
 
@@ -29,7 +33,10 @@ export interface MemberPublicKey {
 
 export interface MissingKeyGrants {
   currentEpoch: number | null;
+  /** Members lacking a current-epoch grant (kept for older clients). */
   missing: MemberPublicKey[];
+  /** Members lacking grants per requested epoch, newest epoch first. */
+  missingByEpoch: Array<{ epoch: number; members: MemberPublicKey[] }>;
 }
 
 export const keysApi = {
@@ -77,9 +84,25 @@ export const keysApi = {
     },
     { epoch: number }
   >('keys:rotateCircleKey'),
+  rejectMyKeyGrant: makeFunctionReference<
+    'mutation',
+    { circleId: string; epoch: number },
+    { rejected: boolean }
+  >('keys:rejectMyKeyGrant'),
+  resetKeys: makeFunctionReference<
+    'mutation',
+    {
+      keyVersion: number;
+      publicKey: string;
+      encPrivateKey: string;
+      encMasterKeyByRecovery: string;
+      encRecoveryKeyByMaster: string;
+    },
+    { created: boolean }
+  >('keys:resetKeys'),
   listMissingKeyGrants: makeFunctionReference<
     'query',
-    { circleId: string },
+    { circleId: string; epochs?: number[] },
     MissingKeyGrants
   >('keys:listMissingKeyGrants'),
 };

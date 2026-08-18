@@ -1,6 +1,8 @@
 import { chunkCount, type FileHeader } from '@beisammen/crypto';
 
 import { createLogger } from '@/lib/logger';
+
+import { createVideoPerfLogger } from '../video-logging';
 import {
   formatResponseHead,
   parseRangeHeader,
@@ -11,8 +13,14 @@ import {
 import type { EncryptedVideoSession } from './session';
 
 const logger = createLogger('media.videoProxy');
+const perfLogger = createVideoPerfLogger('media.videoProxy');
 
-/** Ciphertext chunks fetched from R2 per ranged request while streaming. */
+/**
+ * Upper bound on ciphertext chunks fetched from R2 per ranged request while
+ * streaming. Spans ramp 1 → 2 → 4 chunks per request: the short first span
+ * gets the player its first byte after one small fetch, larger later spans
+ * keep steady-state round trips low.
+ */
 const FETCH_SPAN_CHUNKS = 4;
 
 export interface ConnectionIo {
@@ -44,6 +52,24 @@ function tokenFromPath(path: string): string | null {
   return match ? match[1] : null;
 }
 
+/** One line per served body: how long the player waited and for how much. */
+function logRequestServed(
+  requestStartedAt: number,
+  headerMs: number,
+  range: ByteRange | null,
+  totalLength: number,
+  stats: { bytesWritten: number; firstWriteAt: number | null },
+): void {
+  perfLogger.debug('Proxy request served.', {
+    range: range ? `${range.start}-${range.end}` : 'full',
+    totalLength,
+    bytesWritten: stats.bytesWritten,
+    headerMs,
+    firstByteMs: stats.firstWriteAt === null ? null : stats.firstWriteAt - requestStartedAt,
+    totalMs: Date.now() - requestStartedAt,
+  });
+}
+
 export function createConnectionHandler(registry: ProxyRegistry) {
   return function handleConnection(io: ConnectionIo): ProxyConnection {
     let buffered: Uint8Array = new Uint8Array(0);
@@ -62,29 +88,68 @@ export function createConnectionHandler(registry: ProxyRegistry) {
       session: EncryptedVideoSession,
       header: FileHeader,
       range: ByteRange,
-    ): Promise<void> {
+    ): Promise<{ bytesWritten: number; firstWriteAt: number | null }> {
       const firstChunk = Math.floor(range.start / header.chunkSize);
       const lastChunk = Math.floor(range.end / header.chunkSize);
+      let bytesWritten = 0;
+      let firstWriteAt: number | null = null;
 
-      for (
-        let spanStart = firstChunk;
-        spanStart <= lastChunk && !closed;
-        spanStart += FETCH_SPAN_CHUNKS
-      ) {
-        const spanEnd = Math.min(spanStart + FETCH_SPAN_CHUNKS - 1, lastChunk);
-        const chunks = await session.decryptChunkSpan(header, spanStart, spanEnd);
+      const spans: Array<{ start: number; end: number }> = [];
+      let spanSize = 1;
 
-        for (let index = 0; index < chunks.length && !closed; index += 1) {
-          const chunkIndex = spanStart + index;
-          const chunkOffset = chunkIndex * header.chunkSize;
-          const sliceStart = Math.max(0, range.start - chunkOffset);
-          const sliceEnd = Math.min(chunks[index].length, range.end + 1 - chunkOffset);
+      for (let start = firstChunk; start <= lastChunk; ) {
+        const end = Math.min(start + spanSize - 1, lastChunk);
 
-          if (sliceEnd > sliceStart) {
-            await io.write(chunks[index].subarray(sliceStart, sliceEnd));
+        spans.push({ start, end });
+        start = end + 1;
+        spanSize = Math.min(spanSize * 2, FETCH_SPAN_CHUNKS);
+      }
+
+      // The next span downloads from R2 while the current one drains to the
+      // socket, so fetch latency and socket writes overlap. At most one span
+      // is in flight ahead; a span prefetched for a connection that closes
+      // mid-write is bounded waste and still lands in the session's LRU cache.
+      let nextSpan: Promise<Uint8Array[]> | null =
+        spans.length > 0 ? session.decryptChunkSpan(header, spans[0].start, spans[0].end) : null;
+
+      try {
+        for (let spanIndex = 0; spanIndex < spans.length && !closed; spanIndex += 1) {
+          const span = spans[spanIndex];
+          const chunks = await nextSpan;
+
+          nextSpan =
+            spanIndex + 1 < spans.length && !closed
+              ? session.decryptChunkSpan(
+                  header,
+                  spans[spanIndex + 1].start,
+                  spans[spanIndex + 1].end,
+                )
+              : null;
+
+          if (!chunks) {
+            break;
+          }
+
+          for (let index = 0; index < chunks.length && !closed; index += 1) {
+            const chunkIndex = span.start + index;
+            const chunkOffset = chunkIndex * header.chunkSize;
+            const sliceStart = Math.max(0, range.start - chunkOffset);
+            const sliceEnd = Math.min(chunks[index].length, range.end + 1 - chunkOffset);
+
+            if (sliceEnd > sliceStart) {
+              firstWriteAt ??= Date.now();
+              bytesWritten += sliceEnd - sliceStart;
+              await io.write(chunks[index].subarray(sliceStart, sliceEnd));
+            }
           }
         }
+      } finally {
+        // An unconsumed prefetch (early close or a failed current span) must
+        // not surface as an unhandled rejection.
+        nextSpan?.catch(() => undefined);
       }
+
+      return { bytesWritten, firstWriteAt };
     }
 
     async function handleRequest(request: HttpRequest): Promise<void> {
@@ -96,7 +161,9 @@ export function createConnectionHandler(registry: ProxyRegistry) {
         return;
       }
 
+      const requestStartedAt = Date.now();
       const header = await session.ensureHeader();
+      const headerMs = Date.now() - requestStartedAt;
       const totalLength = header.plaintextLength;
       const baseHeaders = {
         'Content-Type': session.mimeType,
@@ -135,7 +202,12 @@ export function createConnectionHandler(registry: ProxyRegistry) {
         );
 
         if (totalLength > 0 && chunkCount(header) > 0) {
-          await streamPlaintextRange(session, header, { start: 0, end: totalLength - 1 });
+          const stats = await streamPlaintextRange(session, header, {
+            start: 0,
+            end: totalLength - 1,
+          });
+
+          logRequestServed(requestStartedAt, headerMs, null, totalLength, stats);
         }
 
         return;
@@ -152,7 +224,9 @@ export function createConnectionHandler(registry: ProxyRegistry) {
           'Content-Length': range.end - range.start + 1,
         }),
       );
-      await streamPlaintextRange(session, header, range);
+      const stats = await streamPlaintextRange(session, header, range);
+
+      logRequestServed(requestStartedAt, headerMs, range, totalLength, stats);
     }
 
     return {

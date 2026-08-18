@@ -78,6 +78,32 @@ test('converts prepared queue items while preserving upload metadata', () => {
   });
 });
 
+test('converts Live Photo queue items preferring the paired cache copy', () => {
+  const prepared = uploadQueueItemToPreparedAsset({
+    ...baseQueueItem,
+    prepared: true,
+    pairedVideoUri: 'file:///picker/paired.mov',
+    pairedVideoCacheUri: 'file:///recovery/paired.mov',
+    pairedVideoMimeType: 'video/quicktime',
+    pairedVideoSizeBytes: 2048,
+    pairedVideoDurationSeconds: 2.8,
+  });
+
+  expect(prepared).toMatchObject({
+    pairedVideoUri: 'file:///recovery/paired.mov',
+    pairedVideoMimeType: 'video/quicktime',
+    pairedVideoSizeBytes: 2048,
+    pairedVideoDurationSeconds: 2.8,
+  });
+
+  const withoutPaired = uploadQueueItemToPreparedAsset({
+    ...baseQueueItem,
+    prepared: true,
+  });
+
+  expect(withoutPaired).not.toHaveProperty('pairedVideoUri');
+});
+
 test('enqueues upload items with recovery metadata defaults', () => {
   const state = enqueue(initialUploadQueueState, {
     ...baseQueueItem,

@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { FontSize, Spacing } from '@/constants/theme';
 import type { CircleListItem } from '@/features/convex/api';
-import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { useCircleImage } from '@/features/media/use-circle-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 import { AnimatedPressable, Card, LoadingBox, Avatar } from '@/components/ui';
@@ -69,7 +69,7 @@ const CircleRow = memo(function CircleRow({
   onOpenCircle: (circle: CircleListItem) => void;
 }) {
   const theme = useTheme();
-  const imageUrl = useCircleImageUrl(circle._id, circle.hasImage);
+  const image = useCircleImage(circle._id, circle.imageKey);
 
   return (
     <AnimatedPressable
@@ -85,7 +85,7 @@ const CircleRow = memo(function CircleRow({
         },
       ]}
     >
-      <Avatar name={circle.name} imageUrl={imageUrl} />
+      <Avatar name={circle.name} image={image} />
       <View style={styles.info}>
         <Text style={[styles.name, { color: theme.text }]}>{circle.name}</Text>
         <T>

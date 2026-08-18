@@ -87,11 +87,73 @@ describe('resolveAssetMediaUri', () => {
     const uri = await resolveAssetMediaUri({
       asset: { _id: 'asset1', kind: 'image', mimeType: 'image/jpeg', encryption: envelope },
       variant: 'preview',
+      circleId: 'circle1',
       getSignedUrl: async () => 'https://cdn.example/cipher',
     });
 
     expect(uri).toBeNull();
     expect(fakeFsState.downloadCount).toBe(0);
+  });
+
+  test('encrypted assets resolve from the disk cache without keys', async () => {
+    const circleKey = generateCircleKey(sodium);
+    const { envelope } = sealAssetEncryption({
+      sodium,
+      circleKey,
+      circleEpoch: 1,
+      metadata: { v: 1 },
+    });
+
+    seedFile(`${DECRYPTED_CACHE_DIRECTORY}circle1/asset1-preview.jpg`, new Uint8Array(16));
+
+    const uri = await resolveAssetMediaUri({
+      asset: { _id: 'asset1', kind: 'image', mimeType: 'image/jpeg', encryption: envelope },
+      variant: 'preview',
+      circleId: 'circle1',
+      getSignedUrl: async () => {
+        throw new Error('must not be called on a cache hit');
+      },
+    });
+
+    expect(uri).toBe(`${DECRYPTED_CACHE_DIRECTORY}circle1/asset1-preview.jpg`);
+    expect(fakeFsState.downloadCount).toBe(0);
+  });
+
+  test('Live Photo paired clips resolve to a decrypted local video file', async () => {
+    const clip = new Uint8Array(4096).map((_, index) => (index * 13) % 256);
+    const circleKey = generateCircleKey(sodium);
+    const { fileKey, envelope } = sealAssetEncryption({
+      sodium,
+      circleKey,
+      circleEpoch: 2,
+      metadata: { v: 1, fileName: 'live.heic' },
+    });
+
+    seedFile('file:///clip.bin', clip);
+    await encryptFileToFile({
+      sodium,
+      fileKey,
+      sourceUri: 'file:///clip.bin',
+      targetUri: 'file:///clip-cipher.bin',
+    });
+    registerDownload('https://cdn.example/paired-cipher', readFile('file:///clip-cipher.bin')!);
+
+    const uri = await resolveAssetMediaUri({
+      asset: {
+        _id: 'asset1',
+        kind: 'image',
+        mimeType: 'image/heic',
+        pairedVideoMimeType: 'video/quicktime',
+        encryption: envelope,
+      },
+      variant: 'pairedVideo',
+      circleId: 'circle1',
+      getSignedUrl: async () => 'https://cdn.example/paired-cipher',
+      keysByEpoch: new Map([[2, circleKey]]),
+    });
+
+    expect(uri).toBe(`${DECRYPTED_CACHE_DIRECTORY}circle1/asset1-pairedVideo.mov`);
+    expect(readFile(uri!)).toEqual(clip);
   });
 
   test('encrypted assets resolve to a decrypted local file once keys are present', async () => {
@@ -116,11 +178,12 @@ describe('resolveAssetMediaUri', () => {
     const uri = await resolveAssetMediaUri({
       asset: { _id: 'asset1', kind: 'image', mimeType: 'image/jpeg', encryption: envelope },
       variant: 'original',
+      circleId: 'circle1',
       getSignedUrl: async () => 'https://cdn.example/cipher',
       keysByEpoch: new Map([[3, circleKey]]),
     });
 
-    expect(uri).toBe(`${DECRYPTED_CACHE_DIRECTORY}asset1-original.jpg`);
+    expect(uri).toBe(`${DECRYPTED_CACHE_DIRECTORY}circle1/asset1-original.jpg`);
     expect(readFile(uri!)).toEqual(plaintext);
   });
 });

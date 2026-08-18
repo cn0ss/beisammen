@@ -7,10 +7,11 @@ import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
 
 import { Avatar } from '@/components/ui';
+import type { AvatarImage } from '@/features/media/avatar-image-cache';
 
 interface HomeHeaderProps {
   displayName: string;
-  profileImageUrl?: string | null;
+  profileImage?: AvatarImage;
   onOpenSettings: () => void;
 }
 
@@ -30,7 +31,7 @@ function formatEditorialDate(now: Date, format: Intl.DateTimeFormat): string {
 
 export const HomeHeader = memo(function HomeHeader({
   displayName,
-  profileImageUrl,
+  profileImage,
   onOpenSettings,
 }: HomeHeaderProps) {
   const theme = useTheme();
@@ -59,7 +60,7 @@ export const HomeHeader = memo(function HomeHeader({
             opacity: pressed ? 0.7 : 1,
           })}
         >
-          <Avatar name={displayName} imageUrl={profileImageUrl} size="sm" />
+          <Avatar name={displayName} image={profileImage} size="sm" />
         </Pressable>
       </View>
 

@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { RecoveryCodeBlock } from '@/components/crypto/RecoveryCodeBlock';
 import { RecoveryCodeEntryForm } from '@/components/crypto/RecoveryCodeEntryForm';
+import { ResetKeysSection } from '@/components/crypto/ResetKeysSection';
 import { SettingsScreenHeader } from '@/components/settings/SettingsScreenHeader';
 
 export default function RecoveryCodeScreen() {
@@ -66,15 +67,22 @@ export default function RecoveryCodeScreen() {
 
         <Animated.View entering={enterSection(1)}>
           {status === 'recovery-required' ? (
-            <Card style={styles.card}>
-              <T>
-                <Text style={[styles.body, { color: theme.textSecondary }]}>
-                  Auf diesem Gerät fehlt der Schlüssel für deine verschlüsselten Fotos. Gib deinen
-                  Wiederherstellungscode ein, um den Zugriff wiederherzustellen.
-                </Text>
-              </T>
-              <RecoveryCodeEntryForm />
-            </Card>
+            <View style={styles.stack}>
+              <Card style={styles.card}>
+                <T>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>
+                    Auf diesem Gerät fehlt der Schlüssel für deine verschlüsselten Fotos. Gib
+                    deinen Wiederherstellungscode ein, um den Zugriff wiederherzustellen.
+                  </Text>
+                </T>
+                <RecoveryCodeEntryForm
+                  onRecovered={() => setFeedback(gt('Zugriff wiederhergestellt.'))}
+                />
+              </Card>
+              <Card style={styles.card}>
+                <ResetKeysSection />
+              </Card>
+            </View>
           ) : status === 'ready' ? (
             <Card style={styles.card}>
               <T>
@@ -133,6 +141,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.xl,
     paddingBottom: Spacing['3xl'],
+    gap: Spacing.lg,
+  },
+  stack: {
     gap: Spacing.lg,
   },
   card: {

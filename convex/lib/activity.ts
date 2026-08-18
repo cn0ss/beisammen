@@ -39,10 +39,9 @@ export async function createActivityEventWithInbox(
   }> = [];
 
   for (const membership of members) {
-    if (membership.userId === input.actorId) {
-      continue;
-    }
-
+    // The actor gets their own action in the inbox too (the activity tab is
+    // the full circle history), but pre-read: no unread badge, no push.
+    const isActor = membership.userId === input.actorId;
     const inboxItemId = await ctx.db.insert('activityInboxItems', {
       activityEventId,
       userId: membership.userId,
@@ -51,13 +50,17 @@ export async function createActivityEventWithInbox(
       type: input.type,
       shareBatchId: input.shareBatchId,
       ...(input.assetId ? { assetId: input.assetId } : {}),
-      status: 'unread',
+      status: isActor ? 'read' : 'unread',
+      ...(isActor ? { readAt: input.createdAt } : {}),
       createdAt: input.createdAt,
     });
-    notificationRecipients.push({
-      inboxItemId,
-      userId: membership.userId,
-    });
+
+    if (!isActor) {
+      notificationRecipients.push({
+        inboxItemId,
+        userId: membership.userId,
+      });
+    }
   }
 
   await enqueueNotificationDeliveryAttempts(ctx, {

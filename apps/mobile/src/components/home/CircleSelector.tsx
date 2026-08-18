@@ -12,7 +12,7 @@ import {
 
 import { Fonts, FontSize, Spacing } from '@/constants/theme';
 import type { CircleListItem } from '@/features/convex/api';
-import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { useCircleImage } from '@/features/media/use-circle-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 interface CircleSelectorProps {
@@ -78,7 +78,7 @@ interface CircleTileProps {
 const CircleTile = memo(function CircleTile({ circle, isActive, onSelect }: CircleTileProps) {
   const theme = useTheme();
   const gt = useGT();
-  const imageUrl = useCircleImageUrl(circle._id, circle.hasImage);
+  const image = useCircleImage(circle._id, circle.imageKey);
   const handlePress = useCallback(() => onSelect(circle._id), [onSelect, circle._id]);
 
   const palette = useMemo(
@@ -90,7 +90,7 @@ const CircleTile = memo(function CircleTile({ circle, isActive, onSelect }: Circ
     [circle.name],
   );
 
-  const hasImage = Boolean(circle.hasImage && imageUrl);
+  const hasImage = Boolean(circle.hasImage && image);
   const ringColor = isActive ? theme.accent : 'transparent';
   const outerShadow = isActive ? theme.accent : theme.text;
 
@@ -129,7 +129,7 @@ const CircleTile = memo(function CircleTile({ circle, isActive, onSelect }: Circ
         <View style={[styles.tile, { backgroundColor: palette.base }]}>
           {hasImage ? (
             <Image
-              source={{ uri: imageUrl! }}
+              source={image}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               transition={240}

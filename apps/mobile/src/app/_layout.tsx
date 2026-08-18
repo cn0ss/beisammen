@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GTProvider, initializeGT } from 'gt-react-native';
 import { useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplash } from '@/components/splash/AnimatedSplash';
 import { ScreenTransitionProvider } from '@/components/transition/screen-transition';
@@ -118,28 +119,30 @@ function RootLayout() {
   }, [isDark]);
 
   return (
-    <GTProvider>
-      <ThemeProvider value={isDark ? darkNavTheme : lightNavTheme}>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
-        <SplashDoneProvider done={isSplashDone}>
-          <ScreenTransitionProvider>
-            <SessionProvider>
-              <ConvexAppProvider>
-                <CryptoProvider>
-                  <NavigationLogger />
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="(auth)" />
-                    <Stack.Screen name="(app)" />
-                  </Stack>
-                </CryptoProvider>
-              </ConvexAppProvider>
-            </SessionProvider>
-          </ScreenTransitionProvider>
-        </SplashDoneProvider>
-        {!isSplashDone ? <AnimatedSplash onFinish={() => setIsSplashDone(true)} /> : null}
-      </ThemeProvider>
-    </GTProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <GTProvider>
+        <ThemeProvider value={isDark ? darkNavTheme : lightNavTheme}>
+          <StatusBar style={isDark ? 'light' : 'dark'} />
+          <SplashDoneProvider done={isSplashDone}>
+            <ScreenTransitionProvider>
+              <SessionProvider>
+                <ConvexAppProvider>
+                  <CryptoProvider>
+                    <NavigationLogger />
+                    <Stack screenOptions={{ headerShown: false }}>
+                      <Stack.Screen name="index" />
+                      <Stack.Screen name="(auth)" />
+                      <Stack.Screen name="(app)" />
+                    </Stack>
+                  </CryptoProvider>
+                </ConvexAppProvider>
+              </SessionProvider>
+            </ScreenTransitionProvider>
+          </SplashDoneProvider>
+          {!isSplashDone ? <AnimatedSplash onFinish={() => setIsSplashDone(true)} /> : null}
+        </ThemeProvider>
+      </GTProvider>
+    </GestureHandlerRootView>
   );
 }
 

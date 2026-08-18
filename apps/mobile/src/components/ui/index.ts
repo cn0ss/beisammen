@@ -8,5 +8,7 @@ export { Button } from './Button';
 export { Card } from './Card';
 export { EmptyState } from './EmptyState';
 export { FeedbackToast } from './FeedbackToast';
+export { LivePhotoBadge } from './LivePhotoBadge';
 export { LoadingBox } from './LoadingBox';
+export { MediaLoadingIndicator } from './MediaLoadingIndicator';
 export { SectionHeader } from './SectionHeader';

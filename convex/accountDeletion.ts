@@ -5,6 +5,7 @@ import type { Doc, Id, TableNames } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { action, internalMutation, internalQuery } from './_generated/server';
 import { adjustCircleStats } from './circleStats';
+import { markCircleKeyRotationPending } from './keys';
 import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { requireViewer } from './lib/viewer';
 
@@ -124,6 +125,9 @@ export const purgeBatch = internalMutation({
       state.deleted += 1;
 
       if (await ctx.db.get(membership.circleId)) {
+        // A deleted account is a departure like any other: surviving circles
+        // must rotate before new encrypted media can be published.
+        await markCircleKeyRotationPending(ctx, membership.circleId);
         await adjustCircleStats(ctx, membership.circleId, { memberCount: -1 });
       }
     }
@@ -278,8 +282,10 @@ export const purgeBatch = internalMutation({
       for (const upload of uploads) {
         collectStorageRef(state, upload.pendingStorage);
         collectStorageRef(state, upload.previewPendingStorage);
+        collectStorageRef(state, upload.pairedVideoPendingStorage);
         collectStorageRef(state, upload.storage);
         collectStorageRef(state, upload.previewStorage);
+        collectStorageRef(state, upload.pairedVideoStorage);
       }
 
       await deleteDocs(ctx, state, uploads);

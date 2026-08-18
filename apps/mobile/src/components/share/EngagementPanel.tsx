@@ -23,7 +23,7 @@ import type {
 } from '@/features/convex/api';
 import { api } from '@/features/convex/api';
 import { buildCommentTarget, normalizeCommentDraft } from '@/features/engagement/validation';
-import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
+import { useUserProfileImage } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
 
@@ -42,12 +42,12 @@ const CommentRow = memo(function CommentRow({
   const theme = useTheme();
   const gt = useGT();
   const commentTimeFormat = useDateFormat(COMMENT_TIME_OPTIONS);
-  const customImageUrl = useUserProfileImageUrl(comment.authorId, comment.authorHasProfileImage);
-  const avatarUrl = customImageUrl ?? comment.authorAvatarUrl ?? null;
+  const customImage = useUserProfileImage(comment.authorId, comment.authorProfileImageKey);
+  const avatarImage = customImage ?? comment.authorAvatarUrl ?? null;
 
   return (
     <View style={styles.commentRow}>
-      <Avatar name={comment.authorName} imageUrl={avatarUrl} size="sm" />
+      <Avatar name={comment.authorName} image={avatarImage} size="sm" />
       <View style={styles.commentContent}>
         <View style={styles.commentHeader}>
           <Text style={[styles.commentAuthor, { color: theme.text }]} numberOfLines={1}>

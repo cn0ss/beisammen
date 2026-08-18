@@ -3,11 +3,13 @@ import TcpSocket from 'react-native-tcp-socket';
 import { getSodium } from '@/features/crypto/sodium';
 import { createLogger } from '@/lib/logger';
 
+import { createVideoPerfLogger } from '../video-logging';
 import { createConnectionHandler, type ConnectionIo } from './connection';
 import { asciiEncode } from './http';
 import type { EncryptedVideoSession } from './session';
 
 const logger = createLogger('media.videoProxyServer');
+const perfLogger = createVideoPerfLogger('media.videoProxyServer');
 
 /** 18 bytes → 24 URL-safe base64 characters, 144 bits of entropy. */
 const TOKEN_BYTES = 18;
@@ -182,7 +184,7 @@ function startServer(): Promise<number> {
         return;
       }
 
-      logger.debug('Video proxy server listening.', { port: address.port });
+      perfLogger.debug('Video proxy server listening.', { port: address.port });
       resolve(address.port);
     });
   });

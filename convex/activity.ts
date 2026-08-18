@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { mutation, query } from './_generated/server';
-import { formatFeedTimestamp } from './lib/storage/shared';
+import { formatFeedTimestamp, imageCacheKey } from './lib/storage/shared';
 import { findViewer, requireViewer } from './lib/viewer';
 
 export const activityFunctionSurface = [
@@ -120,6 +120,7 @@ async function mapActivityEvent(ctx: QueryCtx, event: ActivityEvent) {
     actorName: name,
     actorAvatarUrl: actor?.avatarUrl,
     actorHasProfileImage: Boolean(actor?.profileImageStorage),
+    actorProfileImageKey: imageCacheKey(actor?.profileImageStorage),
     type: event.type,
     shareBatchId,
     assetId,
@@ -151,6 +152,7 @@ async function mapActivityInboxItem(ctx: QueryCtx, item: ActivityInboxItem) {
     actorName: name,
     actorAvatarUrl: actor?.avatarUrl,
     actorHasProfileImage: Boolean(actor?.profileImageStorage),
+    actorProfileImageKey: imageCacheKey(actor?.profileImageStorage),
     type: item.type,
     shareBatchId: item.shareBatchId,
     assetId,

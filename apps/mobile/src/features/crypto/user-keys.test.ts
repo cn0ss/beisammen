@@ -9,7 +9,12 @@ import {
 } from '@beisammen/crypto';
 
 import type { UserKeyRecord } from './api';
-import { bootstrapUserKeys, recoverUserKeys, revealRecoveryCode } from './user-keys';
+import {
+  bootstrapUserKeys,
+  recoverUserKeys,
+  resetUserKeys,
+  revealRecoveryCode,
+} from './user-keys';
 
 let sodium: SodiumApi;
 
@@ -207,5 +212,46 @@ describe('revealRecoveryCode', () => {
     const expected = encodeRecoveryCode(sodium, bundle.recoveryKey);
 
     expect(revealRecoveryCode(sodium, recordFromBundle(bundle), bundle.masterKey)).toBe(expected);
+  });
+});
+
+describe('resetUserKeys', () => {
+  test('registers a fresh bundle, saves the master key, and returns a working code', async () => {
+    const resetKeysMutation = vi.fn().mockResolvedValue({ created: false });
+    const saveMasterKey = vi.fn().mockResolvedValue(undefined);
+
+    const result = await resetUserKeys({
+      sodium,
+      resetKeys: resetKeysMutation,
+      saveMasterKey,
+    });
+
+    expect(resetKeysMutation).toHaveBeenCalledWith(result.registration);
+    expect(saveMasterKey).toHaveBeenCalledWith(result.keys.masterKey);
+    expect(result.registration.publicKey).not.toHaveLength(0);
+
+    // The returned code recovers the new master key on another device.
+    const recovered = await recoverUserKeys({
+      sodium,
+      serverKeys: { ...result.registration, createdAt: 1, updatedAt: 1 },
+      recoveryCode: result.recoveryCode,
+      saveMasterKey: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(recovered.masterKey).toEqual(result.keys.masterKey);
+    expect(recovered.privateKey).toEqual(result.keys.privateKey);
+  });
+
+  test('does not persist a master key when the server rejects the reset', async () => {
+    const saveMasterKey = vi.fn();
+
+    await expect(
+      resetUserKeys({
+        sodium,
+        resetKeys: vi.fn().mockRejectedValue(new Error('offline')),
+        saveMasterKey,
+      }),
+    ).rejects.toThrow('offline');
+    expect(saveMasterKey).not.toHaveBeenCalled();
   });
 });

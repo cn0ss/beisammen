@@ -31,7 +31,7 @@ type AssetVisibilityCtx = QueryCtx;
 
 interface ReadContext {
   assetId: Id<'assets'>;
-  variant: 'preview' | 'original';
+  variant: 'preview' | 'original' | 'pairedVideo';
   kind: Doc<'assets'>['kind'];
   mimeType: string;
   encryption?: Doc<'assets'>['encryption'];
@@ -72,7 +72,9 @@ function requireShareBatchVisibleToViewer(
 export const getReadContext = internalQuery({
   args: {
     assetId: v.id('assets'),
-    variant: v.optional(v.union(v.literal('preview'), v.literal('original'))),
+    variant: v.optional(
+      v.union(v.literal('preview'), v.literal('original'), v.literal('pairedVideo')),
+    ),
   },
   handler: async (ctx, args) => {
     const viewer = await requireViewer(ctx);
@@ -85,15 +87,27 @@ export const getReadContext = internalQuery({
     await requireAssetVisibleToViewer(ctx, asset, viewer._id);
     const variant = args.variant ?? 'preview';
 
+    if (variant === 'pairedVideo' && !asset.pairedVideoStorage) {
+      throw new Error('Asset has no paired video.');
+    }
+
     return {
       assetId: asset._id,
       variant,
       kind: asset.kind,
-      mimeType: asset.mimeType,
+      mimeType:
+        variant === 'pairedVideo'
+          ? asset.pairedVideoMimeType ?? 'video/mp4'
+          : asset.mimeType,
       // Imperative consumers (downloads) need the envelope to decrypt without
       // issuing a separate query for the asset projection.
       ...(asset.encryption ? { encryption: asset.encryption } : {}),
-      storage: variant === 'original' ? asset.storage : asset.previewStorage ?? asset.storage,
+      storage:
+        variant === 'original'
+          ? asset.storage
+          : variant === 'pairedVideo'
+            ? asset.pairedVideoStorage ?? asset.storage
+            : asset.previewStorage ?? asset.storage,
     };
   },
 });
@@ -124,6 +138,9 @@ export const listForShareBatch = query({
       sizeBytes: asset.sizeBytes,
       storage: asset.storage,
       previewStorage: asset.previewStorage,
+      pairedVideoStorage: asset.pairedVideoStorage,
+      pairedVideoMimeType: asset.pairedVideoMimeType,
+      pairedVideoDurationSeconds: asset.pairedVideoDurationSeconds,
       width: asset.width,
       height: asset.height,
       durationSeconds: asset.durationSeconds,
@@ -185,7 +202,9 @@ export const listMetadataForCircle = query({
 export const getReadUrl = action({
   args: {
     assetId: v.id('assets'),
-    variant: v.optional(v.union(v.literal('preview'), v.literal('original'))),
+    variant: v.optional(
+      v.union(v.literal('preview'), v.literal('original'), v.literal('pairedVideo')),
+    ),
   },
   handler: async (
     ctx,
@@ -266,16 +285,23 @@ export const getDeleteContext = internalQuery({
       shareBatchId: shareBatch._id,
       circleId: asset.circleId,
       billingOwner,
-      storageBytesDelta: -(asset.sizeBytes ?? 0),
+      storageBytesDelta: -((asset.sizeBytes ?? 0) + (asset.pairedVideoSizeBytes ?? 0)),
       uploadIds: linkedUploads.map((upload) => upload._id),
       storageReferences: [
         asset.storage,
         ...(asset.previewStorage ? [asset.previewStorage] : []),
+        ...(asset.pairedVideoStorage ? [asset.pairedVideoStorage] : []),
         ...linkedUploads.flatMap((upload) => (upload.storage ? [upload.storage] : [])),
         ...linkedUploads.flatMap((upload) => (upload.previewStorage ? [upload.previewStorage] : [])),
+        ...linkedUploads.flatMap((upload) =>
+          upload.pairedVideoStorage ? [upload.pairedVideoStorage] : [],
+        ),
         ...linkedUploads.flatMap((upload) => (upload.pendingStorage ? [upload.pendingStorage] : [])),
         ...linkedUploads.flatMap((upload) =>
           upload.previewPendingStorage ? [upload.previewPendingStorage] : [],
+        ),
+        ...linkedUploads.flatMap((upload) =>
+          upload.pairedVideoPendingStorage ? [upload.pairedVideoPendingStorage] : [],
         ),
       ],
     };

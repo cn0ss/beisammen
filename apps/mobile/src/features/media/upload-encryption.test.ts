@@ -211,6 +211,113 @@ describe('resolveUploadEncryption', () => {
     });
   });
 
+  test('encrypts a Live Photo paired video under the same file key', async () => {
+    const source = randomBytes(1024);
+    const preview = randomBytes(128);
+    const pairedVideo = randomBytes(4096);
+
+    seedFile('file:///cache/source.heic', source);
+    seedFile('file:///cache/preview.jpg', preview);
+    seedFile('file:///cache/paired.mov', pairedVideo);
+
+    const circleKey = generateCircleKey(sodium);
+    const result = await resolveUploadEncryption({
+      circleKey: { epoch: 5, circleKey },
+      metadata: { fileName: 'live.heic' },
+      sourceUri: 'file:///cache/source.heic',
+      previewUri: 'file:///cache/preview.jpg',
+      pairedVideoSourceUri: 'file:///cache/paired.mov',
+      encryptedTargetUri: 'file:///recovery/live-encrypted.bin',
+      encryptedPreviewTargetUri: 'file:///recovery/live-encrypted-preview.bin',
+      encryptedPairedVideoTargetUri: 'file:///recovery/live-encrypted-paired.bin',
+    });
+
+    expect(result.encryptedPairedVideoUri).toBe('file:///recovery/live-encrypted-paired.bin');
+    expect(result.encryptedPairedVideoSizeBytes).toBe(
+      memoryFs.files.get('file:///recovery/live-encrypted-paired.bin')?.byteLength,
+    );
+
+    // The one wrapped key in the envelope opens the paired clip too.
+    const fileKey = unwrapAssetFileKey({
+      sodium,
+      envelope: result.envelope,
+      keysByEpoch: new Map([[5, circleKey]]),
+    });
+
+    await decryptFileToFile({
+      sodium,
+      fileKey,
+      sourceUri: result.encryptedPairedVideoUri!,
+      targetUri: 'file:///cache/decrypted-paired.mov',
+    });
+    expect(memoryFs.files.get('file:///cache/decrypted-paired.mov')).toEqual(pairedVideo);
+  });
+
+  test('ignores persisted ciphertext when the paired clip ciphertext is missing', async () => {
+    // Main and preview ciphertext survived, but the paired clip did not: the
+    // envelope's file key covers all three, so everything re-encrypts fresh.
+    seedFile('file:///recovery/persisted-encrypted.bin', randomBytes(50));
+    seedFile('file:///recovery/persisted-encrypted-preview.bin', randomBytes(20));
+    seedFile('file:///cache/source.heic', randomBytes(64));
+    seedFile('file:///cache/preview.jpg', randomBytes(16));
+    seedFile('file:///cache/paired.mov', randomBytes(256));
+
+    const result = await resolveUploadEncryption({
+      circleKey: { epoch: 1, circleKey: generateCircleKey(sodium) },
+      metadata: { fileName: 'live.heic' },
+      sourceUri: 'file:///cache/source.heic',
+      previewUri: 'file:///cache/preview.jpg',
+      pairedVideoSourceUri: 'file:///cache/paired.mov',
+      encryptedTargetUri: 'file:///recovery/fresh.bin',
+      encryptedPreviewTargetUri: 'file:///recovery/fresh-preview.bin',
+      encryptedPairedVideoTargetUri: 'file:///recovery/fresh-paired.bin',
+      persisted: {
+        encryptedCacheUri: 'file:///recovery/persisted-encrypted.bin',
+        encryptedPreviewCacheUri: 'file:///recovery/persisted-encrypted-preview.bin',
+        encryption: { v: 1, circleEpoch: 1, wrappedFileKey: 'wrapped' },
+      },
+    });
+
+    expect(result.encryptedUri).toBe('file:///recovery/fresh.bin');
+    expect(result.encryptedPairedVideoUri).toBe('file:///recovery/fresh-paired.bin');
+    expect(memoryFs.files.has('file:///recovery/fresh-paired.bin')).toBe(true);
+  });
+
+  test('reuses persisted paired video ciphertext together with the other files', async () => {
+    seedFile('file:///recovery/persisted-encrypted.bin', randomBytes(50));
+    seedFile('file:///recovery/persisted-encrypted-preview.bin', randomBytes(20));
+    seedFile('file:///recovery/persisted-encrypted-paired.bin', randomBytes(75));
+
+    const envelope = {
+      v: 1 as const,
+      circleEpoch: 2,
+      wrappedFileKey: 'wrapped',
+    };
+    const result = await resolveUploadEncryption({
+      circleKey: null,
+      metadata: { fileName: 'live.heic' },
+      sourceUri: 'file:///cache/source.heic',
+      previewUri: 'file:///cache/preview.jpg',
+      pairedVideoSourceUri: 'file:///cache/paired.mov',
+      encryptedTargetUri: 'file:///recovery/unused.bin',
+      encryptedPreviewTargetUri: 'file:///recovery/unused-preview.bin',
+      encryptedPairedVideoTargetUri: 'file:///recovery/unused-paired.bin',
+      persisted: {
+        encryptedCacheUri: 'file:///recovery/persisted-encrypted.bin',
+        encryptedPreviewCacheUri: 'file:///recovery/persisted-encrypted-preview.bin',
+        encryptedPairedVideoCacheUri: 'file:///recovery/persisted-encrypted-paired.bin',
+        encryption: envelope,
+      },
+    });
+
+    expect(result.encryptedPairedVideoUri).toBe(
+      'file:///recovery/persisted-encrypted-paired.bin',
+    );
+    expect(result.encryptedPairedVideoSizeBytes).toBe(75);
+    expect(result.envelope).toEqual(envelope);
+    expect(memoryFs.files.has('file:///recovery/unused-paired.bin')).toBe(false);
+  });
+
   test('reuses persisted ciphertext and envelope without needing the circle key', async () => {
     const encryptedBytes = randomBytes(333);
     const encryptedPreviewBytes = randomBytes(99);

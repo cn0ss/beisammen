@@ -193,6 +193,25 @@ describe('chunked file encryption', () => {
     ).toThrow();
   });
 
+  test('rejects attacker-sized chunkSize fields before any allocation', () => {
+    const fileKey = generateFileKey(sodium);
+    const ciphertext = encryptBytes(sodium, { fileKey, plaintext: randomPlaintext(64) });
+
+    // The chunkSize field is read before any chunk is authenticated, so a
+    // crafted header must not be able to drive multi-gigabyte range requests
+    // or buffers (values from the security review's proof-of-concept).
+    for (const chunkSize of [64 * 1024 * 1024, 1024 ** 3, 0xffffffff]) {
+      const crafted = ciphertext.slice();
+
+      new DataView(crafted.buffer).setUint32(8, chunkSize, true);
+      expect(() => parseFileHeader(crafted)).toThrow(/invalid chunk size/i);
+    }
+
+    expect(() =>
+      createFileHeader(sodium, { plaintextLength: 10, chunkSize: 64 * 1024 * 1024 }),
+    ).toThrow(/invalid chunk size/i);
+  });
+
   test('encryptChunk validates plaintext lengths against the header', () => {
     const fileKey = generateFileKey(sodium);
     const header = createFileHeader(sodium, { plaintextLength: 150, chunkSize: 100 });

@@ -37,16 +37,37 @@ re-encrypting reset flow exists.
 - The first member client to come online initializes epoch 1 with a
   self-grant (`initializeCircleKey`; concurrent initializers lose the race
   and re-read).
-- Any member holding the epoch key tops up grants for members without one
-  (`listMissingKeyGrants` → `grantCircleKeys`). New joiners therefore get
-  access as soon as any key-holding member is online — the server verifies
-  membership and that the granter itself holds a grant, and never sees the
-  key.
-- Removing a member deletes their grants and the remover's client rotates to
-  the next epoch (`rotateCircleKey`, owners/admins, must self-grant). Old
-  epochs stay stored so old assets remain decryptable; a removed member who
-  saved keys can, as in every E2EE system, still read content from epochs
-  they legitimately held.
+- Any member holding epoch keys tops up grants for members without one
+  (`listMissingKeyGrants` → `grantCircleKeys`), covering **every epoch the
+  granter holds**, not just the current one. New joiners and users recovering
+  from a key reset therefore get access to the full circle history as soon as
+  any key-holding member is online — the server verifies membership and that
+  the granter itself holds a grant, and never sees the key.
+- Every departure (removal, leave, account deletion) deletes the member's
+  grants and marks the circle `keyRotationPendingAt`. While that flag is set,
+  encrypted upload completion is rejected server-side, so no post-departure
+  media can be sealed under an epoch the departed member still holds — even
+  if the departing client crashes before rotating. The remover's client
+  rotates immediately; otherwise the next manage-role client to come online
+  rotates automatically (`useCircleKeys` → `rotateCircleKeyNow`). Rotation
+  (`rotateCircleKey`, owners/admins, must self-grant) generates a fresh key,
+  so it does not require holding the previous epoch, and it clears the flag.
+- Upload completion additionally requires the *current* epoch: envelopes
+  referencing an older epoch are rejected as stale. Old epochs stay stored so
+  old assets remain decryptable; a removed member who saved keys can, as in
+  every E2EE system, still read content from epochs they legitimately held.
+- Grants and registered public keys are shape-validated server-side (exact
+  base64 lengths for X25519 public keys and sealed circle keys), grant
+  sealing skips individual members with malformed keys instead of aborting
+  the batch, and a member can reject their own unreadable grant
+  (`rejectMyKeyGrant`) so an honest key holder re-grants — an attacker racing
+  a poisoned grant in first cannot permanently lock a member out.
+- Known limitation (documented, not yet mitigated): member public keys and
+  the roster are served by the backend without end-to-end authentication
+  (no pinning, signed rosters, or key transparency). A malicious server
+  operator could substitute keys or insert a ghost member and receive future
+  circle keys from honest clients. Fixing this requires identity-key
+  pinning/verification UX and is tracked as its own phase.
 
 ### Recovery UX (pragmatic profile)
 
@@ -56,8 +77,18 @@ key is device-generated. Three recovery paths, in order:
 1. iCloud Keychain sync (iOS, automatic).
 2. Recovery code (`XXXXX-XXXXX-…`), shown once at key generation and
    re-viewable in settings; redeems `encMasterKeyByRecovery` on a new device.
-3. None → media is unrecoverable. This is inherent to E2EE and must be
-   communicated at onboarding.
+3. Key reset (`keys.resetKeys`) as the explicit last resort when the code is
+   lost: replaces the registered key material, deletes the now-unreadable
+   grants, and shows a fresh recovery code that must be acknowledged. Because
+   media keys live in circle epochs (not user keys), shared-circle media comes
+   back automatically through the multi-epoch grant top-up once any other
+   key-holding member is online. Only solo-circle history is permanently
+   lost; the destructive confirm in the app spells that out. Trade-off: an
+   attacker holding a valid auth session could trigger a reset and then
+   receive re-grants like a new joiner — the same server-trust exposure as
+   the roster gap documented below.
+4. A failed key bootstrap surfaces as a dedicated retry screen
+   (`CryptoGate`, status `unavailable`) instead of failing silently.
 
 ## Media format: BSE1 (`packages/crypto/src/fileEncryption.ts`)
 
@@ -76,6 +107,14 @@ only implements string AD inputs). Properties:
   chunk reordering.
 - Default chunk size 1 MiB; previews use the same format via
   `encryptBytes`/`decryptBytes`.
+- Live Photos upload the companion clip as a third object
+  (`assets.pairedVideoStorage`), encrypted with `encryptFileToFile` under the
+  same per-asset file key — one envelope covers still, preview and clip. The
+  viewer decrypts it through the media cache's `pairedVideo` variant.
+- The header's chunk-size field is read before any chunk is authenticated, so
+  parsing rejects values above `MAX_CHUNK_SIZE` (8 MiB) and the video proxy
+  additionally caps single ranged fetches — a crafted header from a malicious
+  member cannot force multi-gigabyte allocations on viewers' devices.
 
 ## What stays plaintext (deliberate)
 
@@ -120,3 +159,28 @@ only implements string AD inputs). Properties:
   were removed until this exists.
 - **Migration:** existing plaintext assets stay readable; clients re-encrypt
   opportunistically or content is marked "pre-E2EE".
+
+## Local plaintext lifecycle
+
+Decrypted media exists on-device as plaintext in the decrypted display cache
+(`decrypted-media/<circleId>/` in the cache directory, size-capped) and the
+save/share download directory. Both are deleted on sign-out and instance
+switch (`session-provider.tsx` → `clearDecryptedMediaCache` /
+`clearShareDownloads`), so plaintext never outlives the session that was
+authorized to decrypt it. The cache is additionally scoped per circle: leaving
+a circle drops its subdirectory immediately
+(`clearCircleDecryptedMedia`), and once per session after sign-in the cache is
+reconciled against the current membership list so removals that happened while
+the app was closed are cleaned up on the next start
+(`use-decrypted-cache-reconciliation.ts` → `reconcileDecryptedMediaCache`).
+Upload-recovery files (which include pre-encryption source copies) are cleared
+per instance on sign-out as before.
+
+## Known gaps
+
+- Circle cover images still use the legacy plaintext image pipeline
+  (`imageUploads`, no BSE1 envelope) — the server and storage operator can
+  read them. Moving covers onto the encrypted pipeline needs a schema +
+  read-path migration and is open.
+- No end-to-end authentication of member identity keys (see "Epochs and
+  membership" above).

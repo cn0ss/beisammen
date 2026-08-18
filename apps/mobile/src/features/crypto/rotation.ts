@@ -3,55 +3,34 @@ import type { ConvexReactClient } from 'convex/react';
 import { createLogger } from '@/lib/logger';
 
 import { keysApi } from './api';
-import { buildRotationPayload, ensureCircleKey } from './circle-keys';
+import { buildRotationPayload } from './circle-keys';
 import { getSodium } from './sodium';
-import type { UnlockedUserKeys } from './user-keys';
 
 const logger = createLogger('crypto.rotation');
 
 /**
- * Best-effort circle key rotation after a member was removed: generates a
- * fresh epoch key sealed to every remaining member (self included). Only
- * possible when this client holds the current circle key; failures never
- * block the removal UX.
- *
- * TODO(e2ee): removed members keep the old epoch keys until this rotation
- * lands. When this client cannot rotate (no key, offline, error), the next
- * manage-role member client holding the key should rotate instead; see the
- * member-removal notes in docs/e2ee.md.
+ * Best-effort circle key rotation after a member departure: generates a fresh
+ * epoch key sealed to every remaining member (self included). Rotation does
+ * not require holding the previous epoch key, since the new key is generated
+ * from scratch; older epochs stay resolvable for existing assets via their
+ * grants. The server marks the circle rotation-pending on every departure and
+ * blocks encrypted upload completion until a rotation lands, so a client-side
+ * failure here only delays uploads, never post-departure confidentiality.
+ * Returns true when a new epoch was committed.
  */
-export async function rotateCircleKeyAfterMemberRemoval(options: {
+export async function rotateCircleKeyNow(options: {
   convex: ConvexReactClient;
   circleId: string;
-  userKeys: UnlockedUserKeys;
-}): Promise<void> {
-  const { convex, circleId, userKeys } = options;
+}): Promise<boolean> {
+  const { convex, circleId } = options;
 
   try {
     const sodium = await getSodium();
     const myKeys = await convex.query(keysApi.getMyCircleKeys, { circleId });
 
     if (myKeys.currentEpoch === null) {
-      // No circle key yet, so the removed member never held one either.
-      return;
-    }
-
-    const resolved = await ensureCircleKey({
-      sodium,
-      userKeys,
-      getMyCircleKeys: () => Promise.resolve(myKeys),
-      initializeCircleKey: () => {
-        // Unreachable: currentEpoch is non-null, so ensureCircleKey never
-        // initializes here.
-        throw new Error('Unexpected circle key initialization during rotation.');
-      },
-    });
-
-    if (resolved.status !== 'ready') {
-      logger.info('Skipping post-removal rotation: viewer does not hold the circle key.', {
-        circleId,
-      });
-      return;
+      // No circle key yet, so no departed member ever held one either.
+      return false;
     }
 
     const members = await convex.query(keysApi.getCircleMemberPublicKeys, { circleId });
@@ -60,15 +39,19 @@ export async function rotateCircleKeyAfterMemberRemoval(options: {
     await convex.mutation(keysApi.rotateCircleKey, { circleId, grants: rotation.grants });
 
     if (rotation.skippedUserIds.length > 0) {
-      logger.info('Rotated circle key; members without registered keys were skipped.', {
+      logger.info('Rotated circle key; members without usable keys were skipped.', {
         circleId,
         skippedCount: rotation.skippedUserIds.length,
       });
     }
+
+    return true;
   } catch (error) {
-    logger.warn('Post-removal circle key rotation failed; continuing without it.', {
+    logger.warn('Circle key rotation failed; the server keeps uploads gated until it succeeds.', {
       circleId,
       message: error instanceof Error ? error.message : String(error),
     });
+
+    return false;
   }
 }

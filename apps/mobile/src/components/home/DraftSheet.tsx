@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { T, Var, useGT, useMessages } from 'gt-react-native';
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -18,7 +18,7 @@ import type {
   DraftUploadRecord,
   ShareDraftRecord,
 } from '@/features/convex/api';
-import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { useCircleImage } from '@/features/media/use-circle-image-url';
 import { uploadReadinessNotice } from '@/features/media/upload-readiness';
 import type { CircleUploadReadiness } from '@beisammen/contracts';
 import type { UploadQueueState } from '@beisammen/upload-client';
@@ -27,6 +27,7 @@ import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 import { AssetThumbnail } from '@/components/media/AssetThumbnail';
+import { FullscreenMediaViewer } from '@/components/share/FullscreenMediaViewer';
 import { Avatar, Button, LoadingBox } from '@/components/ui';
 
 const CAPTION_MAX_LENGTH = 240;
@@ -84,8 +85,21 @@ export const DraftSheet = memo(function DraftSheet({
   const gt = useGT();
   const m = useMessages();
   const captionLength = caption.length;
-  const circleImageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
+  const circleImage = useCircleImage(circle?._id, circle?.imageKey);
   const readinessNotice = uploadReadinessNotice(uploadReadiness);
+  // Fullscreen preview of an already uploaded draft asset; null = closed.
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const draftAssets = draft?.assets ?? [];
+
+  const closePreview = useCallback(() => setPreviewIndex(null), []);
+
+  // Deleting the last asset (or closing the sheet) must not leave a viewer
+  // open on stale data.
+  useEffect(() => {
+    if (!visible || draftAssets.length === 0) {
+      setPreviewIndex(null);
+    }
+  }, [draftAssets.length, visible]);
 
   return (
     <Modal
@@ -157,7 +171,7 @@ export const DraftSheet = memo(function DraftSheet({
                     },
                   ]}
                 >
-                  <Avatar name={circle.name} imageUrl={circleImageUrl} size="sm" />
+                  <Avatar name={circle.name} image={circleImage} size="sm" />
                   <View style={styles.circleCopy}>
                     <T>
                       <Text style={[styles.circleTarget, { color: theme.text }]} numberOfLines={1}>
@@ -270,12 +284,13 @@ export const DraftSheet = memo(function DraftSheet({
                     showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.assetRow}
                   >
-                    {draft.assets.map((asset) => (
+                    {draft.assets.map((asset, index) => (
                       <AssetThumbnail
                         key={asset._id}
                         asset={asset}
                         circleId={draft.circleId}
                         size={100}
+                        onPress={() => setPreviewIndex(index)}
                         onRemove={() => onDeleteAsset(asset._id)}
                       />
                     ))}
@@ -340,6 +355,19 @@ export const DraftSheet = memo(function DraftSheet({
             </>
           )}
         </ScrollView>
+
+        {/* Fullscreen check of uploaded media before publishing; supports
+            zoom, video playback, and Live Photo hold-to-play like the feed. */}
+        {draft && draftAssets.length > 0 ? (
+          <FullscreenMediaViewer
+            assets={draftAssets}
+            circleId={draft.circleId}
+            initialIndex={Math.min(previewIndex ?? 0, draftAssets.length - 1)}
+            visible={previewIndex !== null}
+            onClose={closePreview}
+            onIndexChange={setPreviewIndex}
+          />
+        ) : null}
       </KeyboardAvoidingView>
     </Modal>
   );

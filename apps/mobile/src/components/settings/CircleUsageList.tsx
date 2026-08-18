@@ -15,7 +15,7 @@ import type { CircleUsageBreakdown, CircleUsageBreakdownItem } from '@beisammen/
 
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { formatBytes } from '@/features/media/client';
-import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { useCircleImage } from '@/features/media/use-circle-image-url';
 import { MotionDuration } from '@/lib/motion';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -91,7 +91,7 @@ const CircleUsageRow = memo(function CircleUsageRow({
   delayMs: number;
 }) {
   const theme = useTheme();
-  const imageUrl = useCircleImageUrl(circle.circleId, circle.hasImage);
+  const image = useCircleImage(circle.circleId, circle.imageKey);
   const fill = useSharedValue(0);
 
   useEffect(() => {
@@ -120,7 +120,7 @@ const CircleUsageRow = memo(function CircleUsageRow({
       ]}
     >
       <View style={styles.topRow}>
-        <Avatar name={circle.name} imageUrl={imageUrl} size="sm" />
+        <Avatar name={circle.name} image={image} size="sm" />
         <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
           {circle.name}
         </Text>

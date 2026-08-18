@@ -34,6 +34,9 @@ export interface ResolvedUploadEncryption {
   encryptedPreviewUri: string;
   encryptedSizeBytes: number;
   encryptedPreviewSizeBytes: number;
+  /** Only set when the upload carries a Live Photo companion clip. */
+  encryptedPairedVideoUri?: string;
+  encryptedPairedVideoSizeBytes?: number;
   envelope: AssetEncryptionEnvelope;
 }
 
@@ -56,26 +59,52 @@ export async function resolveUploadEncryption(input: {
   metadata: { fileName: string; location?: MediaLocation };
   sourceUri: string;
   previewUri: string;
+  /** Live Photo companion clip; encrypted under the same file key. */
+  pairedVideoSourceUri?: string;
   encryptedTargetUri: string;
   encryptedPreviewTargetUri: string;
+  encryptedPairedVideoTargetUri?: string;
   persisted?: {
     encryptedCacheUri?: string;
     encryptedPreviewCacheUri?: string;
+    encryptedPairedVideoCacheUri?: string;
     encryption?: AssetEncryptionEnvelope;
   };
 }): Promise<ResolvedUploadEncryption> {
   const persisted = input.persisted;
+  const hasPairedVideo = Boolean(input.pairedVideoSourceUri);
 
-  if (persisted?.encryptedCacheUri && persisted.encryptedPreviewCacheUri && persisted.encryption) {
+  // The persisted short-circuit is all-or-nothing: every ciphertext is sealed
+  // under the one file key wrapped in the envelope, so a missing paired-video
+  // ciphertext forces a full re-encrypt of all files under a fresh key.
+  if (
+    persisted?.encryptedCacheUri &&
+    persisted.encryptedPreviewCacheUri &&
+    persisted.encryption &&
+    (!hasPairedVideo || persisted.encryptedPairedVideoCacheUri)
+  ) {
     const encryptedSizeBytes = fileSizeIfExists(persisted.encryptedCacheUri);
     const encryptedPreviewSizeBytes = fileSizeIfExists(persisted.encryptedPreviewCacheUri);
+    const encryptedPairedVideoSizeBytes = persisted.encryptedPairedVideoCacheUri
+      ? fileSizeIfExists(persisted.encryptedPairedVideoCacheUri)
+      : undefined;
 
-    if (encryptedSizeBytes !== undefined && encryptedPreviewSizeBytes !== undefined) {
+    if (
+      encryptedSizeBytes !== undefined &&
+      encryptedPreviewSizeBytes !== undefined &&
+      (!hasPairedVideo || encryptedPairedVideoSizeBytes !== undefined)
+    ) {
       return {
         encryptedUri: persisted.encryptedCacheUri,
         encryptedPreviewUri: persisted.encryptedPreviewCacheUri,
         encryptedSizeBytes,
         encryptedPreviewSizeBytes,
+        ...(hasPairedVideo && persisted.encryptedPairedVideoCacheUri
+          ? {
+              encryptedPairedVideoUri: persisted.encryptedPairedVideoCacheUri,
+              encryptedPairedVideoSizeBytes,
+            }
+          : {}),
         envelope: persisted.encryption,
       };
     }
@@ -111,11 +140,35 @@ export async function resolveUploadEncryption(input: {
   previewTarget.create({ intermediates: true, overwrite: true });
   previewTarget.write(previewCiphertext);
 
+  let pairedVideoFields: Pick<
+    ResolvedUploadEncryption,
+    'encryptedPairedVideoUri' | 'encryptedPairedVideoSizeBytes'
+  > = {};
+
+  if (input.pairedVideoSourceUri) {
+    if (!input.encryptedPairedVideoTargetUri) {
+      throw new Error('Für das Live-Video ist kein lokaler Speicher verfügbar.');
+    }
+
+    const encryptedPairedVideo = await encryptFileToFile({
+      sodium,
+      fileKey,
+      sourceUri: input.pairedVideoSourceUri,
+      targetUri: input.encryptedPairedVideoTargetUri,
+    });
+
+    pairedVideoFields = {
+      encryptedPairedVideoUri: input.encryptedPairedVideoTargetUri,
+      encryptedPairedVideoSizeBytes: encryptedPairedVideo.ciphertextLength,
+    };
+  }
+
   return {
     encryptedUri: input.encryptedTargetUri,
     encryptedPreviewUri: input.encryptedPreviewTargetUri,
     encryptedSizeBytes: encrypted.ciphertextLength,
     encryptedPreviewSizeBytes: previewCiphertext.byteLength,
+    ...pairedVideoFields,
     envelope,
   };
 }
@@ -136,6 +189,7 @@ export function encryptedCompletionFields(input: {
     width?: number;
     height?: number;
     durationSeconds?: number;
+    pairedVideoDurationSeconds?: number;
     capturedAt?: number;
   };
 }): {
@@ -144,6 +198,7 @@ export function encryptedCompletionFields(input: {
   width?: number;
   height?: number;
   durationSeconds?: number;
+  pairedVideoDurationSeconds?: number;
   capturedAt?: number;
   encryption: AssetEncryptionEnvelope;
 } {
@@ -153,6 +208,7 @@ export function encryptedCompletionFields(input: {
     width: input.asset.width,
     height: input.asset.height,
     durationSeconds: input.asset.durationSeconds,
+    pairedVideoDurationSeconds: input.asset.pairedVideoDurationSeconds,
     capturedAt: input.asset.capturedAt,
     encryption: input.encrypted.envelope,
   };

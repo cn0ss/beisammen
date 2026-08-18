@@ -14,6 +14,7 @@ import {
   buildImageUploadObjectKey,
   buildS3StorageReference,
   getCurrentInstanceStorage,
+  imageCacheKey,
   requireS3StorageProvider,
 } from './lib/storage/shared';
 import { assertValidDeclaredImageSize } from './lib/uploadLimits';
@@ -41,6 +42,7 @@ function serializeViewer(viewer: Doc<'users'>) {
     avatarUrl: viewer.avatarUrl,
     createdAt: viewer.createdAt,
     hasProfileImage: Boolean(viewer.profileImageStorage),
+    profileImageKey: imageCacheKey(viewer.profileImageStorage),
     deletionRequestedAt: viewer.deletionRequestedAt,
     deletionCompletedAt: viewer.deletionCompletedAt,
   };

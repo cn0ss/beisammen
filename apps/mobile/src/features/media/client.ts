@@ -38,6 +38,11 @@ export interface PreparedUploadAsset {
   durationSeconds?: number;
   location?: MediaLocation;
   capturedAt?: number;
+  /** Live Photo companion clip (image assets only). */
+  pairedVideoUri?: string;
+  pairedVideoMimeType?: string;
+  pairedVideoSizeBytes?: number;
+  pairedVideoDurationSeconds?: number;
 }
 
 export interface PreparedPreviewAsset {
@@ -575,12 +580,52 @@ async function resolvePickerUploadUri(asset: ImagePicker.ImagePickerAsset): Prom
   return normalizedUri;
 }
 
+/**
+ * Live Photo companion clip metadata from the picker asset. Only present when
+ * the picker ran with the 'livePhotos' media type (iOS); Android and plain
+ * photos return no paired asset.
+ */
+async function resolvePairedVideo(
+  asset: ImagePicker.ImagePickerAsset,
+): Promise<Pick<
+  PreparedUploadAsset,
+  | 'pairedVideoUri'
+  | 'pairedVideoMimeType'
+  | 'pairedVideoSizeBytes'
+  | 'pairedVideoDurationSeconds'
+> | null> {
+  const paired = asset.pairedVideoAsset;
+
+  if (!paired?.uri) {
+    return null;
+  }
+
+  const uri = normalizeFileUri(paired.uri);
+  const sizeBytes = paired.fileSize ?? (await getFileSize(uri));
+
+  if (sizeBytes === undefined || sizeBytes <= 0) {
+    return null;
+  }
+
+  return {
+    pairedVideoUri: uri,
+    pairedVideoMimeType:
+      paired.mimeType?.trim() ||
+      (/\.mov$/i.test(uri) ? 'video/quicktime' : 'video/mp4'),
+    pairedVideoSizeBytes: sizeBytes,
+    ...(paired.duration !== null && paired.duration !== undefined
+      ? { pairedVideoDurationSeconds: paired.duration / 1000 }
+      : {}),
+  };
+}
+
 async function processImageAsset(
   asset: ImagePicker.ImagePickerAsset,
   location?: MediaLocation,
   capturedAt?: number,
 ): Promise<PreparedUploadAsset> {
   const uri = await resolvePickerUploadUri(asset);
+  const pairedVideo = await resolvePairedVideo(asset);
 
   return {
     uri,
@@ -593,6 +638,7 @@ async function processImageAsset(
     height: asset.height,
     location,
     capturedAt,
+    ...(pairedVideo ?? {}),
   };
 }
 
@@ -737,6 +783,19 @@ function fallbackExtensionForAsset(asset: Pick<DownloadableAssetInfo, 'kind' | '
 
 function downloadTargetUri(baseName: string): string {
   return `${DOWNLOAD_DIRECTORY}${Date.now()}-${baseName}`;
+}
+
+/**
+ * Deletes all save/share download files. They are plaintext (decrypted)
+ * media, so they must not outlive the session; called on sign-out and
+ * account switch.
+ */
+export async function clearShareDownloads(): Promise<void> {
+  if (!DOWNLOAD_DIRECTORY) {
+    return;
+  }
+
+  await FileSystem.deleteAsync(DOWNLOAD_DIRECTORY, { idempotent: true }).catch(() => undefined);
 }
 
 /**

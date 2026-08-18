@@ -10,13 +10,17 @@ import {
   View,
 } from 'react-native';
 
+import { VideoView } from 'expo-video';
+
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
-import type { ShareFeedItem } from '@/features/convex/api';
+import type { ShareAssetRecord, ShareFeedItem } from '@/features/convex/api';
 import { useAssetMediaUri } from '@/features/media/use-asset-media-uri';
-import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
+import { isLivePhotoAsset, useLivePhotoPlayback } from '@/features/media/use-live-photo-playback';
+import type { AvatarImage } from '@/features/media/avatar-image-cache';
+import { useUserProfileImage } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
-import { Avatar } from '@/components/ui';
+import { Avatar, MediaLoadingIndicator } from '@/components/ui';
 
 const IMAGE_HEIGHT = 340;
 
@@ -121,10 +125,53 @@ const EngagementSummaryRow = memo(function EngagementSummaryRow({
   );
 });
 
+/**
+ * Hold-to-play layer over a Live Photo hero. Mounted only for live heroes so
+ * plain cards never create a native player; the clip resolves on demand at
+ * the first hold. Taps fall through to the same open-share action as the
+ * card itself.
+ */
+const LiveHeroOverlay = memo(function LiveHeroOverlay({
+  asset,
+  circleId,
+  onPress,
+}: {
+  asset: ShareAssetRecord;
+  circleId: string;
+  onPress: () => void;
+}) {
+  const gt = useGT();
+  const livePhoto = useLivePhotoPlayback({ asset, circleId });
+
+  return (
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={gt('Live-Foto: Antippen zum Öffnen, gedrückt halten zum Abspielen')}
+      style={StyleSheet.absoluteFill}
+      onPress={onPress}
+      delayLongPress={220}
+      onLongPress={livePhoto.start}
+      onPressOut={livePhoto.stop}
+    >
+      {livePhoto.isPlaying ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <VideoView
+            player={livePhoto.player}
+            style={styles.heroImage}
+            nativeControls={false}
+            contentFit="cover"
+          />
+        </View>
+      ) : null}
+      <MediaLoadingIndicator visible={livePhoto.isLoading} />
+    </Pressable>
+  );
+});
+
 interface FeedCardProps {
   share: ShareFeedItem;
   currentUserId?: string | null;
-  currentProfileImageUrl?: string | null;
+  currentProfileImage?: AvatarImage;
   isDeleting?: boolean;
   onOpenShare: (shareId: string) => void;
   onDeleteShare: (shareId: string) => void;
@@ -133,7 +180,7 @@ interface FeedCardProps {
 export const FeedCard = memo(function FeedCard({
   share,
   currentUserId,
-  currentProfileImageUrl,
+  currentProfileImage,
   isDeleting = false,
   onOpenShare,
   onDeleteShare,
@@ -156,13 +203,13 @@ export const FeedCard = memo(function FeedCard({
   const handlePress = useCallback(() => onOpenShare(share._id), [onOpenShare, share._id]);
   const handleDelete = useCallback(() => onDeleteShare(share._id), [onDeleteShare, share._id]);
 
-  const customAuthorImageUrl = useUserProfileImageUrl(
+  const customAuthorImage = useUserProfileImage(
     share.authorId,
-    share.authorHasProfileImage,
+    share.authorProfileImageKey,
   );
-  const authorImageUrl =
-    (currentUserId && share.authorId === currentUserId ? currentProfileImageUrl : null) ??
-    customAuthorImageUrl ??
+  const authorImage =
+    (currentUserId && share.authorId === currentUserId ? currentProfileImage : null) ??
+    customAuthorImage ??
     share.authorAvatarUrl ??
     null;
 
@@ -202,6 +249,14 @@ export const FeedCard = memo(function FeedCard({
           </View>
         ) : null}
 
+        {heroAsset && isLivePhotoAsset(heroAsset) ? (
+          <LiveHeroOverlay
+            asset={heroAsset}
+            circleId={share.circleId}
+            onPress={handlePress}
+          />
+        ) : null}
+
         {/* Date "postcard stamp" — top right */}
         <View style={[styles.dateStamp, { backgroundColor: theme.surface }]}>
           <Text
@@ -219,7 +274,7 @@ export const FeedCard = memo(function FeedCard({
           </Text>
         </View>
 
-        {/* Video / multi-asset meta — top left */}
+        {/* Video / Live Photo / multi-asset meta — top left */}
         {heroAsset?.kind === 'video' ? (
           <View style={styles.topLeftChip}>
             <Ionicons name="play" size={12} color="#FFFFFF" />
@@ -228,6 +283,13 @@ export const FeedCard = memo(function FeedCard({
                 Video
               </Text>
             </T>
+          </View>
+        ) : isLivePhotoAsset(heroAsset) ? (
+          <View style={styles.topLeftChip}>
+            <Ionicons name="disc-outline" size={12} color="#FFFFFF" />
+            <Text allowFontScaling={false} style={styles.topLeftChipText}>
+              LIVE
+            </Text>
           </View>
         ) : hasMultipleAssets ? (
           <View style={styles.topLeftChip}>
@@ -241,7 +303,7 @@ export const FeedCard = memo(function FeedCard({
 
       {/* Author row */}
       <View style={styles.authorRow}>
-        <Avatar name={share.authorName ?? '?'} imageUrl={authorImageUrl} size="sm" />
+        <Avatar name={share.authorName ?? '?'} image={authorImage} size="sm" />
         <View style={styles.authorInfo}>
           <Text
             style={[styles.authorName, { color: theme.text }]}

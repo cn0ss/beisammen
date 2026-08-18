@@ -3,6 +3,7 @@ import { Redirect, Stack } from 'expo-router';
 
 import { CryptoGate } from '@/components/crypto/CryptoGate';
 import { useSession } from '@/features/auth/session-provider';
+import { useDecryptedCacheReconciliation } from '@/features/media/use-decrypted-cache-reconciliation';
 import { usePushNotifications } from '@/features/notifications/use-push-notifications';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -11,6 +12,7 @@ export default function AppLayout() {
   const convexAuth = useConvexAuth();
   const theme = useTheme();
   usePushNotifications();
+  useDecryptedCacheReconciliation();
 
   if (!isReady || (session && (convexAuth.isLoading || !convexAuth.isAuthenticated))) {
     return null;

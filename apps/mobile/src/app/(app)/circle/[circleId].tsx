@@ -33,11 +33,11 @@ import { enterSection } from '@/lib/motion';
 import type { CircleInviteRecord, CircleMemberRecord } from '@/features/convex/api';
 import { useSession } from '@/features/auth/session-provider';
 import { api } from '@/features/convex/api';
-import { useCrypto } from '@/features/crypto/provider';
-import { rotateCircleKeyAfterMemberRemoval } from '@/features/crypto/rotation';
+import { rotateCircleKeyNow } from '@/features/crypto/rotation';
 import { inviteModeLabel } from '@/features/invites/preview-state';
 import { formatBytes, optimizePickerAsset, uploadPreparedFile } from '@/features/media/client';
-import { useCircleImageUrl } from '@/features/media/use-circle-image-url';
+import { clearCircleDecryptedMedia } from '@/features/media/decrypted-cache';
+import { useCircleImage } from '@/features/media/use-circle-image-url';
 import { buildMemoryViewerHref } from '@/features/memories/timeline';
 import { MemoryTile } from '@/features/memories/MemoryTile';
 import { useTheme } from '@/hooks/use-theme';
@@ -107,7 +107,6 @@ export default function CircleManagementScreen() {
   const m = useMessages();
   const { setActiveCircleId } = useSession();
   const convex = useConvex();
-  const crypto = useCrypto();
   const convexAuth = useConvexAuth();
   const params = useLocalSearchParams<{ circleId?: string | string[] }>();
   const circleId = firstParam(params.circleId);
@@ -142,7 +141,7 @@ export default function CircleManagementScreen() {
   const [isLeaving, setIsLeaving] = useState(false);
   const [isImageBusy, setIsImageBusy] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const imageUrl = useCircleImageUrl(circle?._id, Boolean(circle?.hasImage));
+  const image = useCircleImage(circle?._id, circle?.imageKey);
   const { width: windowWidth } = useWindowDimensions();
   // Screen padding + card padding on both sides, two gaps between three tiles.
   const mediaTileSize = Math.floor(
@@ -364,16 +363,14 @@ export default function CircleManagementScreen() {
                 .then(() => {
                   setFeedback(gt('{name} wurde entfernt.', { name: member.displayName }));
 
-                  // Best-effort E2EE key rotation so the removed member cannot
-                  // read future media. Failures are logged and never block the
-                  // removal UX (see docs/e2ee.md).
-                  if (crypto.status === 'ready' && crypto.userKeys) {
-                    void rotateCircleKeyAfterMemberRemoval({
-                      convex,
-                      circleId: circleId!,
-                      userKeys: crypto.userKeys,
-                    });
-                  }
+                  // Immediate E2EE key rotation so uploads are not gated on
+                  // another admin coming online; the server keeps encrypted
+                  // uploads blocked until a rotation lands (see docs/e2ee.md),
+                  // so a failure here never compromises confidentiality.
+                  void rotateCircleKeyNow({
+                    convex,
+                    circleId: circleId!,
+                  });
                 })
                 .catch((error) => {
                   setFeedback(
@@ -390,7 +387,7 @@ export default function CircleManagementScreen() {
         ],
       );
     },
-    [circleId, convex, crypto.status, crypto.userKeys, gt, removeMember],
+    [circleId, convex, gt, removeMember],
   );
 
   const handleTransferOwnership = useCallback(
@@ -489,6 +486,10 @@ export default function CircleManagementScreen() {
             setFeedback(null);
             void leaveCircle({ circleId })
               .then(() => {
+                // Drop the circle's decrypted plaintext right away; removals
+                // while the app was closed are caught by the start-up
+                // reconciliation instead.
+                void clearCircleDecryptedMedia(circleId).catch(() => undefined);
                 setActiveCircleId(null);
                 router.replace('/settings');
               })
@@ -623,7 +624,7 @@ export default function CircleManagementScreen() {
               </View>
 
               <View style={styles.heroRow}>
-                <Avatar name={circle.name} imageUrl={imageUrl} size="lg" />
+                <Avatar name={circle.name} image={image} size="lg" />
                 <View style={styles.heroCopy}>
                   <Text style={[styles.heroTitle, { color: theme.text }]}>{circle.name}</Text>
                   <T>
@@ -939,7 +940,7 @@ function MemberRow({
         },
       ]}
     >
-      <Avatar name={member.displayName} imageUrl={member.avatarUrl ?? null} size="sm" />
+      <Avatar name={member.displayName} image={member.avatarUrl ?? null} size="sm" />
       <View style={styles.rowCopy}>
         <View style={styles.inlineRow}>
           <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>

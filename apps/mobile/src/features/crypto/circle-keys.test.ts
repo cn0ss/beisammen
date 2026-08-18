@@ -11,7 +11,12 @@ import {
   type UserKeyBundle,
 } from '@beisammen/crypto';
 
-import { buildMissingGrantPayload, buildRotationPayload, ensureCircleKey } from './circle-keys';
+import {
+  buildMissingGrantPayload,
+  buildMissingGrantPayloadsByEpoch,
+  buildRotationPayload,
+  ensureCircleKey,
+} from './circle-keys';
 import type { UnlockedUserKeys } from './user-keys';
 
 let sodium: SodiumApi;
@@ -158,6 +163,53 @@ describe('ensureCircleKey', () => {
 
     expect(result).toEqual({ status: 'waiting-for-grant', currentEpoch: 1 });
   });
+
+  test('an unreadable current-epoch grant is rejected so it can be replaced', async () => {
+    const bundle = generateUserKeyBundle(sodium);
+    const otherBundle = generateUserKeyBundle(sodium);
+    const oldKey = generateCircleKey(sodium);
+    const poisonedKey = generateCircleKey(sodium);
+    const rejectKeyGrant = vi.fn().mockResolvedValue({ rejected: true });
+
+    const result = await ensureCircleKey({
+      sodium,
+      userKeys: unlockedKeys(bundle),
+      getMyCircleKeys: vi.fn().mockResolvedValue({
+        currentEpoch: 2,
+        grants: [
+          // Readable old epoch stays untouched; only the unreadable current
+          // grant (sealed to someone else's keys) is rejected server-side.
+          grantFor(oldKey, bundle, 1),
+          grantFor(poisonedKey, otherBundle, 2),
+        ],
+      }),
+      initializeCircleKey: vi.fn(),
+      rejectKeyGrant,
+    });
+
+    expect(result).toEqual({ status: 'waiting-for-grant', currentEpoch: 2 });
+    expect(rejectKeyGrant).toHaveBeenCalledTimes(1);
+    expect(rejectKeyGrant).toHaveBeenCalledWith(2);
+  });
+
+  test('a missing (not unreadable) current-epoch grant is not rejected', async () => {
+    const bundle = generateUserKeyBundle(sodium);
+    const oldKey = generateCircleKey(sodium);
+    const rejectKeyGrant = vi.fn();
+
+    const result = await ensureCircleKey({
+      sodium,
+      userKeys: unlockedKeys(bundle),
+      getMyCircleKeys: vi
+        .fn()
+        .mockResolvedValue({ currentEpoch: 2, grants: [grantFor(oldKey, bundle, 1)] }),
+      initializeCircleKey: vi.fn(),
+      rejectKeyGrant,
+    });
+
+    expect(result).toEqual({ status: 'waiting-for-grant', currentEpoch: 2 });
+    expect(rejectKeyGrant).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildMissingGrantPayload', () => {
@@ -180,6 +232,66 @@ describe('buildMissingGrantPayload', () => {
     });
 
     expect(opened).toEqual(circleKey);
+  });
+
+  test('a malformed public key skips that member without aborting the batch', () => {
+    const circleKey = generateCircleKey(sodium);
+    const memberBundle = generateUserKeyBundle(sodium);
+
+    const payload = buildMissingGrantPayload(sodium, circleKey, [
+      { userId: 'poisoned', publicKey: 'not-a-valid-key' },
+      { userId: 'with-keys', publicKey: toBase64(memberBundle.publicKey) },
+    ]);
+
+    expect(payload.map((entry) => entry.userId)).toEqual(['with-keys']);
+  });
+});
+
+describe('buildMissingGrantPayloadsByEpoch', () => {
+  test('seals each held epoch to its missing members and skips unheld epochs', () => {
+    const keyEpoch1 = generateCircleKey(sodium);
+    const keyEpoch2 = generateCircleKey(sodium);
+    const joiner = generateUserKeyBundle(sodium);
+
+    const payloads = buildMissingGrantPayloadsByEpoch(
+      sodium,
+      new Map([
+        [1, keyEpoch1],
+        [2, keyEpoch2],
+      ]),
+      [
+        { epoch: 3, members: [{ userId: 'joiner', publicKey: toBase64(joiner.publicKey) }] },
+        { epoch: 2, members: [{ userId: 'joiner', publicKey: toBase64(joiner.publicKey) }] },
+        { epoch: 1, members: [{ userId: 'joiner', publicKey: toBase64(joiner.publicKey) }] },
+      ],
+    );
+
+    // Epoch 3 is not held and gets no payload; 1 and 2 are both covered.
+    expect(payloads.map((payload) => payload.epoch)).toEqual([2, 1]);
+
+    for (const [epoch, circleKey] of [
+      [2, keyEpoch2],
+      [1, keyEpoch1],
+    ] as const) {
+      const grant = payloads.find((payload) => payload.epoch === epoch)!.grants[0]!;
+      const opened = openCircleKeyGrant(sodium, {
+        sealedCircleKey: grant.sealedCircleKey,
+        publicKey: joiner.publicKey,
+        privateKey: joiner.privateKey,
+      });
+
+      expect(opened).toEqual(circleKey);
+    }
+  });
+
+  test('members without keys produce no payload entry for that epoch', () => {
+    const payloads = buildMissingGrantPayloadsByEpoch(
+      sodium,
+      new Map([[1, generateCircleKey(sodium)]]),
+      [{ epoch: 1, members: [{ userId: 'keyless', publicKey: null }] }],
+    );
+
+    expect(payloads).toEqual([]);
   });
 });
 
@@ -210,5 +322,17 @@ describe('buildRotationPayload', () => {
 
       expect(opened).toEqual(rotation.circleKey);
     }
+  });
+
+  test('a malformed public key is skipped so rotation still reaches everyone else', () => {
+    const self = generateUserKeyBundle(sodium);
+
+    const rotation = buildRotationPayload(sodium, [
+      { userId: 'self', publicKey: toBase64(self.publicKey) },
+      { userId: 'poisoned', publicKey: 'definitely!not@base64' },
+    ]);
+
+    expect(rotation.grants.map((grant) => grant.userId)).toEqual(['self']);
+    expect(rotation.skippedUserIds).toEqual(['poisoned']);
   });
 });

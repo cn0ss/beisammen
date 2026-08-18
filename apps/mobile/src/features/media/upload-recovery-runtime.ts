@@ -122,7 +122,11 @@ export async function prepareUploadEncryptionTargets(input: {
   instanceUrl: string;
   shareBatchId: string;
   queueId: string;
-}): Promise<{ encryptedUri: string; encryptedPreviewUri: string } | null> {
+}): Promise<{
+  encryptedUri: string;
+  encryptedPreviewUri: string;
+  encryptedPairedVideoUri: string;
+} | null> {
   if (!recoveryRootAvailable()) {
     return null;
   }
@@ -136,6 +140,7 @@ export async function prepareUploadEncryptionTargets(input: {
   return {
     encryptedUri: `${directory}${safeFileName(input.queueId)}-encrypted.bin`,
     encryptedPreviewUri: `${directory}${safeFileName(input.queueId)}-encrypted-preview.bin`,
+    encryptedPairedVideoUri: `${directory}${safeFileName(input.queueId)}-encrypted-paired.bin`,
   };
 }
 

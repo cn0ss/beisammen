@@ -487,6 +487,7 @@ export interface CircleUsageBreakdownItem {
   circleId: string;
   name: string;
   hasImage: boolean;
+  imageKey?: string;
   isOwner: boolean;
   memberCount: number;
   imageCount: number;
@@ -509,17 +510,25 @@ export interface CreateUploadTargetInput {
   sizeBytes: number;
   /** Exact byte size of the compressed preview JPEG; signed into its PUT. */
   previewSizeBytes: number;
+  /**
+   * Exact byte size of a Live Photo's companion clip; signed into its own
+   * PUT. Only valid together with `pairedVideoMimeType` on image uploads.
+   */
+  pairedVideoSizeBytes?: number;
+  pairedVideoMimeType?: string;
 }
 
 export interface CompleteUploadInput {
   uploadId: string;
   objectKey?: string;
   previewObjectKey?: string;
+  pairedVideoObjectKey?: string;
   fileName?: string;
   sizeBytes?: number;
   width?: number;
   height?: number;
   durationSeconds?: number;
+  pairedVideoDurationSeconds?: number;
   location?: MediaLocation;
   capturedAt?: number;
 }

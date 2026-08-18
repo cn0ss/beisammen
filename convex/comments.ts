@@ -11,6 +11,7 @@ import {
   engagementTargetKey,
   requirePublishedEngagementTarget,
 } from './lib/engagement';
+import { imageCacheKey } from './lib/storage/shared';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
 export const commentFunctionSurface = [
@@ -54,6 +55,7 @@ async function mapComment(
     authorName: author?.displayName ?? author?.email ?? 'Unbekannt',
     authorAvatarUrl: author?.avatarUrl,
     authorHasProfileImage: Boolean(author?.profileImageStorage),
+    authorProfileImageKey: imageCacheKey(author?.profileImageStorage),
     body: input.comment.body,
     createdAt: input.comment.createdAt,
     updatedAt: input.comment.updatedAt,

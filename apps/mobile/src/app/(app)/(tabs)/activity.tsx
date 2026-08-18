@@ -21,7 +21,7 @@ import { enterListItem, enterSection } from '@/lib/motion';
 import type { ActivityInboxItemRecord } from '@/features/convex/api';
 import { api } from '@/features/convex/api';
 import { buildShareDetailHref } from '@/features/engagement/navigation';
-import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
+import { useUserProfileImage } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 function activityIcon(type: ActivityInboxItemRecord['type']): keyof typeof Ionicons.glyphMap {
@@ -47,7 +47,7 @@ const ActivityInboxRow = memo(function ActivityInboxRow({
   const gt = useGT();
   const theme = useTheme();
   const isUnread = item.status === 'unread';
-  const customProfileImageUrl = useUserProfileImageUrl(item.actorId, item.actorHasProfileImage);
+  const customProfileImage = useUserProfileImage(item.actorId, item.actorProfileImageKey);
 
   return (
     <Pressable
@@ -65,7 +65,7 @@ const ActivityInboxRow = memo(function ActivityInboxRow({
     >
       <Avatar
         name={item.actorName}
-        imageUrl={customProfileImageUrl ?? item.actorAvatarUrl ?? null}
+        image={customProfileImage ?? item.actorAvatarUrl ?? null}
         size="sm"
       />
       <View style={styles.rowCopy}>

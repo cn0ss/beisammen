@@ -6,16 +6,19 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Avatar, Button } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ActivityEventRecord } from '@/features/convex/api';
-import { useUserProfileImageUrl } from '@/features/media/use-user-profile-image-url';
+import { useUserProfileImage } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 
 type ActivityStatus = 'LoadingFirstPage' | 'CanLoadMore' | 'LoadingMore' | 'Exhausted';
+
+/** The strip is a bounded preview; the activity tab holds the full history. */
+const MAX_PREVIEW_ITEMS = 6;
 
 interface ActivityStripProps {
   activities: ActivityEventRecord[];
   status: ActivityStatus;
   onOpenShare: (shareBatchId: string, assetId?: string | null) => void;
-  onLoadMore: () => void;
+  onOpenActivityTab: () => void;
 }
 
 function activityIcon(type: ActivityEventRecord['type']): keyof typeof Ionicons.glyphMap {
@@ -42,9 +45,9 @@ const ActivityRow = memo(function ActivityRow({
 }) {
   const theme = useTheme();
   const gt = useGT();
-  const customProfileImageUrl = useUserProfileImageUrl(
+  const customProfileImage = useUserProfileImage(
     activity.actorId,
-    activity.actorHasProfileImage,
+    activity.actorProfileImageKey,
   );
 
   return (
@@ -63,7 +66,7 @@ const ActivityRow = memo(function ActivityRow({
     >
       <Avatar
         name={activity.actorName}
-        imageUrl={customProfileImageUrl ?? activity.actorAvatarUrl ?? null}
+        image={customProfileImage ?? activity.actorAvatarUrl ?? null}
         size="sm"
       />
       <View style={styles.rowCopy}>
@@ -87,15 +90,14 @@ const ActivityRow = memo(function ActivityRow({
 
 export const ActivityStrip = memo(function ActivityStrip({
   activities,
-  onLoadMore,
+  onOpenActivityTab,
   onOpenShare,
   status,
 }: ActivityStripProps) {
   const theme = useTheme();
   const gt = useGT();
   const isLoadingFirstPage = status === 'LoadingFirstPage';
-  const isLoadingMore = status === 'LoadingMore';
-  const canLoadMore = status !== 'Exhausted';
+  const previewActivities = activities.slice(0, MAX_PREVIEW_ITEMS);
 
   return (
     <View style={styles.wrapper}>
@@ -104,7 +106,7 @@ export const ActivityStrip = memo(function ActivityStrip({
           <Text style={[styles.eyebrow, { color: theme.textTertiary }]}>Aktivität</Text>
         </T>
         <Text style={[styles.count, { color: theme.textTertiary }]}>
-          {activities.length.toString().padStart(2, '0')}
+          {previewActivities.length.toString().padStart(2, '0')}
         </Text>
       </View>
 
@@ -113,12 +115,12 @@ export const ActivityStrip = memo(function ActivityStrip({
           <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color={theme.primary} />
           </View>
-        ) : activities.length > 0 ? (
-          activities.map((activity, index) => (
+        ) : previewActivities.length > 0 ? (
+          previewActivities.map((activity, index) => (
             <ActivityRow
               key={activity._id}
               activity={activity}
-              hasSeparator={index < activities.length - 1}
+              hasSeparator={index < previewActivities.length - 1}
               onOpenShare={onOpenShare}
             />
           ))
@@ -134,14 +136,12 @@ export const ActivityStrip = memo(function ActivityStrip({
         )}
       </View>
 
-      {activities.length > 0 && canLoadMore ? (
+      {previewActivities.length > 0 ? (
         <Button
-          label={isLoadingMore ? gt('Lädt...') : gt('Mehr Aktivität')}
-          icon="chevron-down-outline"
+          label={gt('Alle Aktivitäten')}
+          icon="arrow-forward-outline"
           variant="outline"
-          loading={isLoadingMore}
-          disabled={isLoadingMore}
-          onPress={onLoadMore}
+          onPress={onOpenActivityTab}
         />
       ) : null}
     </View>

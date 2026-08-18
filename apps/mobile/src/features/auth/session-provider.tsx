@@ -6,8 +6,21 @@ import type { AppSession, InstanceConfig } from '@beisammen/contracts';
 
 import { logOutPurchases } from '@/features/billing/purchases';
 import { InstanceProvider, useInstance } from '@/features/instances/instance-provider';
+import { clearAvatarImageCache } from '@/features/media/avatar-image-cache';
+import { clearShareDownloads } from '@/features/media/client';
+import { clearDecryptedMediaCache } from '@/features/media/decrypted-cache';
 import { clearUploadRecoveryForInstance } from '@/features/media/upload-recovery-runtime';
 import { createLogger } from '@/lib/logger';
+
+/**
+ * Removes all locally persisted media plaintext and avatars (decrypted display
+ * cache, save/share downloads, and the expo-image avatar cache). Runs whenever
+ * the authorized session ends, so files the session was authorized to see do
+ * not survive into the next session, a device backup, or another account.
+ */
+async function clearLocalPlaintextMedia(): Promise<void> {
+  await Promise.all([clearDecryptedMediaCache(), clearShareDownloads(), clearAvatarImageCache()]);
+}
 
 const logger = createLogger('auth.session');
 
@@ -67,6 +80,9 @@ function SessionBridge({ children }: PropsWithChildren) {
         error,
       });
     });
+    await clearLocalPlaintextMedia().catch((error) => {
+      logger.warn('Failed to clear local plaintext media during sign-out', { error });
+    });
     await logOutPurchases();
     await clerk.signOut();
     instanceContext.setActiveCircleId(null);
@@ -89,6 +105,9 @@ function SessionBridge({ children }: PropsWithChildren) {
       nextInstance.instance.baseUrl !== instance.instance.baseUrl;
 
     if (isSwitching && isSignedIn) {
+      await clearLocalPlaintextMedia().catch((error) => {
+        logger.warn('Failed to clear local plaintext media while switching instance', { error });
+      });
       await logOutPurchases();
       await clerk.signOut().catch((error) => {
         logger.warn('Failed to sign out of Clerk while switching instance', { error });
