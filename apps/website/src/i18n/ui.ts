@@ -153,7 +153,7 @@ export const dict: Record<Locale, Dictionary> = {
           reply: { initial: 'K', name: 'Kim', text: 'I want to go back already.', time: '16:08' },
           facts: [
             'Visible to exactly 5 people',
-            'Nothing gets sorted or recommended',
+            'Nothing fights for your attention',
             'Stays until you delete it',
           ],
         },
@@ -183,8 +183,8 @@ export const dict: Record<Locale, Dictionary> = {
           body: 'Every circle starts empty. You decide who joins. Nobody else, ever.',
         },
         {
-          title: 'No algorithm',
-          body: 'Your photos appear in the order life happened. Nothing is ranked, nothing is recommended.',
+          title: 'No feed algorithm',
+          body: 'Your photos appear in the order life happened. Nothing is optimized for engagement, nothing fights for your attention.',
         },
         {
           title: 'End-to-end encrypted',
@@ -288,7 +288,7 @@ export const dict: Record<Locale, Dictionary> = {
           reply: { initial: 'K', name: 'Kim', text: 'Da will ich gleich wieder hin.', time: '16:08' },
           facts: [
             'Sichtbar für genau 5 Personen',
-            'Nichts wird sortiert oder empfohlen',
+            'Nichts kämpft um eure Aufmerksamkeit',
             'Bleibt, bis ihr es löscht',
           ],
         },
@@ -318,8 +318,8 @@ export const dict: Record<Locale, Dictionary> = {
           body: 'Jeder Kreis beginnt leer. Wer dazukommt, entscheidet ihr. Niemand sonst.',
         },
         {
-          title: 'Kein Algorithmus',
-          body: 'Eure Fotos erscheinen in der Reihenfolge, in der das Leben passiert ist. Nichts wird sortiert, nichts wird empfohlen.',
+          title: 'Kein Feed-Algorithmus',
+          body: 'Eure Fotos erscheinen in der Reihenfolge, in der das Leben passiert ist. Nichts wird auf Engagement optimiert, nichts kämpft um eure Aufmerksamkeit.',
         },
         {
           title: 'Ende-zu-Ende-verschlüsselt',
