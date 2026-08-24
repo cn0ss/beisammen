@@ -69,6 +69,88 @@ export function isBillingConfigured(): boolean {
   return Boolean(value && value.trim().length > 0);
 }
 
+const REVENUECAT_REST_BASE_URL = 'https://api.revenuecat.com/v1';
+
+function readRevenueCatApiKey(): string | null {
+  const value = process.env.REVENUECAT_API_KEY?.trim();
+
+  return value && value.length > 0 ? value : null;
+}
+
+/**
+ * True when the deployment can pull subscriber state from the RevenueCat REST
+ * API (`REVENUECAT_API_KEY`). Webhooks stay the primary sync path; this
+ * enables the on-demand reconciliation used right after purchases.
+ */
+export function isRevenueCatSyncConfigured(): boolean {
+  return readRevenueCatApiKey() !== null;
+}
+
+export type RevenueCatSyncStatus = 'synced' | 'not_configured' | 'failed';
+
+/**
+ * Pulls the owner's current subscriber record from the RevenueCat REST API and
+ * mirrors it into the RevenueCat component, idempotently. Webhooks can lag or
+ * be misconfigured; the client calls this right after a purchase or restore so
+ * entitlement-gated features (circle creation, uploads) unlock immediately
+ * instead of waiting on webhook delivery.
+ */
+export async function syncOwnerFromRevenueCat(
+  ctx: RunMutationCtx,
+  ownerId: Id<'users'>,
+): Promise<RevenueCatSyncStatus> {
+  const apiKey = readRevenueCatApiKey();
+
+  if (!apiKey) {
+    return 'not_configured';
+  }
+
+  const appUserId = ownerCustomerId(ownerId);
+
+  try {
+    const response = await fetch(
+      `${REVENUECAT_REST_BASE_URL}/subscribers/${encodeURIComponent(appUserId)}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: 'application/json',
+        },
+      },
+    );
+
+    if (!response.ok) {
+      console.warn(
+        `[billing] RevenueCat subscriber fetch failed for ${appUserId}: HTTP ${response.status}`,
+      );
+      return 'failed';
+    }
+
+    const payload = (await response.json()) as { subscriber?: unknown };
+
+    if (!payload.subscriber || typeof payload.subscriber !== 'object') {
+      console.warn(`[billing] RevenueCat subscriber payload missing for ${appUserId}`);
+      return 'failed';
+    }
+
+    await revenuecat.syncSubscriber(ctx, {
+      appUserId,
+      subscriber: payload.subscriber as Parameters<
+        typeof revenuecat.syncSubscriber
+      >[1]['subscriber'],
+    });
+
+    return 'synced';
+  } catch (error) {
+    console.warn(
+      `[billing] RevenueCat subscriber sync failed for ${appUserId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return 'failed';
+  }
+}
+
 function billingOwnerFromUser(user: Doc<'users'>): BillingOwner {
   return {
     _id: user._id,

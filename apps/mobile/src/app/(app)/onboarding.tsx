@@ -17,6 +17,7 @@ import { T, Var, useGT, useMessages } from 'gt-react-native';
 
 import { useConvexAuth, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 
+import { LegalLinks } from '@/components/billing/LegalLinks';
 import { Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { InviteComposer, type InviteComposerSubmitArgs } from '@/components/invites/InviteComposer';
 import { CelebrationBurst } from '@/components/onboarding/CelebrationBurst';
@@ -30,6 +31,7 @@ import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { useSession } from '@/features/auth/session-provider';
 import { circleCreationNotice } from '@/features/billing/circle-creation-readiness';
 import { usePlanPaywall } from '@/features/billing/use-plan-paywall';
+import { useEntitlementReconciliation } from '@/features/billing/use-purchase-sync';
 import { api } from '@/features/convex/api';
 import { parseInviteToken } from '@/features/invites/parse-invite-token';
 import { useMarkInteractive } from '@/features/observe/interactive';
@@ -99,6 +101,10 @@ export default function OnboardingScreen() {
   const hasExistingCircle = circlesPage.results.length > 0;
   const isLoading = hasViewer && circlesPage.status === 'LoadingFirstPage';
   const creationBlockedNotice = createdCircle ? null : circleCreationNotice(creationReadiness);
+
+  // A purchase the backend has not seen yet (webhook lag) must not block
+  // onboarding: reconcile against the store once while the plan gate shows.
+  useEntitlementReconciliation(creationReadiness);
 
   useMarkInteractive(
     !pendingInviteToken &&
@@ -372,15 +378,18 @@ export default function OnboardingScreen() {
                       {m(creationBlockedNotice.message)}
                     </Text>
                     {creationBlockedNotice.action === 'choose_plan' ? (
-                      <Button
-                        label={gt('Tarife ansehen')}
-                        icon="sparkles-outline"
-                        variant="outline"
-                        loading={isPresentingPaywall}
-                        onPress={() => {
-                          void presentPaywall();
-                        }}
-                      />
+                      <>
+                        <Button
+                          label={gt('Tarife ansehen')}
+                          icon="sparkles-outline"
+                          variant="outline"
+                          loading={isPresentingPaywall}
+                          onPress={() => {
+                            void presentPaywall();
+                          }}
+                        />
+                        <LegalLinks />
+                      </>
                     ) : null}
                   </>
                 ) : null}

@@ -15,12 +15,14 @@ import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { enterSection } from '@/lib/motion';
 import { configurePurchases } from '@/features/billing/purchases';
 import { usePlanPaywall } from '@/features/billing/use-plan-paywall';
+import { useSyncPurchases } from '@/features/billing/use-purchase-sync';
 import { api } from '@/features/convex/api';
 import { formatBytes } from '@/features/media/client';
 import { useDateFormat } from '@/i18n/use-date-format';
 import { useTheme } from '@/hooks/use-theme';
 
 import { Button, Card, FeedbackToast, LoadingBox, SectionHeader } from '@/components/ui';
+import { LegalLinks } from '@/components/billing/LegalLinks';
 import { CircleUsageList } from '@/components/settings/CircleUsageList';
 import { SettingsScreenHeader } from '@/components/settings/SettingsScreenHeader';
 import { UsageMeter } from '@/components/settings/UsageMeter';
@@ -44,6 +46,7 @@ export default function PlanScreen() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isBillingBusy, setIsBillingBusy] = useState(false);
   const { present: presentPaywall } = usePlanPaywall(setFeedback);
+  const syncPurchases = useSyncPurchases();
 
   const handleShowPaywall = useCallback(async () => {
     setIsBillingBusy(true);
@@ -89,6 +92,9 @@ export default function PlanScreen() {
       const restoredCount = Object.keys(customerInfo.entitlements.active).length;
 
       if (restoredCount > 0) {
+        // Mirror the restored entitlement into Convex right away instead of
+        // waiting for the RevenueCat webhook.
+        await syncPurchases();
         setFeedback(gt('Käufe wurden wiederhergestellt.'));
       } else {
         setFeedback(gt('Für dieses Store-Konto wurden keine aktiven Käufe gefunden.'));
@@ -100,7 +106,7 @@ export default function PlanScreen() {
     } finally {
       setIsBillingBusy(false);
     }
-  }, [gt]);
+  }, [gt, syncPurchases]);
 
   const handleDismissFeedback = useCallback(() => setFeedback(null), []);
 
@@ -242,9 +248,12 @@ export default function PlanScreen() {
               </View>
               <T>
                 <Text style={[styles.finePrint, { color: theme.textTertiary }]}>
-                  Jederzeit kündbar. Ein Tarif deckt alle Mitglieder deiner Circles ab.
+                  Jederzeit kündbar. Ein Tarif deckt alle Mitglieder deiner Circles ab. Abos
+                  verlängern sich automatisch, bis sie in den Store-Einstellungen gekündigt
+                  werden.
                 </Text>
               </T>
+              <LegalLinks style={styles.legalLinks} />
             </Card>
           </Animated.View>
         ) : null}
@@ -396,5 +405,8 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     lineHeight: 16,
     textAlign: 'center',
+  },
+  legalLinks: {
+    marginTop: Spacing.xs,
   },
 });

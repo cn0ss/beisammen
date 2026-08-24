@@ -78,6 +78,26 @@ export async function logInPurchases(convexUserId: string): Promise<void> {
   }
 }
 
+/**
+ * True when the store (RevenueCat customer info) reports at least one active
+ * entitlement for the current customer. Used to detect backend plan state that
+ * lags behind a completed purchase.
+ */
+export async function hasActiveStoreEntitlement(): Promise<boolean> {
+  if (!configurePurchases()) {
+    return false;
+  }
+
+  try {
+    const customerInfo = await Purchases.getCustomerInfo();
+
+    return Object.keys(customerInfo.entitlements.active).length > 0;
+  } catch (error) {
+    logger.debug('Could not read store entitlements', { error });
+    return false;
+  }
+}
+
 export async function logOutPurchases(): Promise<void> {
   if (!configured) {
     return;

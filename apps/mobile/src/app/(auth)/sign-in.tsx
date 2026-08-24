@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSignIn, useSignUp, useSSO } from '@clerk/expo';
+import * as AuthSession from 'expo-auth-session';
 import { Redirect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { T, Var, msg, useGT, useMessages } from 'gt-react-native';
@@ -30,6 +31,7 @@ import { defaultInstanceConfig } from '@/features/instances/catalog';
 import { resolveInstanceConfig } from '@/features/instances/discovery';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
+import { appEnv } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 import { enterSection, exitFade, settleLayout } from '@/lib/motion';
 
@@ -40,6 +42,16 @@ const logger = createLogger('auth.sign-in');
 type AuthMode = 'sign-in' | 'sign-up' | 'verify-email' | 'verify-device';
 
 const signInFailedMessage = msg('Anmeldung fehlgeschlagen.');
+
+/**
+ * Native SSO callback. Clerk rejects the sign-in ("Redirect url mismatch")
+ * unless this exact URL is allowlisted under Native Applications for the
+ * instance, so keep it explicit and stable: `beisammen://sso-callback`.
+ */
+const ssoRedirectUrl = AuthSession.makeRedirectUri({
+  scheme: appEnv.appScheme,
+  path: 'sso-callback',
+});
 
 function authErrorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'errors' in error) {
@@ -378,7 +390,10 @@ export default function SignInScreen() {
     setAuthError(null);
 
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({ strategy });
+      const { createdSessionId, setActive } = await startSSOFlow({
+        strategy,
+        redirectUrl: ssoRedirectUrl,
+      });
 
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });

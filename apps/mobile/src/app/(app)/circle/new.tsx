@@ -17,12 +17,14 @@ import { T, useGT, useMessages } from 'gt-react-native';
 
 import { useConvexAuth, useMutation, useQuery } from 'convex/react';
 
+import { LegalLinks } from '@/components/billing/LegalLinks';
 import { Button, Card, FeedbackToast, LoadingBox } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { enterSection } from '@/lib/motion';
 import { useSession } from '@/features/auth/session-provider';
 import { circleCreationNotice } from '@/features/billing/circle-creation-readiness';
 import { usePlanPaywall } from '@/features/billing/use-plan-paywall';
+import { useEntitlementReconciliation } from '@/features/billing/use-purchase-sync';
 import { api } from '@/features/convex/api';
 import { userFacingErrorMessage } from '@/lib/user-facing-error';
 import { useTheme } from '@/hooks/use-theme';
@@ -49,6 +51,10 @@ export default function NewCircleScreen() {
 
   const isLoadingReadiness = !hasViewer || creationReadiness === undefined;
   const notice = circleCreationNotice(creationReadiness);
+
+  // A purchase the backend has not seen yet (webhook lag) must not block the
+  // form: reconcile against the store once while the plan gate is showing.
+  useEntitlementReconciliation(creationReadiness);
   const needsPlan = notice?.action === 'choose_plan';
 
   // The page is the paywall guard for every create-circle entry point: users
@@ -175,6 +181,7 @@ export default function NewCircleScreen() {
                     }}
                   />
                 </View>
+                <LegalLinks />
               </Card>
             </Animated.View>
           ) : (

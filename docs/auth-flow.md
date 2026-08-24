@@ -17,6 +17,11 @@
 4. The sign-in screen drives a custom flow with Clerk hooks: email + password
    (`useSignIn().signIn.password`), sign-up with email-code verification
    (`useSignUp()`), and Google/Apple SSO (`useSSO().startSSOFlow`).
+   SSO passes the explicit native redirect URL `<scheme>://sso-callback`
+   (`beisammen://sso-callback` for official builds). Clerk rejects the sign-in
+   with "Redirect url mismatch" unless that exact URL is allowlisted in the
+   Clerk Dashboard under **Native Applications** (Backend API
+   `/redirect_urls`) for the instance, on development and production alike.
 5. `ConvexProviderWithClerk` (from `convex/react-clerk`) fetches Convex JWTs
    from the `convex` template and keeps the Convex client authenticated.
 6. The client stores only the active instance config and pending invite tokens;

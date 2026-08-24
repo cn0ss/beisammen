@@ -4,10 +4,12 @@ import type {
   BillingStatus,
   CircleCreationReadiness,
   CircleUploadReadiness,
+  PurchaseSyncResult,
 } from '@beisammen/contracts';
 
+import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
-import { internalQuery, query } from './_generated/server';
+import { action, internalQuery, query } from './_generated/server';
 import { countOwnedCircles } from './billingUsage';
 import { CLOUD_PLAN_QUOTAS } from './lib/billing/plans';
 import {
@@ -20,6 +22,7 @@ import {
   requireCloudOwnerFeatureAccess,
   resolveCircleBillingOwner,
   resolveOwnerPlanTier,
+  syncOwnerFromRevenueCat,
 } from './lib/billing/quota';
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
@@ -29,6 +32,7 @@ export const billingFunctionSurface = [
   'billing.statusForCircle',
   'billing.uploadReadinessForCircle',
   'billing.circleCreationReadiness',
+  'billing.syncPurchases',
 ] as const;
 
 function selfHostedBillingStatus(): BillingStatus {
@@ -59,6 +63,51 @@ export const getCircleOwnerForBilling = internalQuery({
       entityId: args.circleId,
       viewerId: viewer._id as Id<'users'>,
       billingOwner,
+    };
+  },
+});
+
+export const getViewerForPurchaseSync = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<Id<'users'>> => {
+    const viewer = await requireViewer(ctx);
+
+    return viewer._id;
+  },
+});
+
+/**
+ * Reconciles the viewer's RevenueCat subscriber state into Convex on demand.
+ * The mobile app calls this right after a purchase or restore (and when the
+ * store reports an active entitlement the backend does not know about yet) so
+ * plan-gated features unlock without depending on webhook latency.
+ */
+export const syncPurchases = action({
+  args: {},
+  handler: async (ctx): Promise<PurchaseSyncResult> => {
+    const policy = getDeploymentPolicyFromEnv();
+
+    if (policy.isSelfHosted) {
+      return { status: 'self_hosted', activePlanId: null };
+    }
+
+    if (!isBillingConfigured()) {
+      return { status: 'billing_not_configured', activePlanId: null };
+    }
+
+    const viewerId: Id<'users'> = await ctx.runQuery(
+      internal.billing.getViewerForPurchaseSync,
+      {},
+    );
+    const status = await syncOwnerFromRevenueCat(ctx, viewerId);
+
+    if (status !== 'synced') {
+      return { status, activePlanId: null };
+    }
+
+    return {
+      status,
+      activePlanId: await resolveOwnerPlanTier(ctx, viewerId),
     };
   },
 });

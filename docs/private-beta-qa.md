@@ -8,8 +8,19 @@ application and an S3-compatible bucket (AWS S3, R2, B2 S3, or MinIO).
 - `EXPO_PUBLIC_DEFAULT_INSTANCE_URL` points at the Convex site URL.
 - `EXPO_PUBLIC_DEFAULT_CONVEX_URL` points at the matching Convex client URL.
 - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` carries the Clerk publishable key.
-- `CLERK_JWT_ISSUER_DOMAIN`, `PUBLIC_AUTH_PUBLISHABLE_KEY`, and
-  `REVENUECAT_WEBHOOK_AUTH` are configured on the Convex deployment.
+- `CLERK_JWT_ISSUER_DOMAIN`, `PUBLIC_AUTH_PUBLISHABLE_KEY`,
+  `REVENUECAT_WEBHOOK_AUTH`, and `REVENUECAT_API_KEY` are configured on the
+  Convex deployment.
+- The Clerk instance allowlists `beisammen://sso-callback` (Native
+  Applications) so Apple and Google sign-in complete instead of failing with
+  "Redirect url mismatch".
+- `@expo/dom-webview` is pinned in `apps/mobile/package.json` to the installed
+  Expo SDK line. Expo declares it only as an optional peer (`*`), so pnpm
+  otherwise keeps whatever stale version the lockfile has; a mismatched
+  version is still autolinked and crashes Android at startup
+  (`NoClassDefFoundError: expo.modules.kotlin.types.AnyTypeProvider`). After
+  any Expo SDK bump, run `npx expo-doctor` and smoke-test a **release** build
+  on Android before submitting to Google Play.
 - `S3_BUCKET`, credentials, and optional `S3_REGION`, `S3_ENDPOINT`, and `S3_BASE_PATH` are configured.
 - For Android release or development builds that render the Memories places
   map, enable Maps SDK for Android in Google Cloud and set

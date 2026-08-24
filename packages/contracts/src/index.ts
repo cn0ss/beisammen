@@ -254,6 +254,17 @@ export interface CircleCreationReadiness {
   maxCircles: number | null;
 }
 
+/** Result of `billing.syncPurchases`: on-demand RevenueCat → Convex reconciliation. */
+export interface PurchaseSyncResult {
+  status:
+    | 'synced'
+    | 'failed'
+    | 'not_configured'
+    | 'self_hosted'
+    | 'billing_not_configured';
+  activePlanId: string | null;
+}
+
 export interface NotificationDeviceRegistration {
   deviceId: string;
   instanceUrl: string;

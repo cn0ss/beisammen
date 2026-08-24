@@ -123,6 +123,12 @@ account deletion and admin purge paths still clean up its rows.
 - Convex setup requires `app.use(revenuecat)` in `convex/convex.config.ts`,
   the shared client in `convex/revenuecat.ts`, and `REVENUECAT_WEBHOOK_AUTH`
   set in the Convex environment (matching the webhook Authorization header).
+- `REVENUECAT_API_KEY` (a RevenueCat v1 API key; a secret key is preferred,
+  a public SDK key also works for the subscriber endpoint) enables
+  `billing.syncPurchases`: the app calls it right after a purchase or restore,
+  and when the store reports an active entitlement the backend does not know
+  yet, so plan-gated features unlock without depending on webhook delivery.
+  Without the key the action is a no-op and webhooks remain the only path.
 
 ## Future services
 

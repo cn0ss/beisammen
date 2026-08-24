@@ -8,6 +8,7 @@ const rcMocks = vi.hoisted(() => ({
   hasEntitlement: vi.fn(),
   getActiveSubscriptions: vi.fn(),
   getCustomer: vi.fn(),
+  syncSubscriber: vi.fn(),
 }));
 
 vi.mock('convex-revenuecat', async () => {
@@ -19,6 +20,7 @@ vi.mock('convex-revenuecat', async () => {
         hasEntitlement: rcMocks.hasEntitlement,
         getActiveSubscriptions: rcMocks.getActiveSubscriptions,
         getCustomer: rcMocks.getCustomer,
+        syncSubscriber: rcMocks.syncSubscriber,
         httpHandler: () =>
           httpActionGeneric(async () => new Response(null, { status: 501 })),
       };
@@ -508,6 +510,21 @@ async function withResendKey<T>(run: () => Promise<T>): Promise<T> {
       delete process.env.RESEND_API_KEY;
     } else {
       process.env.RESEND_API_KEY = originalKey;
+    }
+  }
+}
+
+async function withRevenueCatApiKey<T>(run: () => Promise<T>): Promise<T> {
+  const originalKey = process.env.REVENUECAT_API_KEY;
+  process.env.REVENUECAT_API_KEY = 'sk_test_revenuecat_key';
+
+  try {
+    return await run();
+  } finally {
+    if (originalKey === undefined) {
+      delete process.env.REVENUECAT_API_KEY;
+    } else {
+      process.env.REVENUECAT_API_KEY = originalKey;
     }
   }
 }
@@ -1098,6 +1115,7 @@ describe('deployment billing policy', () => {
       'billing.statusForCircle',
       'billing.uploadReadinessForCircle',
       'billing.circleCreationReadiness',
+      'billing.syncPurchases',
     ]);
   });
 
@@ -2016,6 +2034,107 @@ describe('circle authorization and stats', () => {
           usedCircles: 1,
           maxCircles: CLOUD_PLAN_QUOTAS.cloud_plus.maxCircles,
         });
+      });
+    });
+  });
+
+  test('syncPurchases pulls the subscriber from RevenueCat and mirrors it into Convex', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        await withRevenueCatApiKey(async () => {
+          mockEntitledTier(null);
+          rcMocks.syncSubscriber.mockReset();
+          const t = createTestDb();
+          const { user, viewer } = await upsertViewer(t, 'owner@example.com', 'Owner');
+          const subscriber = {
+            entitlements: {
+              cloud_plus: {
+                product_identifier: 'cloud_plus_monthly',
+                expires_date: '2999-01-01T00:00:00Z',
+                purchase_date: '2026-08-22T08:00:00Z',
+              },
+            },
+            subscriptions: {},
+            original_app_user_id: viewer._id,
+          };
+          const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({ subscriber }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          );
+          rcMocks.syncSubscriber.mockImplementation(async () => {
+            // The mirrored entitlement becomes visible to the tier lookup.
+            mockEntitledTier('cloud_plus');
+            return { subscriptions: 0, entitlements: 1, nonSubscriptions: 0 };
+          });
+
+          try {
+            await expect(user.action(api.billing.syncPurchases, {})).resolves.toEqual({
+              status: 'synced',
+              activePlanId: 'cloud_plus',
+            });
+
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+            expect(url).toBe(
+              `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(viewer._id)}`,
+            );
+            expect((init.headers as Record<string, string>).Authorization).toBe(
+              'Bearer sk_test_revenuecat_key',
+            );
+            expect(rcMocks.syncSubscriber).toHaveBeenCalledWith(expect.anything(), {
+              appUserId: viewer._id,
+              subscriber,
+            });
+          } finally {
+            fetchSpy.mockRestore();
+          }
+        });
+      });
+    });
+  });
+
+  test('syncPurchases reports failures without throwing and skips when unconfigured', async () => {
+    await withDeploymentKind('cloud', async () => {
+      await withRevenueCatSecret(async () => {
+        mockEntitledTier(null);
+        rcMocks.syncSubscriber.mockReset();
+        const t = createTestDb();
+        const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+        // Without REVENUECAT_API_KEY the action is a no-op.
+        await expect(user.action(api.billing.syncPurchases, {})).resolves.toEqual({
+          status: 'not_configured',
+          activePlanId: null,
+        });
+        expect(rcMocks.syncSubscriber).not.toHaveBeenCalled();
+
+        await withRevenueCatApiKey(async () => {
+          const fetchSpy = vi
+            .spyOn(globalThis, 'fetch')
+            .mockResolvedValue(new Response('nope', { status: 401 }));
+
+          try {
+            await expect(user.action(api.billing.syncPurchases, {})).resolves.toEqual({
+              status: 'failed',
+              activePlanId: null,
+            });
+            expect(rcMocks.syncSubscriber).not.toHaveBeenCalled();
+          } finally {
+            fetchSpy.mockRestore();
+          }
+        });
+      });
+    });
+
+    await withDeploymentKind('self-hosted', async () => {
+      const t = createTestDb();
+      const { user } = await upsertViewer(t, 'owner@example.com', 'Owner');
+
+      await expect(user.action(api.billing.syncPurchases, {})).resolves.toEqual({
+        status: 'self_hosted',
+        activePlanId: null,
       });
     });
   });

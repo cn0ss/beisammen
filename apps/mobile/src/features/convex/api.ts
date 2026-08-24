@@ -12,6 +12,7 @@ import type {
   NotificationDeviceRegistration,
   NotificationPreference,
   NotificationKind,
+  PurchaseSyncResult,
   SignedReadUrl,
   StorageReference,
   StorageUsageStats,
@@ -804,5 +805,10 @@ export const api = {
       Record<string, never>,
       CircleCreationReadiness | null
     >('billing:circleCreationReadiness'),
+    // Absent on self-hosted instances that predate on-demand purchase sync;
+    // callers treat failures as best-effort.
+    syncPurchases: makeFunctionReference<'action', Record<string, never>, PurchaseSyncResult>(
+      'billing:syncPurchases',
+    ),
   },
 } as const;
