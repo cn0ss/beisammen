@@ -19,8 +19,7 @@ import type {
   ShareDraftRecord,
 } from '@/features/convex/api';
 import { useCircleImage } from '@/features/media/use-circle-image-url';
-import { uploadReadinessNotice } from '@/features/media/upload-readiness';
-import type { CircleUploadReadiness } from '@beisammen/contracts';
+import type { UploadReadinessNotice } from '@/features/media/upload-readiness';
 import type { UploadQueueState } from '@beisammen/upload-client';
 
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
@@ -28,7 +27,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 import { AssetThumbnail } from '@/components/media/AssetThumbnail';
 import { FullscreenMediaViewer } from '@/components/share/FullscreenMediaViewer';
-import { Avatar, Button, LoadingBox } from '@/components/ui';
+import { Avatar, Button, FeedbackToast, LoadingBox } from '@/components/ui';
 
 const CAPTION_MAX_LENGTH = 240;
 
@@ -45,9 +44,17 @@ interface DraftSheetProps {
   canPublish: boolean;
   uploadQueue: UploadQueueState;
   persistedUploads: DraftUploadRecord[];
-  uploadReadiness?: CircleUploadReadiness | null;
+  /** Why the picker cannot open right now; rendered inline above the caption. */
+  uploadBlocker?: UploadReadinessNotice | null;
+  /**
+   * Feedback from the home screen. Rendered inside this sheet because the
+   * native modal hides anything drawn on the screen underneath.
+   */
+  feedback: string | null;
+  onDismissFeedback: () => void;
   onPickMedia: () => void;
   onOpenBilling?: () => void;
+  onRetryEncryption?: () => void;
   onPublish: () => void;
   onDeleteDraft: () => void;
   onDeleteAsset: (assetId: string) => void;
@@ -70,9 +77,12 @@ export const DraftSheet = memo(function DraftSheet({
   canPublish,
   uploadQueue,
   persistedUploads,
-  uploadReadiness,
+  uploadBlocker,
+  feedback,
+  onDismissFeedback,
   onPickMedia,
   onOpenBilling,
+  onRetryEncryption,
   onPublish,
   onDeleteDraft,
   onDeleteAsset,
@@ -86,7 +96,7 @@ export const DraftSheet = memo(function DraftSheet({
   const m = useMessages();
   const captionLength = caption.length;
   const circleImage = useCircleImage(circle?._id, circle?.imageKey);
-  const readinessNotice = uploadReadinessNotice(uploadReadiness);
+  const readinessNotice = uploadBlocker ?? null;
   // Fullscreen preview of an already uploaded draft asset; null = closed.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const draftAssets = draft?.assets ?? [];
@@ -205,7 +215,9 @@ export const DraftSheet = memo(function DraftSheet({
                       name={
                         readinessNotice.action === 'choose_plan'
                           ? 'card-outline'
-                          : 'information-circle-outline'
+                          : readinessNotice.action === 'retry_now'
+                            ? 'alert-circle-outline'
+                            : 'information-circle-outline'
                       }
                       size={18}
                       color={theme.accent}
@@ -225,6 +237,16 @@ export const DraftSheet = memo(function DraftSheet({
                           icon="card-outline"
                           variant="outline"
                           onPress={onOpenBilling}
+                        />
+                      </View>
+                    ) : null}
+                    {readinessNotice.action === 'retry_now' && onRetryEncryption ? (
+                      <View style={styles.readinessAction}>
+                        <Button
+                          label={gt('Erneut versuchen')}
+                          icon="refresh-outline"
+                          variant="outline"
+                          onPress={onRetryEncryption}
                         />
                       </View>
                     ) : null}
@@ -355,6 +377,12 @@ export const DraftSheet = memo(function DraftSheet({
             </>
           )}
         </ScrollView>
+
+        {feedback ? (
+          <View style={styles.feedback}>
+            <FeedbackToast message={feedback} onDismiss={onDismissFeedback} />
+          </View>
+        ) : null}
 
         {/* Fullscreen check of uploaded media before publishing; supports
             zoom, video playback, and Live Photo hold-to-play like the feed. */}
@@ -669,5 +697,9 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: Spacing.md,
+  },
+  feedback: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.xl,
   },
 });

@@ -88,6 +88,7 @@
       "t": "Text"
     }
   ],
+  "0c2ef13b071c625e": "Encryption unavailable",
   "0d493a71491198e6": "Your profile picture will be removed.",
   "0e1799c39336f1f8": "Purchase complete. Your plan is active.",
   "0f60b94afc3f71d2": "The file will be deleted from the draft and Storage.",
@@ -102,11 +103,6 @@
   "12315ddc0a51893d": "Join my Circle \"{circleName}\": {inviteLink}\n\nThis personal link is intended only for the invited email address.",
   "123568a1106c7b47": "Back to the app",
   "159ccebcaa61cf15": "This link contains neither an instance nor an invitation token.",
-  "162d472487db93b7": {
-    "c": "Cancel anytime. One plan covers all members of your Circles.",
-    "i": 1,
-    "t": "Text"
-  },
   "165e4ab92cebc5f8": {
     "c": "No media has been shared in this Circle yet.",
     "i": 1,
@@ -122,6 +118,7 @@
   },
   "1906256b127b760f": "Could not verify the instance.",
   "1999e12fd77b9f1d": "Live photo: Tap for full screen, press and hold to play",
+  "19ed643b0801eb29": "Could not open the media library.",
   "1a998c721ad22bc8": "Preparing...",
   "1af5a1cca29f5661": "Transfer",
   "1b347481910edf5f": "Usage by Circle",
@@ -500,7 +497,13 @@
   "5bcc41fbb52d25a8": "Show recovery code",
   "5c45875a72f4389f": "The account could not be completely deleted. Try again.",
   "5cbfa25cdac6844b": "Loading instance...",
+  "5d49f5355c86f3b4": {
+    "c": "Cancel anytime. One plan covers all members of your Circles. Subscriptions renew automatically until you cancel them in your store settings.",
+    "i": 1,
+    "t": "Text"
+  },
   "5e0a042031bf8aa2": "Please select a Circle first.",
+  "5e2d84e141864637": "Privacy Policy",
   "5ea094ed4519f04c": "Restore purchases",
   "5ee08db78e0dc180": "Profile picture removed.",
   "5f98b54b4ee842c6": {
@@ -694,6 +697,7 @@
   "7a998b229eea0db3": "Encryption is currently being set up. Try again in a moment.",
   "7b50bff7c20fe298": "Signing in...",
   "7b6bb912cfbced2b": "Reactions",
+  "7b790f205c6203ad": "Preparing upload",
   "7b95249e9a150cf3": {
     "c": "If you continue, you'll be added to this Circle right away.",
     "i": 1,
@@ -1097,7 +1101,9 @@
   "d0ae7dd55e56ec02": "When others share, comment, or react in your Circles, it will appear here.",
   "d131cae25eac3806": "When someone shares photos or videos in one of your Circles.",
   "d28474a413c7d7a1": "Your Circles",
+  "d3b5d8f368e6cbd0": "Terms of Use (EULA)",
   "d4434205b94f39cb": "Open {dateLabel} from {circleName}",
+  "d44f8cd8cefaaa1e": "Confirming purchase …",
   "d51ab707b900998d": {
     "c": "Only this Circle",
     "i": 1,
@@ -1200,6 +1206,7 @@
   "ef652295312ae3a0": "As an Admin",
   "f010bcf18a650ca3": "Could not share invitation link.",
   "f019f1eee605f644": "Some media items don't contain GPS data. Would you like to use your current location once to add a location to these media items?",
+  "f04872e83eb71278": "Encryption could not be set up on this device. Please try again.",
   "f2255a27ff7dd8cd": "Enter the code from your email.",
   "f2434d74293e3aab": "Danger zone",
   "f29cb82c8f3f6703": "Secure access to encrypted photos",

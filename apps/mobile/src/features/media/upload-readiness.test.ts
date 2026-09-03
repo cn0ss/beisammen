@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
-import { encryptionReadinessNotice, uploadReadinessNotice } from './upload-readiness';
+import {
+  encryptionReadinessNotice,
+  uploadBlockerNotice,
+  uploadReadinessNotice,
+} from './upload-readiness';
 
 describe('upload readiness copy', () => {
   test('returns no notice when uploads are allowed', () => {
@@ -140,5 +144,48 @@ describe('upload readiness copy', () => {
       message: 'Cloud-Abrechnung ist für diese Instanz noch nicht eingerichtet.',
       action: 'owner_required',
     });
+  });
+});
+
+describe('uploadBlockerNotice', () => {
+  const ready = {
+    deployment: 'cloud' as const,
+    canUpload: true,
+    viewerIsBillingOwner: true,
+    billingRequired: true,
+    reason: 'ready' as const,
+    message: 'ready',
+  };
+
+  test('reports a pending readiness check instead of failing silently', () => {
+    expect(
+      uploadBlockerNotice({ readiness: null, cryptoStatus: 'ready', circleKeysStatus: 'ready' }),
+    ).toMatchObject({ action: 'retry_later' });
+  });
+
+  test('prefers the billing notice over key state', () => {
+    expect(
+      uploadBlockerNotice({
+        readiness: { ...ready, canUpload: false, reason: 'plan_required' },
+        cryptoStatus: 'loading',
+        circleKeysStatus: 'loading',
+      }),
+    ).toMatchObject({ action: 'choose_plan' });
+  });
+
+  test('offers an immediate retry when the crypto bootstrap failed', () => {
+    expect(
+      uploadBlockerNotice({
+        readiness: ready,
+        cryptoStatus: 'unavailable',
+        circleKeysStatus: 'loading',
+      }),
+    ).toMatchObject({ action: 'retry_now' });
+  });
+
+  test('returns null once billing and keys are usable', () => {
+    expect(
+      uploadBlockerNotice({ readiness: ready, cryptoStatus: 'ready', circleKeysStatus: 'ready' }),
+    ).toBeNull();
   });
 });

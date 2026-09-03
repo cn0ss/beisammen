@@ -5,7 +5,11 @@ import type { CircleUploadReadiness } from '@beisammen/contracts';
 export type UploadReadinessNotice = {
   title: string;
   message: string;
-  action: 'choose_plan' | 'owner_required' | 'retry_later';
+  /**
+   * `retry_now` marks a transient device-side failure the user can retry
+   * immediately (crypto bootstrap); `retry_later` waits on backend state.
+   */
+  action: 'choose_plan' | 'owner_required' | 'retry_later' | 'retry_now';
 };
 
 /**
@@ -23,6 +27,14 @@ export function encryptionReadinessNotice(input: {
       title: msg('Schlüssel wiederherstellen'),
       message: msg('Stelle zuerst deine Verschlüsselung mit deinem Wiederherstellungscode auf diesem Gerät wieder her, bevor du Medien hochlädst.'),
       action: 'retry_later',
+    };
+  }
+
+  if (input.cryptoStatus === 'unavailable') {
+    return {
+      title: msg('Verschlüsselung nicht verfügbar'),
+      message: msg('Die Verschlüsselung konnte auf diesem Gerät nicht eingerichtet werden. Bitte versuche es erneut.'),
+      action: 'retry_now',
     };
   }
 
@@ -105,4 +117,32 @@ export function uploadReadinessNotice(
     message: msg('Der Circle-Owner muss die Cloud-Abrechnung aktivieren, bevor Mitglieder Medien hochladen.'),
     action: 'owner_required',
   };
+}
+
+/**
+ * Everything that keeps the media picker from opening, in the order the home
+ * screen checks it: readiness still loading, billing, then encryption keys.
+ * The draft sheet renders the result inline so a tap on "Medien hinzufügen"
+ * never fails silently (a toast behind the native modal is invisible).
+ */
+export function uploadBlockerNotice(input: {
+  readiness: CircleUploadReadiness | null | undefined;
+  cryptoStatus: 'loading' | 'ready' | 'recovery-required' | 'unavailable';
+  circleKeysStatus: 'loading' | 'waiting-for-grant' | 'ready';
+}): UploadReadinessNotice | null {
+  if (!input.readiness) {
+    return {
+      title: msg('Upload wird vorbereitet'),
+      message: msg('Upload-Bereitschaft wird noch geprüft. Versuche es gleich noch einmal.'),
+      action: 'retry_later',
+    };
+  }
+
+  return (
+    uploadReadinessNotice(input.readiness) ??
+    encryptionReadinessNotice({
+      cryptoStatus: input.cryptoStatus,
+      circleKeysStatus: input.circleKeysStatus,
+    })
+  );
 }

@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { T, useGT, useMessages } from 'gt-react-native';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,10 +23,7 @@ import { api } from '@/features/convex/api';
 import { useCrypto } from '@/features/crypto/provider';
 import { useCircleKeys } from '@/features/crypto/use-circle-keys';
 import { buildShareDetailHref } from '@/features/engagement/navigation';
-import {
-  encryptionReadinessNotice,
-  uploadReadinessNotice,
-} from '@/features/media/upload-readiness';
+import { uploadBlockerNotice } from '@/features/media/upload-readiness';
 import { useProfileImage } from '@/features/media/use-profile-image-url';
 import { useShareUploadFlow } from '@/features/media/use-share-upload-flow';
 import { useMarkInteractive } from '@/features/observe/interactive';
@@ -368,36 +365,32 @@ export default function HomeScreen() {
     router.push('/settings' as never);
   }, [router]);
 
+  // Everything that keeps the picker closed: readiness still loading, billing,
+  // or encryption keys (uploads encrypt with the circle key). The draft sheet
+  // shows this inline so the media button never appears to do nothing.
+  const uploadBlocker = useMemo(
+    () =>
+      uploadBlockerNotice({
+        readiness: uploadReadiness,
+        cryptoStatus: crypto.status,
+        circleKeysStatus: circleKeys.status,
+      }),
+    [circleKeys.status, crypto.status, uploadReadiness],
+  );
+
   const checkUploadReadiness = useCallback((): CircleUploadReadiness | null => {
     if (!selectedCircle) {
       setFeedback(gt('Bitte wähle zuerst einen Circle aus.'));
       return null;
     }
 
-    if (!uploadReadiness) {
-      setFeedback(gt('Upload-Bereitschaft wird noch geprüft. Versuche es gleich noch einmal.'));
-      return null;
-    }
-
-    const notice = uploadReadinessNotice(uploadReadiness);
-    if (notice) {
-      setFeedback(m(notice.message));
-      return null;
-    }
-
-    // Uploads encrypt with the circle key; block the picker until both the
-    // user keys and this circle's key are usable on this device.
-    const keysNotice = encryptionReadinessNotice({
-      cryptoStatus: crypto.status,
-      circleKeysStatus: circleKeys.status,
-    });
-    if (keysNotice) {
-      setFeedback(m(keysNotice.message));
+    if (uploadBlocker) {
+      setFeedback(m(uploadBlocker.message));
       return null;
     }
 
     return uploadReadiness;
-  }, [circleKeys.status, crypto.status, gt, m, selectedCircle, uploadReadiness]);
+  }, [gt, m, selectedCircle, uploadBlocker, uploadReadiness]);
 
   const handlePickMediaWithReadiness = useCallback(async () => {
     const readiness = checkUploadReadiness();
@@ -589,9 +582,12 @@ export default function HomeScreen() {
           canPublish={canPublish}
           uploadQueue={{ items: selectedQueueItems }}
           persistedUploads={visiblePersistedUploads}
-          uploadReadiness={uploadReadiness}
+          uploadBlocker={uploadBlocker}
+          feedback={feedback}
+          onDismissFeedback={handleDismissFeedback}
           onPickMedia={() => void handlePickMediaWithReadiness()}
           onOpenBilling={handleOpenBilling}
+          onRetryEncryption={crypto.retry}
           onPublish={() => void handlePublishDraft()}
           onDeleteDraft={handleDeleteDraft}
           onDeleteAsset={handleDeleteAsset}
@@ -604,7 +600,11 @@ export default function HomeScreen() {
         {publishBurstKey > 0 ? (
         <CelebrationBurst key={publishBurstKey} size={260} topOffset={180} />
       ) : null}
-      <FeedbackToast message={feedback} onDismiss={handleDismissFeedback} />
+      {/* While the draft sheet is open its native modal covers this toast, so
+          the sheet renders the same feedback itself. */}
+      {isDraftSheetOpen ? null : (
+        <FeedbackToast message={feedback} onDismiss={handleDismissFeedback} />
+      )}
       </View>
     </SafeAreaView>
   );

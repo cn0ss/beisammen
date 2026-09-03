@@ -463,21 +463,36 @@ export function useShareUploadFlow({
       return;
     }
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      onFeedback(gt('Ohne Mediathek-Zugriff können keine Fotos oder Videos ausgewählt werden.'));
+    let result: ImagePicker.ImagePickerResult;
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        onFeedback(gt('Ohne Mediathek-Zugriff können keine Fotos oder Videos ausgewählt werden.'));
+        return;
+      }
+
+      result = await ImagePicker.launchImageLibraryAsync({
+        // 'livePhotos' delivers the paired video of iOS Live Photos alongside
+        // the still; Android and web ignore the entry.
+        mediaTypes: ['images', 'videos', 'livePhotos'],
+        allowsMultipleSelection: true,
+        exif: true,
+        quality: 1,
+        selectionLimit: 0,
+      });
+    } catch (error) {
+      // A picker that fails to launch (missing activity, OS-level error) must
+      // surface as feedback; the caller discards the promise, so an unhandled
+      // rejection would leave the button looking dead.
+      logger.error('Media picker failed to open', { circleId: selectedCircle._id, error });
+      recordClientDiagnostic('upload', 'Media picker failed to open', {
+        circleId: selectedCircle._id,
+        error,
+      });
+      onFeedback(errorMessage(error, gt('Die Mediathek konnte nicht geöffnet werden.')));
       return;
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      // 'livePhotos' delivers the paired video of iOS Live Photos alongside
-      // the still; Android and web ignore the entry.
-      mediaTypes: ['images', 'videos', 'livePhotos'],
-      allowsMultipleSelection: true,
-      exif: true,
-      quality: 1,
-      selectionLimit: 0,
-    });
 
     if (result.canceled || !result.assets.length) return;
 
