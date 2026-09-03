@@ -36,7 +36,7 @@ const mapsPluginConfig = {
 const config: ExpoConfig = {
   name: 'beisammen',
   slug: 'beisammen-mobile',
-  version: '1.0',
+  version: '1.0.1',
   // Keep production OTA updates scoped to the native app version. Expo
   // recommends this stable policy for EAS Update; fingerprint runtimes are
   // still experimental and can differ between local and clean EAS installs.
