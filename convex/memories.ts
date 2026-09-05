@@ -7,14 +7,6 @@ import { internalMutation, query } from './_generated/server';
 import { imageCacheKey } from './lib/storage/shared';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const memoryFunctionSurface = [
-  'memories.listForViewer',
-  'memories.discoveryForViewer',
-  'memories.locatedForViewer',
-  'memories.backfillBatch',
-  'memories.backfillDiscoveryBatch',
-] as const;
-
 const MEMORY_MEMBERSHIP_LIMIT = 100;
 const MEMORY_PAGE_SIZE_LIMIT = 48;
 const MEMORY_ITEMS_PER_CIRCLE_LIMIT = 80;

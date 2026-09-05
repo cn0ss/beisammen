@@ -11,7 +11,6 @@ import type { NotificationKind } from '@beisammen/contracts';
 import { Spacing } from '@/constants/theme';
 import { enterSection } from '@/lib/motion';
 import { api } from '@/features/convex/api';
-import { saveNotificationPreference } from '@/features/notifications/preferences';
 import { useTheme } from '@/hooks/use-theme';
 
 import { FeedbackToast } from '@/components/ui';
@@ -39,8 +38,7 @@ export default function NotificationsScreen() {
       setFeedback(null);
 
       try {
-        await saveNotificationPreference({
-          updatePreference: updateNotificationPreference,
+        await updateNotificationPreference({
           kind,
           enabled,
         });

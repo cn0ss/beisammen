@@ -16,9 +16,6 @@ import {
   type CloudPlanTier,
 } from './plans';
 
-/** Billing state is mirrored into Convex by the RevenueCat component. */
-export const billingBackendKind = 'convex-component' as const;
-
 export const BILLING_FEATURE_IDS = {
   mediaUploads: 'media_uploads',
   storageBytes: 'storage_bytes',

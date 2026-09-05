@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   assertPreparedUploadAssetMimeTypeSupported,
   enqueue,
-  clearCompleted,
   initialUploadQueueState,
   markUploadStatus,
   patchUploadProgress,
@@ -188,18 +187,6 @@ test('failed uploads clear stale progress before retry', () => {
 
   expect(retrying.items[0]?.errorMessage).toBeUndefined();
   expect(retrying.items[0]?.progressRatio).toBeUndefined();
-});
-
-test('clears completed uploads while preserving in-flight and failed items', () => {
-  const state = {
-    items: [
-      { ...baseQueueItem, id: 'item-1', status: 'uploaded' as const },
-      { ...baseQueueItem, id: 'item-2', status: 'uploading' as const },
-      { ...baseQueueItem, id: 'item-3', status: 'failed' as const },
-    ],
-  };
-
-  expect(clearCompleted(state).items.map((item) => item.id)).toEqual(['item-2', 'item-3']);
 });
 
 test('rejects unsupported mime types but allows long videos and large originals', () => {

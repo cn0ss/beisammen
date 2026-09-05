@@ -461,12 +461,6 @@ export type UploadTarget = {
   headers?: Record<string, string>;
 };
 
-export interface StoredObject {
-  storage: StorageReference;
-  checksum?: string;
-  sizeBytes?: number;
-}
-
 export interface SignedReadUrl {
   url: string | null;
   expiresAt: number | null;
@@ -527,36 +521,6 @@ export interface CreateUploadTargetInput {
    */
   pairedVideoSizeBytes?: number;
   pairedVideoMimeType?: string;
-}
-
-export interface CompleteUploadInput {
-  uploadId: string;
-  objectKey?: string;
-  previewObjectKey?: string;
-  pairedVideoObjectKey?: string;
-  fileName?: string;
-  sizeBytes?: number;
-  width?: number;
-  height?: number;
-  durationSeconds?: number;
-  pairedVideoDurationSeconds?: number;
-  location?: MediaLocation;
-  capturedAt?: number;
-}
-
-export interface ReadObjectInput {
-  storage: StorageReference;
-}
-
-export interface DeleteObjectInput {
-  storage: StorageReference;
-}
-
-export interface StorageAdapter {
-  createUploadTarget(input: CreateUploadTargetInput): Promise<UploadTarget>;
-  completeUpload(input: CompleteUploadInput): Promise<StoredObject>;
-  getReadUrl(input: ReadObjectInput): Promise<SignedReadUrl>;
-  deleteObject(input: DeleteObjectInput): Promise<void>;
 }
 
 export function normalizeBaseUrl(baseUrl: string): string {

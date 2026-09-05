@@ -30,17 +30,3 @@ export function notificationPreferenceEnabled(
 ): boolean {
   return preferences?.find((preference) => preference.kind === kind)?.enabled ?? true;
 }
-
-export async function saveNotificationPreference(input: {
-  updatePreference: (args: {
-    kind: NotificationKind;
-    enabled: boolean;
-  }) => Promise<NotificationPreference>;
-  kind: NotificationKind;
-  enabled: boolean;
-}): Promise<NotificationPreference> {
-  return await input.updatePreference({
-    kind: input.kind,
-    enabled: input.enabled,
-  });
-}

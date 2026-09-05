@@ -7,14 +7,6 @@ import { mutation, query } from './_generated/server';
 import { formatFeedTimestamp, imageCacheKey } from './lib/storage/shared';
 import { findViewer, requireViewer } from './lib/viewer';
 
-export const activityFunctionSurface = [
-  'activity.listForViewer',
-  'activity.summaryForViewer',
-  'activity.listInboxForViewer',
-  'activity.markRead',
-  'activity.markManyRead',
-] as const;
-
 const ACTIVITY_MEMBERSHIP_LIMIT = 100;
 const ACTIVITY_PAGE_SIZE_LIMIT = 30;
 const ACTIVITY_EVENTS_PER_CIRCLE_LIMIT = 50;

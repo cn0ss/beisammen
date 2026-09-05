@@ -39,16 +39,6 @@ import {
 } from './lib/engagement';
 import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const shareFunctionSurface = [
-  'shares.getOrCreateDraft',
-  'shares.getDraftForCircle',
-  'shares.updateDraft',
-  'shares.publish',
-  'shares.getById',
-  'shares.deleteShare',
-  'shares.listForCircle',
-] as const;
-
 const SHARE_DELETE_BATCH_SIZE = 50;
 const DRAFT_UNRESOLVED_UPLOAD_DISPLAY_LIMIT = 50;
 const UNRESOLVED_UPLOAD_STATUSES: Doc<'uploads'>['status'][] = [

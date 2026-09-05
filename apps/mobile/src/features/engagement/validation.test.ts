@@ -1,27 +1,9 @@
 import { describe, expect, test } from 'vitest';
 
-import {
-  buildCommentTarget,
-  normalizeCommentDraft,
-  normalizeReactionEmoji,
-} from './validation';
+import { buildCommentTarget } from './validation';
 import { buildShareDetailHref } from './navigation';
 
 describe('engagement validation', () => {
-  test('normalizes one emoji grapheme and rejects arbitrary text', () => {
-    expect(normalizeReactionEmoji('  👍🏽  ')).toBe('👍🏽');
-    expect(normalizeReactionEmoji('❤️')).toBe('❤️');
-    expect(() => normalizeReactionEmoji('ok')).toThrow(/emoji/i);
-    expect(() => normalizeReactionEmoji('👍👍')).toThrow(/single emoji/i);
-  });
-
-  test('normalizes comments before submitting', () => {
-    expect(normalizeCommentDraft('  Hallo zusammen.\r\nDas war schoen.  ')).toBe(
-      'Hallo zusammen.\nDas war schoen.',
-    );
-    expect(() => normalizeCommentDraft('   ')).toThrow(/comment/i);
-  });
-
   test('switches comment targets between share and active asset', () => {
     expect(buildCommentTarget({ shareBatchId: 'share-1' })).toEqual({
       shareBatchId: 'share-1',

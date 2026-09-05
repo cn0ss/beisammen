@@ -6,14 +6,6 @@ import { mutation, query } from './_generated/server';
 import { adjustCircleStats } from './circleStats';
 import { isManageRole, requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const inviteFunctionSurface = [
-  'invites.create',
-  'invites.listForCircle',
-  'invites.preview',
-  'invites.accept',
-  'invites.revoke',
-] as const;
-
 export const CIRCLE_INVITE_LIST_LIMIT = 100;
 type InviteMode = 'email' | 'open';
 

@@ -13,13 +13,6 @@ import { isValidEmailAddress, normalizeEmailAddress } from './waitlist';
 
 const http = httpRouter();
 
-export const httpSurface = [
-  'billing.revenuecatWebhook',
-  'healthz',
-  'instance.discovery',
-  'waitlist.join',
-] as const;
-
 function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
     ...init,

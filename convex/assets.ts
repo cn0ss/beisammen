@@ -18,13 +18,6 @@ import { listShareAssetsForDisplay } from './lib/shareAssets';
 import { createS3ReadUrl } from './lib/storage/s3';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const assetFunctionSurface = [
-  'assets.getReadUrl',
-  'assets.listForShareBatch',
-  'assets.listMetadataForCircle',
-  'assets.deleteDraftAsset',
-] as const;
-
 const ASSET_LINKED_UPLOAD_DELETE_LIMIT = 20;
 
 type AssetVisibilityCtx = QueryCtx;

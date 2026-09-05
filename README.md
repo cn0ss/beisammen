@@ -20,17 +20,16 @@ Read [docs/licensing.md](docs/licensing.md) and [NOTICE](NOTICE) before using or
 - Official `convex-revenuecat` component integration for entitlement sync
 - BYO storage architecture with S3-compatible storage first
 - Central app distribution with official and self-hosted instances
-- Web-ready package boundaries without a web app yet
+- Marketing website with German and English pages
 
 ## Repo structure
 
 ```text
 apps/mobile            Expo app with Expo Router
+apps/website           Marketing and policy website
 packages/contracts     Shared API and storage contracts
-packages/domain        Domain types and helper rules
-packages/ui-mobile     Shared React Native UI primitives
+packages/crypto        Shared encryption primitives
 packages/upload-client Upload queue model and state helpers
-packages/config        Public-vs-secret environment helpers
 convex/                Convex schema and backend scaffolding
 docs/                  Architecture, auth, licensing, self-hosting docs
 services/              Reserved for future Go services

@@ -35,7 +35,6 @@ import type * as lib_instance from "../lib/instance.js";
 import type * as lib_notifications from "../lib/notifications.js";
 import type * as lib_permissions from "../lib/permissions.js";
 import type * as lib_shareAssets from "../lib/shareAssets.js";
-import type * as lib_storage_adapter from "../lib/storage/adapter.js";
 import type * as lib_storage_s3 from "../lib/storage/s3.js";
 import type * as lib_storage_shared from "../lib/storage/shared.js";
 import type * as lib_uploadLimits from "../lib/uploadLimits.js";
@@ -86,7 +85,6 @@ declare const fullApi: ApiFromModules<{
   "lib/notifications": typeof lib_notifications;
   "lib/permissions": typeof lib_permissions;
   "lib/shareAssets": typeof lib_shareAssets;
-  "lib/storage/adapter": typeof lib_storage_adapter;
   "lib/storage/s3": typeof lib_storage_s3;
   "lib/storage/shared": typeof lib_storage_shared;
   "lib/uploadLimits": typeof lib_uploadLimits;

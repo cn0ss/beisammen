@@ -13,7 +13,9 @@ Supported targets in principle:
 
 ## Contract
 
-The shared storage contract lives in `packages/contracts`.
+Shared storage references, upload targets, and signed read URL types live in
+`packages/contracts`. Concrete S3 operations live in `convex/lib/storage/s3.ts`;
+upload authorization and finalization live in `convex/uploads.ts`.
 
 Storage is selected per deployment instance:
 
@@ -21,13 +23,8 @@ Storage is selected per deployment instance:
 - legacy `convex-files` references may still be read and deleted for data that
   existed before the S3-only upload path
 
-Each provider adapter is expected to implement:
-
-- upload target creation
-- upload completion
-- signed reads
-- deletes
-- connection validation
+The backend calls the S3 functions directly for presigned uploads and reads,
+object verification, deletion, and connection validation.
 
 ## Why S3 first
 
@@ -43,10 +40,9 @@ When the client can prepare one, it also creates a separate JPEG preview object.
 Feed cards and thumbnails request preview URLs; share detail playback, download,
 and native sharing request original URLs.
 
-Cloud deployments keep the current app-level beta media count and video duration
-limits while RevenueCat entitlements and Convex quotas enforce paid plan access before
-storage-generating uploads. Self-hosted deployments keep the same storage safety
-checks and MIME validation, but do not enforce those app product limits.
+Cloud deployments enforce RevenueCat plan access and Convex storage quotas before
+storage-generating uploads. Neither deployment kind limits media counts or video
+duration. Both enforce storage safety checks and MIME validation.
 
 ## Future providers
 

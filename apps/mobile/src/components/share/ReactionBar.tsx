@@ -8,7 +8,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { AnimatedPressable } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
 import { api } from '@/features/convex/api';
-import { normalizeReactionEmoji } from '@/features/engagement/validation';
+import { normalizeReactionEmoji } from '@beisammen/contracts';
 import { useTheme } from '@/hooks/use-theme';
 
 /** One-tap examples; any other emoji works via the "+" chip. */

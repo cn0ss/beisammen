@@ -36,23 +36,6 @@ import {
 import { assertValidDeclaredImageSize } from './lib/uploadLimits';
 import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const circleFunctionSurface = [
-  'circles.create',
-  'circles.listForViewer',
-  'circles.getById',
-  'circles.update',
-  'circles.listMembers',
-  'circles.updateMemberRole',
-  'circles.removeMember',
-  'circles.transferOwnership',
-  'circles.leave',
-  'circles.createImageTarget',
-  'circles.completeImageUpload',
-  'circles.removeImage',
-  'circles.getImageReadUrl',
-  'circles.deleteOwn',
-] as const;
-
 export const CIRCLE_MEMBER_LIST_LIMIT = 200;
 
 interface PreparedCircleImageUpload {

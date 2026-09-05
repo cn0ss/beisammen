@@ -6,19 +6,6 @@ import { mutation, query } from './_generated/server';
 import { canManageCircle } from './lib/permissions';
 import { findViewer, requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const keyFunctionSurface = [
-  'keys.getMyKeys',
-  'keys.registerKeys',
-  'keys.getCircleMemberPublicKeys',
-  'keys.getMyCircleKeys',
-  'keys.initializeCircleKey',
-  'keys.grantCircleKeys',
-  'keys.rotateCircleKey',
-  'keys.rejectMyKeyGrant',
-  'keys.resetKeys',
-  'keys.listMissingKeyGrants',
-] as const;
-
 export const SUPPORTED_USER_KEY_VERSION = 1;
 
 /** Epochs per circle stay tiny (one per rotation), so a bounded read is fine. */

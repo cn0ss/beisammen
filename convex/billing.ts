@@ -27,14 +27,6 @@ import {
 import { getDeploymentPolicyFromEnv } from './lib/instance';
 import { findViewer, getViewerMembership, requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const billingFunctionSurface = [
-  'billing.status',
-  'billing.statusForCircle',
-  'billing.uploadReadinessForCircle',
-  'billing.circleCreationReadiness',
-  'billing.syncPurchases',
-] as const;
-
 function selfHostedBillingStatus(): BillingStatus {
   return {
     deployment: 'self-hosted',

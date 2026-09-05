@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 
 import { useMutation, usePaginatedQuery } from 'convex/react';
-import { COMMENT_MAX_BODY_LENGTH } from '@beisammen/contracts';
+import { COMMENT_MAX_BODY_LENGTH, normalizeCommentBody } from '@beisammen/contracts';
 
 import { AnimatedPressable, Avatar, Button, LoadingBox } from '@/components/ui';
 import { Fonts, FontSize, Radius, Spacing } from '@/constants/theme';
@@ -22,7 +22,7 @@ import type {
   ShareBatchRecord,
 } from '@/features/convex/api';
 import { api } from '@/features/convex/api';
-import { buildCommentTarget, normalizeCommentDraft } from '@/features/engagement/validation';
+import { buildCommentTarget } from '@/features/engagement/validation';
 import { useUserProfileImage } from '@/features/media/use-user-profile-image-url';
 import { useTheme } from '@/hooks/use-theme';
 import { useDateFormat } from '@/i18n/use-date-format';
@@ -162,7 +162,7 @@ export const EngagementPanel = memo(function EngagementPanel({
     onFeedback(null);
 
     try {
-      const body = normalizeCommentDraft(commentDraft);
+      const body = normalizeCommentBody(commentDraft);
       await createComment({
         shareBatchId: commentTarget.shareBatchId,
         ...(commentTarget.assetId ? { assetId: commentTarget.assetId } : {}),

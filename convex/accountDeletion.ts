@@ -9,8 +9,6 @@ import { markCircleKeyRotationPending } from './keys';
 import { deleteStorageReference, storageReferenceKey } from './legacyStorage';
 import { requireViewer } from './lib/viewer';
 
-export const accountDeletionFunctionSurface = ['accountDeletion.deleteMyAccountData'] as const;
-
 const ACCOUNT_DELETE_BATCH_SIZE = 100;
 const MAX_ACCOUNT_DELETE_PASSES = 500;
 const MAX_OWNED_CIRCLES = 100;

@@ -18,13 +18,6 @@ import {
 import { NOTIFICATION_KINDS } from './lib/notifications';
 import { requireViewer } from './lib/viewer';
 
-export const notificationsFunctionSurface = [
-  'notifications.registerDevice',
-  'notifications.unregisterDevice',
-  'notifications.getPreferences',
-  'notifications.updatePreferences',
-] as const;
-
 const notificationKindValidator = v.union(
   v.literal('share.published'),
   v.literal('comment.created'),

@@ -58,4 +58,6 @@ override is remembered on future visits to `/`.
 requires a ReUI license key. Without one, vendor components from the MIT-licensed
 [keenthemes/reui](https://github.com/keenthemes/reui) repo (`registry/bases/base/ui/*`)
 into `src/components/ui` and fix the `@/registry/...` imports to `@/lib/utils` /
-`@/components/ui`; their styling comes from `src/styles/reui-nova.css`.
+`@/components/ui`. `src/styles/reui-nova.css` contains only the button and sheet
+styles used by the site. When adding a component, copy its required style rules
+into that file as well.

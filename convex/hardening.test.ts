@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import { convexTest, type TestConvex } from 'convex-test';
-import { makeFunctionReference, type UserIdentity } from 'convex/server';
+import type { UserIdentity } from 'convex/server';
 import { describe, expect, test, vi } from 'vitest';
 
 const rcMocks = vi.hoisted(() => ({
@@ -42,26 +42,18 @@ vi.mock('@convex-dev/resend', () => ({
 
 import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
-import { activityFunctionSurface } from './activity';
-import { assetFunctionSurface } from './assets';
-import { billingFunctionSurface } from './billing';
 import {
   RETENTION_GRACE_MS,
   RETENTION_MAX_WARNINGS,
   RETENTION_WARNING_INTERVAL_MS,
 } from './billingRetention';
-import { commentFunctionSurface } from './comments';
-import { httpSurface } from './http';
-import { billingBackendKind } from './lib/billing/quota';
 import { CLOUD_PLAN_QUOTAS, currentPeriodKey } from './lib/billing/plans';
 import { buildPublicInstanceConfigFromEnv } from './lib/httpHelpers';
 import {
   DEFAULT_CLOUD_BILLING_PLANS,
   getDeploymentPolicyFromEnv,
 } from './lib/instance';
-import { notificationsFunctionSurface } from './notifications';
 import { verifyS3ObjectExists } from './lib/storage/s3';
-import { reactionFunctionSurface } from './reactions';
 import schema from './schema';
 
 const modules = import.meta.glob(['./**/*.ts', '!./**/*.test.ts']);
@@ -116,339 +108,6 @@ const EXPECTED_SHARE_ASSET_DISPLAY_LIMIT = 100;
 const EXPECTED_ASSET_LINKED_UPLOAD_DELETE_LIMIT = 20;
 const EXPECTED_SHARE_DELETE_BATCH_SIZE = 50;
 const COMMENT_MAX_BODY_LENGTH = 1000;
-
-const commentsApi = {
-  listForShare: makeFunctionReference<
-    'query',
-    {
-      shareBatchId: Id<'shareBatches'>;
-      assetId?: Id<'assets'>;
-      paginationOpts: { numItems: number; cursor: string | null };
-    },
-    {
-      page: Array<{
-        _id: Id<'comments'>;
-        body: string;
-        targetKind: 'share' | 'asset';
-        assetId: Id<'assets'> | null;
-        authorId: Id<'users'>;
-        authorName: string;
-        canDelete: boolean;
-      }>;
-      isDone: boolean;
-      continueCursor: string;
-    }
-  >('comments:listForShare'),
-  create: makeFunctionReference<
-    'mutation',
-    { shareBatchId: Id<'shareBatches'>; assetId?: Id<'assets'>; body: string },
-    { commentId: Id<'comments'> }
-  >('comments:create'),
-  delete: makeFunctionReference<
-    'mutation',
-    { commentId: Id<'comments'> },
-    { commentId: Id<'comments'> }
-  >('comments:delete'),
-};
-
-const reactionsApi = {
-  listForShare: makeFunctionReference<
-    'query',
-    { shareBatchId: Id<'shareBatches'> },
-    {
-      targets: Array<{
-        targetKind: 'share' | 'asset';
-        assetId: Id<'assets'> | null;
-        reactionCount: number;
-        viewerReaction: string | null;
-        topReactions: Array<{
-          emoji: string;
-          count: number;
-          reactedByViewer: boolean;
-        }>;
-      }>;
-    }
-  >('reactions:listForShare'),
-  set: makeFunctionReference<
-    'mutation',
-    { shareBatchId: Id<'shareBatches'>; assetId?: Id<'assets'>; emoji: string },
-    { reactionId: Id<'reactions'>; emoji: string }
-  >('reactions:set'),
-  remove: makeFunctionReference<
-    'mutation',
-    { shareBatchId: Id<'shareBatches'>; assetId?: Id<'assets'> },
-    { removed: boolean }
-  >('reactions:remove'),
-};
-
-const notificationsApi = {
-  registerDevice: makeFunctionReference<
-    'mutation',
-    {
-      instanceUrl: string;
-      token: string;
-      platform: 'ios' | 'android' | 'web' | 'unknown';
-      appVersion?: string;
-    },
-    {
-      deviceId: string;
-      instanceUrl: string;
-      platform: 'ios' | 'android' | 'web' | 'unknown';
-      provider: 'expo';
-      registeredAt: number;
-    }
-  >('notifications:registerDevice'),
-  getPreferences: makeFunctionReference<
-    'query',
-    Record<string, never>,
-    Array<{
-      kind: 'share.published' | 'comment.created' | 'reaction.set';
-      enabled: boolean;
-      updatedAt: number | null;
-    }>
-  >('notifications:getPreferences'),
-  updatePreferences: makeFunctionReference<
-    'mutation',
-    {
-      kind: 'share.published' | 'comment.created' | 'reaction.set';
-      enabled: boolean;
-    },
-    {
-      kind: 'share.published' | 'comment.created' | 'reaction.set';
-      enabled: boolean;
-      updatedAt: number | null;
-    }
-  >('notifications:updatePreferences'),
-};
-
-const notificationWorkersApi = {
-  dispatchQueued: makeFunctionReference<
-    'action',
-    { now?: number },
-    {
-      scanned: number;
-      sent: number;
-      failed: number;
-      retried: number;
-      skipped: number;
-    }
-  >('notifications:dispatchQueued'),
-  checkReceipts: makeFunctionReference<
-    'action',
-    { now?: number },
-    {
-      scanned: number;
-      delivered: number;
-      failed: number;
-      missing: number;
-      retried: number;
-      skipped: number;
-    }
-  >('notifications:checkReceipts'),
-};
-
-const invitesApi = {
-  create: makeFunctionReference<
-    'mutation',
-    {
-      circleId: Id<'circles'>;
-      mode?: 'email' | 'open';
-      invitedEmail?: string;
-      role: 'admin' | 'member';
-    },
-    { inviteId: Id<'invites'>; token: string; inviteLink: string }
-  >('invites:create'),
-  listForCircle: makeFunctionReference<
-    'query',
-    { circleId: Id<'circles'> },
-    Array<{
-      _id: Id<'invites'>;
-      circleId: Id<'circles'>;
-      mode: 'email' | 'open';
-      invitedEmail: string | null;
-      role: 'admin' | 'member';
-      status: 'pending' | 'accepted' | 'expired' | 'revoked';
-      expiresAt: number;
-      acceptedAt: number | null;
-      acceptedBy: { userId: Id<'users'>; displayName: string } | null;
-      canRevoke: boolean;
-    }>
-  >('invites:listForCircle'),
-  preview: makeFunctionReference<
-    'query',
-    { token: string },
-    {
-      inviteId: Id<'invites'>;
-      circleId: Id<'circles'>;
-      circleName: string;
-      mode: 'email' | 'open';
-      invitedEmail: string | null;
-      role: 'admin' | 'member';
-      status: 'pending' | 'accepted' | 'expired' | 'revoked';
-      expiresAt: number;
-      acceptedAt: number | null;
-      acceptedBy: { userId: Id<'users'>; displayName: string } | null;
-      canAccept: boolean;
-      emailMatchesViewer: boolean;
-      isAlreadyMember: boolean;
-    } | null
-  >('invites:preview'),
-  accept: makeFunctionReference<
-    'mutation',
-    { token: string },
-    { inviteId: Id<'invites'>; circleId: Id<'circles'> }
-  >('invites:accept'),
-  revoke: makeFunctionReference<'mutation', { inviteId: Id<'invites'> }, { inviteId: Id<'invites'> }>(
-    'invites:revoke',
-  ),
-};
-
-const activityApi = {
-  listForViewer: makeFunctionReference<
-    'query',
-    {
-      paginationOpts: { numItems: number; cursor: string | null };
-    },
-    {
-      page: Array<{
-        _id: Id<'activityEvents'>;
-        circleId: Id<'circles'>;
-        circleName: string;
-        actorId: Id<'users'>;
-        actorName: string;
-        type: string;
-        shareBatchId: Id<'shareBatches'>;
-        assetId: Id<'assets'> | null;
-        displayText: string;
-        createdAt: number;
-      }>;
-      isDone: boolean;
-      continueCursor: string;
-    }
-  >('activity:listForViewer'),
-  summaryForViewer: makeFunctionReference<
-    'query',
-    Record<string, never>,
-    {
-      unreadCount: number;
-      hasUnread: boolean;
-    }
-  >('activity:summaryForViewer'),
-  listInboxForViewer: makeFunctionReference<
-    'query',
-    {
-      paginationOpts: { numItems: number; cursor: string | null };
-    },
-    {
-      page: Array<{
-        _id: string;
-        activityEventId: Id<'activityEvents'>;
-        circleId: Id<'circles'>;
-        actorId: Id<'users'>;
-        type: string;
-        shareBatchId: Id<'shareBatches'>;
-        assetId: Id<'assets'> | null;
-        status: 'unread' | 'read';
-        displayText: string;
-        createdAt: number;
-      }>;
-      isDone: boolean;
-      continueCursor: string;
-    }
-  >('activity:listInboxForViewer'),
-  markRead: makeFunctionReference<
-    'mutation',
-    { inboxItemId: string },
-    { inboxItemId: string; status: 'read' }
-  >('activity:markRead'),
-  markManyRead: makeFunctionReference<
-    'mutation',
-    { inboxItemIds: string[] },
-    { readCount: number }
-  >('activity:markManyRead'),
-};
-
-const memoriesApi = {
-  listForViewer: makeFunctionReference<
-    'query',
-    {
-      circleId?: Id<'circles'>;
-      filter?: { kind: 'month' | 'place'; key: string };
-      paginationOpts: { numItems: number; cursor: string | null };
-    },
-    {
-      page: Array<{
-        _id: Id<'memoryItems'>;
-        circleId: Id<'circles'>;
-        circleName: string;
-        shareBatchId: Id<'shareBatches'>;
-        assetId: Id<'assets'>;
-        authorId: Id<'users'>;
-        authorName: string;
-        kind: 'image' | 'video';
-        caption: string;
-        timelineAt: number;
-        capturedAt: number | null;
-        publishedAt: number;
-        monthKey: string | null;
-        placeKey: string | null;
-        placeLabel: string | null;
-        asset: {
-          _id: Id<'assets'>;
-          kind: 'image' | 'video';
-          fileName?: string;
-          location?: {
-            latitude: number;
-            longitude: number;
-            source: 'embedded' | 'device-fallback';
-          };
-        };
-      }>;
-      isDone: boolean;
-      continueCursor: string;
-    }
-  >('memories:listForViewer'),
-  discoveryForViewer: makeFunctionReference<
-    'query',
-    { circleId?: Id<'circles'> },
-    {
-      months: Array<{
-        key: string;
-        itemCount: number;
-        latestTimelineAt: number;
-        coverAssetId: Id<'assets'>;
-      }>;
-      places: Array<{
-        key: string;
-        label: string;
-        latitude: number;
-        longitude: number;
-        itemCount: number;
-        latestTimelineAt: number;
-        coverAssetId: Id<'assets'>;
-      }>;
-    }
-  >('memories:discoveryForViewer'),
-};
-
-const internalMemoriesApi = {
-  backfillBatch: makeFunctionReference<
-    'mutation',
-    { cursor?: string | null; batchSize?: number },
-    { scanned: number; inserted: number; hasMore: boolean; continueCursor: string }
-  >('memories:backfillBatch'),
-  backfillDiscoveryBatch: makeFunctionReference<
-    'mutation',
-    { cursor?: string | null; batchSize?: number; dryRun?: boolean },
-    {
-      scanned: number;
-      patched: number;
-      summaryWrites: number;
-      hasMore: boolean;
-      continueCursor: string;
-    }
-  >('memories:backfillDiscoveryBatch'),
-};
 
 type TestDb = TestConvex<typeof schema>;
 type TestUser = ReturnType<TestDb['withIdentity']>;
@@ -967,7 +626,7 @@ async function createQueuedPushAttempt(input?: {
   });
   const member = await upsertViewer(t, 'member@example.com', 'Member');
   await member.user.mutation(api.invites.accept, { token: invite.token });
-  await member.user.mutation(notificationsApi.registerDevice, {
+  await member.user.mutation(api.notifications.registerDevice, {
     instanceUrl: 'https://cloud.example.com',
     token: 'ExponentPushToken[member-device]',
     platform: 'ios',
@@ -975,7 +634,7 @@ async function createQueuedPushAttempt(input?: {
   });
 
   if (input?.disabledKind) {
-    await member.user.mutation(notificationsApi.updatePreferences, {
+    await member.user.mutation(api.notifications.updatePreferences, {
       kind: input.disabledKind,
       enabled: false,
     });
@@ -1006,16 +665,7 @@ async function createQueuedPushAttempt(input?: {
   };
 }
 
-describe('http surface', () => {
-  test('exposes public instance discovery for custom backend links', () => {
-    expect(httpSurface).toContain('instance.discovery');
-  });
-
-  test('exposes the RevenueCat webhook route', () => {
-    expect(httpSurface).toContain('billing.revenuecatWebhook');
-    expect(httpSurface).not.toContain('billing.return');
-  });
-
+describe('instance discovery configuration', () => {
   test('builds cloud and self-hosted public instance manifests from env', () => {
     expect(
       buildPublicInstanceConfigFromEnv({
@@ -1109,51 +759,6 @@ describe('deployment billing policy', () => {
     });
   });
 
-  test('exposes billing functions for cloud plan status and readiness', () => {
-    expect(billingFunctionSurface).toEqual([
-      'billing.status',
-      'billing.statusForCircle',
-      'billing.uploadReadinessForCircle',
-      'billing.circleCreationReadiness',
-      'billing.syncPurchases',
-    ]);
-  });
-
-  test('exposes only the intended public asset functions', () => {
-    expect(assetFunctionSurface).toEqual([
-      'assets.getReadUrl',
-      'assets.listForShareBatch',
-      'assets.listMetadataForCircle',
-      'assets.deleteDraftAsset',
-    ]);
-  });
-
-  test('exposes only the intended public engagement functions', () => {
-    expect(activityFunctionSurface).toEqual([
-      'activity.listForViewer',
-      'activity.summaryForViewer',
-      'activity.listInboxForViewer',
-      'activity.markRead',
-      'activity.markManyRead',
-    ]);
-    expect(commentFunctionSurface).toEqual([
-      'comments.listForShare',
-      'comments.create',
-      'comments.delete',
-    ]);
-    expect(reactionFunctionSurface).toEqual([
-      'reactions.listForShare',
-      'reactions.set',
-      'reactions.remove',
-    ]);
-    expect(notificationsFunctionSurface).toEqual([
-      'notifications.registerDevice',
-      'notifications.unregisterDevice',
-      'notifications.getPreferences',
-      'notifications.updatePreferences',
-    ]);
-  });
-
   test('default cloud billing plans are paid-only', () => {
     expect(DEFAULT_CLOUD_BILLING_PLANS.map((plan) => plan.id)).toEqual([
       'cloud_plus',
@@ -1166,10 +771,6 @@ describe('deployment billing policy', () => {
           .includes('free'),
       ),
     ).toBe(false);
-  });
-
-  test('billing state is mirrored through the RevenueCat Convex component', () => {
-    expect(billingBackendKind).toBe('convex-component');
   });
 
   test('plan tiers define hard storage and circle quotas without upload count limits', () => {
@@ -1300,14 +901,14 @@ describe('invites', () => {
     const owner = await createCircleFor(t, 'owner@example.com');
     const firstInvitee = await upsertViewer(t, 'first@example.com', 'First Invitee');
     const secondInvitee = await upsertViewer(t, 'second@example.com', 'Second Invitee');
-    const invite = await owner.user.mutation(invitesApi.create, {
+    const invite = await owner.user.mutation(api.invites.create, {
       circleId: owner.circleId,
       mode: 'open',
       role: 'member',
     });
 
     await expect(
-      firstInvitee.user.query(invitesApi.preview, { token: invite.token }),
+      firstInvitee.user.query(api.invites.preview, { token: invite.token }),
     ).resolves.toMatchObject({
       mode: 'open',
       invitedEmail: null,
@@ -1317,7 +918,7 @@ describe('invites', () => {
     });
 
     await expect(
-      firstInvitee.user.mutation(invitesApi.accept, { token: invite.token }),
+      firstInvitee.user.mutation(api.invites.accept, { token: invite.token }),
     ).resolves.toMatchObject({
       inviteId: invite.inviteId,
       circleId: owner.circleId,
@@ -1327,7 +928,7 @@ describe('invites', () => {
     });
 
     await expect(
-      secondInvitee.user.query(invitesApi.preview, { token: invite.token }),
+      secondInvitee.user.query(api.invites.preview, { token: invite.token }),
     ).resolves.toMatchObject({
       status: 'accepted',
       canAccept: false,
@@ -1337,26 +938,26 @@ describe('invites', () => {
       },
     });
     await expect(
-      secondInvitee.user.mutation(invitesApi.accept, { token: invite.token }),
+      secondInvitee.user.mutation(api.invites.accept, { token: invite.token }),
     ).rejects.toThrow(/pending/i);
   });
 
   test('open invite previews do not let existing members consume the link', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
-    const invite = await owner.user.mutation(invitesApi.create, {
+    const invite = await owner.user.mutation(api.invites.create, {
       circleId: owner.circleId,
       mode: 'open',
       role: 'admin',
     });
 
-    await expect(owner.user.query(invitesApi.preview, { token: invite.token })).resolves.toMatchObject({
+    await expect(owner.user.query(api.invites.preview, { token: invite.token })).resolves.toMatchObject({
       mode: 'open',
       role: 'admin',
       canAccept: false,
       isAlreadyMember: true,
     });
-    await expect(owner.user.mutation(invitesApi.accept, { token: invite.token })).rejects.toThrow(
+    await expect(owner.user.mutation(api.invites.accept, { token: invite.token })).rejects.toThrow(
       /already/i,
     );
 
@@ -1371,19 +972,19 @@ describe('invites', () => {
   test('invite list and revoke expose open invite metadata', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
-    const openInvite = await owner.user.mutation(invitesApi.create, {
+    const openInvite = await owner.user.mutation(api.invites.create, {
       circleId: owner.circleId,
       mode: 'open',
       role: 'admin',
     });
-    await owner.user.mutation(invitesApi.create, {
+    await owner.user.mutation(api.invites.create, {
       circleId: owner.circleId,
       mode: 'email',
       invitedEmail: 'email@example.com',
       role: 'member',
     });
 
-    await expect(owner.user.query(invitesApi.listForCircle, { circleId: owner.circleId })).resolves.toEqual(
+    await expect(owner.user.query(api.invites.listForCircle, { circleId: owner.circleId })).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           _id: openInvite.inviteId,
@@ -1401,9 +1002,9 @@ describe('invites', () => {
       ]),
     );
 
-    await owner.user.mutation(invitesApi.revoke, { inviteId: openInvite.inviteId });
+    await owner.user.mutation(api.invites.revoke, { inviteId: openInvite.inviteId });
 
-    await expect(owner.user.query(invitesApi.listForCircle, { circleId: owner.circleId })).resolves.toEqual(
+    await expect(owner.user.query(api.invites.listForCircle, { circleId: owner.circleId })).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           _id: openInvite.inviteId,
@@ -3311,27 +2912,27 @@ describe('shares, uploads, and feed', () => {
       caption: 'Engaged post',
     });
 
-    const shareComment = await owner.user.mutation(commentsApi.create, {
+    const shareComment = await owner.user.mutation(api.comments.create, {
       shareBatchId: published.shareBatchId,
       body: 'This belongs to the whole post.',
     });
-    const assetComment = await member.user.mutation(commentsApi.create, {
+    const assetComment = await member.user.mutation(api.comments.create, {
       shareBatchId: published.shareBatchId,
       assetId: published.assetId,
       body: 'This is about the photo.',
     });
-    await member.user.mutation(reactionsApi.set, {
+    await member.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       emoji: '😍',
     });
-    await owner.user.mutation(reactionsApi.set, {
+    await owner.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       assetId: published.assetId,
       emoji: '👍🏽',
     });
 
     await expect(
-      member.user.query(commentsApi.listForShare, {
+      member.user.query(api.comments.listForShare, {
         shareBatchId: published.shareBatchId,
         paginationOpts: { numItems: 10, cursor: null },
       }),
@@ -3348,7 +2949,7 @@ describe('shares, uploads, and feed', () => {
       ],
     });
     await expect(
-      owner.user.query(commentsApi.listForShare, {
+      owner.user.query(api.comments.listForShare, {
         shareBatchId: published.shareBatchId,
         assetId: published.assetId,
         paginationOpts: { numItems: 10, cursor: null },
@@ -3366,7 +2967,7 @@ describe('shares, uploads, and feed', () => {
       ],
     });
 
-    const reactions = await member.user.query(reactionsApi.listForShare, {
+    const reactions = await member.user.query(api.reactions.listForShare, {
       shareBatchId: published.shareBatchId,
     });
 
@@ -3470,44 +3071,44 @@ describe('shares, uploads, and feed', () => {
     });
 
     await expect(
-      outsider.user.query(commentsApi.listForShare, {
+      outsider.user.query(api.comments.listForShare, {
         shareBatchId: published.shareBatchId,
         paginationOpts: { numItems: 10, cursor: null },
       }),
     ).rejects.toThrow(/membership/i);
     await expect(
-      outsider.user.mutation(commentsApi.create, {
+      outsider.user.mutation(api.comments.create, {
         shareBatchId: published.shareBatchId,
         body: 'No access.',
       }),
     ).rejects.toThrow(/membership/i);
     await expect(
-      outsider.user.mutation(reactionsApi.set, {
+      outsider.user.mutation(api.reactions.set, {
         shareBatchId: published.shareBatchId,
         emoji: '🔥',
       }),
     ).rejects.toThrow(/membership/i);
     await expect(
-      owner.user.mutation(commentsApi.create, {
+      owner.user.mutation(api.comments.create, {
         shareBatchId: draft.shareBatchId,
         body: 'Draft comment.',
       }),
     ).rejects.toThrow(/published/i);
     await expect(
-      owner.user.mutation(reactionsApi.set, {
+      owner.user.mutation(api.reactions.set, {
         shareBatchId: draft.shareBatchId,
         emoji: '🔥',
       }),
     ).rejects.toThrow(/published/i);
     await expect(
-      owner.user.mutation(commentsApi.create, {
+      owner.user.mutation(api.comments.create, {
         shareBatchId: published.shareBatchId,
         assetId: otherPublished.assetId,
         body: 'Wrong asset.',
       }),
     ).rejects.toThrow(/asset/i);
     await expect(
-      owner.user.mutation(reactionsApi.set, {
+      owner.user.mutation(api.reactions.set, {
         shareBatchId: published.shareBatchId,
         assetId: otherPublished.assetId,
         emoji: '🔥',
@@ -3526,16 +3127,16 @@ describe('shares, uploads, and feed', () => {
       fileName: 'reaction.jpg',
     });
 
-    await owner.user.mutation(reactionsApi.set, {
+    await owner.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       emoji: '👍',
     });
-    await owner.user.mutation(reactionsApi.set, {
+    await owner.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       emoji: '😍',
     });
 
-    const reactions = await owner.user.query(reactionsApi.listForShare, {
+    const reactions = await owner.user.query(api.reactions.listForShare, {
       shareBatchId: published.shareBatchId,
     });
 
@@ -3555,25 +3156,25 @@ describe('shares, uploads, and feed', () => {
       },
     ]);
     await expect(
-      owner.user.mutation(reactionsApi.set, {
+      owner.user.mutation(api.reactions.set, {
         shareBatchId: published.shareBatchId,
         emoji: 'ok',
       }),
     ).rejects.toThrow(/emoji/i);
     await expect(
-      owner.user.mutation(reactionsApi.set, {
+      owner.user.mutation(api.reactions.set, {
         shareBatchId: published.shareBatchId,
         emoji: '👍👍',
       }),
     ).rejects.toThrow(/single emoji/i);
     await expect(
-      owner.user.mutation(commentsApi.create, {
+      owner.user.mutation(api.comments.create, {
         shareBatchId: published.shareBatchId,
         body: '   ',
       }),
     ).rejects.toThrow(/comment/i);
     await expect(
-      owner.user.mutation(commentsApi.create, {
+      owner.user.mutation(api.comments.create, {
         shareBatchId: published.shareBatchId,
         body: 'x'.repeat(COMMENT_MAX_BODY_LENGTH + 1),
       }),
@@ -3604,32 +3205,32 @@ describe('shares, uploads, and feed', () => {
       circleId: owner.circleId,
       fileName: 'comments.jpg',
     });
-    const memberComment = await member.user.mutation(commentsApi.create, {
+    const memberComment = await member.user.mutation(api.comments.create, {
       shareBatchId: published.shareBatchId,
       body: 'Member comment.',
     });
-    const ownerComment = await owner.user.mutation(commentsApi.create, {
+    const ownerComment = await owner.user.mutation(api.comments.create, {
       shareBatchId: published.shareBatchId,
       body: 'Owner comment.',
     });
 
     await expect(
-      member.user.mutation(commentsApi.delete, {
+      member.user.mutation(api.comments.delete, {
         commentId: ownerComment.commentId,
       }),
     ).rejects.toThrow(/delete/i);
     await expect(
-      owner.user.mutation(commentsApi.delete, {
+      owner.user.mutation(api.comments.delete, {
         commentId: memberComment.commentId,
       }),
     ).resolves.toEqual({ commentId: memberComment.commentId });
     await expect(
-      admin.user.mutation(commentsApi.delete, {
+      admin.user.mutation(api.comments.delete, {
         commentId: ownerComment.commentId,
       }),
     ).resolves.toEqual({ commentId: ownerComment.commentId });
 
-    const remaining = await owner.user.query(commentsApi.listForShare, {
+    const remaining = await owner.user.query(api.comments.listForShare, {
       shareBatchId: published.shareBatchId,
       paginationOpts: { numItems: 10, cursor: null },
     });
@@ -3656,20 +3257,20 @@ describe('shares, uploads, and feed', () => {
         fileName: 'cleanup.jpg',
       });
 
-      await owner.user.mutation(commentsApi.create, {
+      await owner.user.mutation(api.comments.create, {
         shareBatchId: published.shareBatchId,
         body: 'Delete me with the share.',
       });
-      await owner.user.mutation(commentsApi.create, {
+      await owner.user.mutation(api.comments.create, {
         shareBatchId: published.shareBatchId,
         assetId: published.assetId,
         body: 'Delete this asset comment too.',
       });
-      await owner.user.mutation(reactionsApi.set, {
+      await owner.user.mutation(api.reactions.set, {
         shareBatchId: published.shareBatchId,
         emoji: '🔥',
       });
-      await owner.user.mutation(reactionsApi.set, {
+      await owner.user.mutation(api.reactions.set, {
         shareBatchId: published.shareBatchId,
         assetId: published.assetId,
         emoji: '📷',
@@ -3735,17 +3336,17 @@ describe('shares, uploads, and feed', () => {
       circleId: outsiderCircle.circleId,
       fileName: 'outside.jpg',
     });
-    await member.user.mutation(commentsApi.create, {
+    await member.user.mutation(api.comments.create, {
       shareBatchId: published.shareBatchId,
       assetId: published.assetId,
       body: 'Activity comment.',
     });
-    await owner.user.mutation(reactionsApi.set, {
+    await owner.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       emoji: '🔥',
     });
 
-    const activity = await member.user.query(activityApi.listForViewer, {
+    const activity = await member.user.query(api.activity.listForViewer, {
       paginationOpts: { numItems: 10, cursor: null },
     });
 
@@ -3796,26 +3397,26 @@ describe('shares, uploads, and feed', () => {
       fileName: 'inbox.jpg',
     });
 
-    await member.user.mutation(commentsApi.create, {
+    await member.user.mutation(api.comments.create, {
       shareBatchId: published.shareBatchId,
       assetId: published.assetId,
       body: 'Inbox comment.',
     });
-    await owner.user.mutation(reactionsApi.set, {
+    await owner.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       emoji: '🔥',
     });
 
-    await expect(owner.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+    await expect(owner.user.query(api.activity.summaryForViewer, {})).resolves.toEqual({
       unreadCount: 1,
       hasUnread: true,
     });
-    await expect(member.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+    await expect(member.user.query(api.activity.summaryForViewer, {})).resolves.toEqual({
       unreadCount: 2,
       hasUnread: true,
     });
 
-    const memberInbox = await member.user.query(activityApi.listInboxForViewer, {
+    const memberInbox = await member.user.query(api.activity.listInboxForViewer, {
       paginationOpts: { numItems: 10, cursor: null },
     });
 
@@ -3847,7 +3448,7 @@ describe('shares, uploads, and feed', () => {
       ]),
     );
 
-    const ownerInbox = await owner.user.query(activityApi.listInboxForViewer, {
+    const ownerInbox = await owner.user.query(api.activity.listInboxForViewer, {
       paginationOpts: { numItems: 10, cursor: null },
     });
 
@@ -3878,19 +3479,19 @@ describe('shares, uploads, and feed', () => {
   test('notification device registration is scoped by instance URL', async () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
-    const first = await owner.user.mutation(notificationsApi.registerDevice, {
+    const first = await owner.user.mutation(api.notifications.registerDevice, {
       instanceUrl: 'https://cloud.example.com',
       token: 'ExponentPushToken[same-device]',
       platform: 'ios',
       appVersion: '0.1.0',
     });
-    const duplicate = await owner.user.mutation(notificationsApi.registerDevice, {
+    const duplicate = await owner.user.mutation(api.notifications.registerDevice, {
       instanceUrl: 'https://cloud.example.com',
       token: 'ExponentPushToken[same-device]',
       platform: 'ios',
       appVersion: '0.1.0',
     });
-    const secondInstance = await owner.user.mutation(notificationsApi.registerDevice, {
+    const secondInstance = await owner.user.mutation(api.notifications.registerDevice, {
       instanceUrl: 'https://self.example.com',
       token: 'ExponentPushToken[same-device]',
       platform: 'ios',
@@ -3910,13 +3511,13 @@ describe('shares, uploads, and feed', () => {
     const firstViewer = await upsertViewer(t, 'first@example.com', 'First');
     const secondViewer = await upsertViewer(t, 'second@example.com', 'Second');
     const token = 'ExponentPushToken[shared-device]';
-    const first = await firstViewer.user.mutation(notificationsApi.registerDevice, {
+    const first = await firstViewer.user.mutation(api.notifications.registerDevice, {
       instanceUrl: 'https://cloud.example.com',
       token,
       platform: 'ios',
     });
 
-    await secondViewer.user.mutation(notificationsApi.registerDevice, {
+    await secondViewer.user.mutation(api.notifications.registerDevice, {
       instanceUrl: 'https://cloud.example.com',
       token,
       platform: 'ios',
@@ -3931,18 +3532,18 @@ describe('shares, uploads, and feed', () => {
     const t = createTestDb();
     const owner = await createCircleFor(t, 'owner@example.com');
 
-    await expect(owner.user.query(notificationsApi.getPreferences, {})).resolves.toEqual([
+    await expect(owner.user.query(api.notifications.getPreferences, {})).resolves.toEqual([
       { kind: 'share.published', enabled: true, updatedAt: null },
       { kind: 'comment.created', enabled: true, updatedAt: null },
       { kind: 'reaction.set', enabled: true, updatedAt: null },
     ]);
 
-    await owner.user.mutation(notificationsApi.updatePreferences, {
+    await owner.user.mutation(api.notifications.updatePreferences, {
       kind: 'reaction.set',
       enabled: false,
     });
 
-    await expect(owner.user.query(notificationsApi.getPreferences, {})).resolves.toEqual([
+    await expect(owner.user.query(api.notifications.getPreferences, {})).resolves.toEqual([
       { kind: 'share.published', enabled: true, updatedAt: null },
       { kind: 'comment.created', enabled: true, updatedAt: null },
       expect.objectContaining({ kind: 'reaction.set', enabled: false }),
@@ -3960,7 +3561,7 @@ describe('shares, uploads, and feed', () => {
       });
       const member = await upsertViewer(t, 'member@example.com', 'Member');
       await member.user.mutation(api.invites.accept, { token: invite.token });
-      await member.user.mutation(notificationsApi.registerDevice, {
+      await member.user.mutation(api.notifications.registerDevice, {
         instanceUrl: 'https://cloud.example.com',
         token: 'ExponentPushToken[member-device]',
         platform: 'android',
@@ -4006,7 +3607,7 @@ describe('shares, uploads, and feed', () => {
 
       try {
         await expect(
-          owner.user.action(notificationWorkersApi.dispatchQueued, { now }),
+          owner.user.action(internal.notifications.dispatchQueued, { now }),
         ).resolves.toEqual({
           scanned: 1,
           sent: 1,
@@ -4078,7 +3679,7 @@ describe('shares, uploads, and feed', () => {
 
       try {
         await expect(
-          owner.user.action(notificationWorkersApi.dispatchQueued, { now }),
+          owner.user.action(internal.notifications.dispatchQueued, { now }),
         ).resolves.toEqual({
           scanned: 1,
           sent: 0,
@@ -4108,7 +3709,7 @@ describe('shares, uploads, and feed', () => {
 
       try {
         await expect(
-          owner.user.action(notificationWorkersApi.dispatchQueued, {
+          owner.user.action(internal.notifications.dispatchQueued, {
             now: 1_725_000_000_000,
           }),
         ).resolves.toEqual({
@@ -4138,7 +3739,7 @@ describe('shares, uploads, and feed', () => {
 
       try {
         await expect(
-          owner.user.action(notificationWorkersApi.dispatchQueued, {
+          owner.user.action(internal.notifications.dispatchQueued, {
             now: 1_725_000_000_000,
           }),
         ).resolves.toEqual({
@@ -4185,7 +3786,7 @@ describe('shares, uploads, and feed', () => {
 
       try {
         await expect(
-          owner.user.action(notificationWorkersApi.checkReceipts, { now }),
+          owner.user.action(internal.notifications.checkReceipts, { now }),
         ).resolves.toEqual({
           scanned: 1,
           delivered: 1,
@@ -4242,7 +3843,7 @@ describe('shares, uploads, and feed', () => {
 
       try {
         await expect(
-          owner.user.action(notificationWorkersApi.checkReceipts, { now }),
+          owner.user.action(internal.notifications.checkReceipts, { now }),
         ).resolves.toEqual({
           scanned: 1,
           delivered: 0,
@@ -4289,7 +3890,7 @@ describe('shares, uploads, and feed', () => {
           skipReason: 'preference_disabled',
         });
         await expect(
-          owner.user.action(notificationWorkersApi.dispatchQueued, {
+          owner.user.action(internal.notifications.dispatchQueued, {
             now: 1_725_000_000_000,
           }),
         ).resolves.toEqual({
@@ -4324,11 +3925,11 @@ describe('shares, uploads, and feed', () => {
       circleId: owner.circleId,
       fileName: 'read-state.jpg',
     });
-    await owner.user.mutation(reactionsApi.set, {
+    await owner.user.mutation(api.reactions.set, {
       shareBatchId: published.shareBatchId,
       emoji: '❤️',
     });
-    const memberInbox = await member.user.query(activityApi.listInboxForViewer, {
+    const memberInbox = await member.user.query(api.activity.listInboxForViewer, {
       paginationOpts: { numItems: 10, cursor: null },
     });
 
@@ -4337,12 +3938,12 @@ describe('shares, uploads, and feed', () => {
     const [firstItem, ...allItems] = memberInbox.page;
 
     await expect(
-      outsider.user.mutation(activityApi.markRead, {
+      outsider.user.mutation(api.activity.markRead, {
         inboxItemId: firstItem!._id,
       }),
     ).rejects.toThrow(/activity/i);
     await expect(
-      member.user.mutation(activityApi.markRead, {
+      member.user.mutation(api.activity.markRead, {
         inboxItemId: firstItem!._id,
       }),
     ).resolves.toEqual({
@@ -4350,25 +3951,25 @@ describe('shares, uploads, and feed', () => {
       status: 'read',
     });
     await expect(
-      member.user.mutation(activityApi.markRead, {
+      member.user.mutation(api.activity.markRead, {
         inboxItemId: firstItem!._id,
       }),
     ).resolves.toEqual({
       inboxItemId: firstItem!._id,
       status: 'read',
     });
-    await expect(member.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+    await expect(member.user.query(api.activity.summaryForViewer, {})).resolves.toEqual({
       unreadCount: 1,
       hasUnread: true,
     });
     await expect(
-      member.user.mutation(activityApi.markManyRead, {
+      member.user.mutation(api.activity.markManyRead, {
         inboxItemIds: [firstItem!, ...allItems].map((item) => item._id),
       }),
     ).resolves.toEqual({
       readCount: 2,
     });
-    await expect(member.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+    await expect(member.user.query(api.activity.summaryForViewer, {})).resolves.toEqual({
       unreadCount: 0,
       hasUnread: false,
     });
@@ -4415,7 +4016,7 @@ describe('shares, uploads, and feed', () => {
       }
     });
 
-    await expect(owner.user.query(activityApi.summaryForViewer, {})).resolves.toEqual({
+    await expect(owner.user.query(api.activity.summaryForViewer, {})).resolves.toEqual({
       unreadCount: 99,
       hasUnread: true,
     });
@@ -4443,14 +4044,14 @@ describe('shares, uploads, and feed', () => {
       fileName: 'second-activity.jpg',
     });
 
-    const firstPage = await owner.user.query(activityApi.listForViewer, {
+    const firstPage = await owner.user.query(api.activity.listForViewer, {
       paginationOpts: { numItems: 1, cursor: null },
     });
 
     expect(firstPage.page).toHaveLength(1);
     expect(firstPage.isDone).toBe(false);
 
-    const secondPage = await owner.user.query(activityApi.listForViewer, {
+    const secondPage = await owner.user.query(api.activity.listForViewer, {
       paginationOpts: { numItems: 1, cursor: firstPage.continueCursor },
     });
 
@@ -4562,10 +4163,10 @@ describe('shares, uploads, and feed', () => {
         capturedAt: Date.parse('2026-06-01T08:00:00.000Z'),
       });
 
-      const all = await owner.user.query(memoriesApi.listForViewer, {
+      const all = await owner.user.query(api.memories.listForViewer, {
         paginationOpts: { numItems: 10, cursor: null },
       });
-      const filtered = await owner.user.query(memoriesApi.listForViewer, {
+      const filtered = await owner.user.query(api.memories.listForViewer, {
         circleId: owner.circleId,
         paginationOpts: { numItems: 10, cursor: null },
       });
@@ -4574,7 +4175,7 @@ describe('shares, uploads, and feed', () => {
       expect(all.page.every((item) => item.authorName.length > 0 && item.circleName.length > 0)).toBe(true);
       expect(filtered.page.map((item) => item.assetId)).toEqual([first.assetId]);
       await expect(
-        outsider.user.query(memoriesApi.listForViewer, {
+        outsider.user.query(api.memories.listForViewer, {
           circleId: owner.circleId,
           paginationOpts: { numItems: 10, cursor: null },
         }),
@@ -4620,7 +4221,7 @@ describe('shares, uploads, and feed', () => {
         capturedAt: Date.parse('2026-04-20T09:30:00.000Z'),
       });
 
-      const discovery = await owner.user.query(memoriesApi.discoveryForViewer, {
+      const discovery = await owner.user.query(api.memories.discoveryForViewer, {
         circleId: owner.circleId,
       });
 
@@ -4643,7 +4244,7 @@ describe('shares, uploads, and feed', () => {
       ]);
 
       await expect(
-        owner.user.query(memoriesApi.listForViewer, {
+        owner.user.query(api.memories.listForViewer, {
           circleId: owner.circleId,
           filter: { kind: 'month', key: '2026-04' },
           paginationOpts: { numItems: 10, cursor: null },
@@ -4655,7 +4256,7 @@ describe('shares, uploads, and feed', () => {
         ],
       });
       await expect(
-        owner.user.query(memoriesApi.listForViewer, {
+        owner.user.query(api.memories.listForViewer, {
           circleId: owner.circleId,
           filter: { kind: 'place', key: '52.520:13.405' },
           paginationOpts: { numItems: 10, cursor: null },
@@ -4694,7 +4295,7 @@ describe('shares, uploads, and feed', () => {
       });
 
       await expect(
-        owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+        owner.user.query(api.memories.discoveryForViewer, { circleId: owner.circleId }),
       ).resolves.toMatchObject({
         months: [expect.objectContaining({ key: '2026-04', itemCount: 1 })],
         places: [expect.objectContaining({ key: '52.520:13.405', itemCount: 1 })],
@@ -4705,7 +4306,7 @@ describe('shares, uploads, and feed', () => {
       });
 
       await expect(
-        owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+        owner.user.query(api.memories.discoveryForViewer, { circleId: owner.circleId }),
       ).resolves.toEqual({
         months: [],
         places: [],
@@ -4766,7 +4367,7 @@ describe('shares, uploads, and feed', () => {
     });
 
     await expect(
-      owner.user.mutation(internalMemoriesApi.backfillDiscoveryBatch, {
+      owner.user.mutation(internal.memories.backfillDiscoveryBatch, {
         batchSize: 10,
         dryRun: true,
       }),
@@ -4777,11 +4378,11 @@ describe('shares, uploads, and feed', () => {
       hasMore: false,
     });
     await expect(
-      owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+      owner.user.query(api.memories.discoveryForViewer, { circleId: owner.circleId }),
     ).resolves.toEqual({ months: [], places: [] });
 
     await expect(
-      owner.user.mutation(internalMemoriesApi.backfillDiscoveryBatch, {
+      owner.user.mutation(internal.memories.backfillDiscoveryBatch, {
         batchSize: 10,
       }),
     ).resolves.toMatchObject({
@@ -4791,13 +4392,13 @@ describe('shares, uploads, and feed', () => {
       hasMore: false,
     });
     await expect(
-      owner.user.query(memoriesApi.discoveryForViewer, { circleId: owner.circleId }),
+      owner.user.query(api.memories.discoveryForViewer, { circleId: owner.circleId }),
     ).resolves.toMatchObject({
       months: [expect.objectContaining({ key: '2026-04', itemCount: 1 })],
       places: [expect.objectContaining({ key: '52.520:13.405', itemCount: 1 })],
     });
     await expect(
-      owner.user.mutation(internalMemoriesApi.backfillDiscoveryBatch, {
+      owner.user.mutation(internal.memories.backfillDiscoveryBatch, {
         batchSize: 10,
       }),
     ).resolves.toMatchObject({
@@ -4853,14 +4454,14 @@ describe('shares, uploads, and feed', () => {
       });
 
       await expect(
-        owner.user.mutation(internalMemoriesApi.backfillBatch, { batchSize: 10 }),
+        owner.user.mutation(internal.memories.backfillBatch, { batchSize: 10 }),
       ).resolves.toMatchObject({
         scanned: expect.any(Number),
         inserted: 1,
         hasMore: false,
       });
       await expect(
-        owner.user.mutation(internalMemoriesApi.backfillBatch, { batchSize: 10 }),
+        owner.user.mutation(internal.memories.backfillBatch, { batchSize: 10 }),
       ).resolves.toMatchObject({
         inserted: 0,
       });
@@ -4922,7 +4523,7 @@ describe('shares, uploads, and feed', () => {
           inserted: number;
           hasMore: boolean;
           continueCursor: string;
-        } = await owner.user.mutation(internalMemoriesApi.backfillBatch, {
+        } = await owner.user.mutation(internal.memories.backfillBatch, {
           cursor,
           batchSize: 1,
         });

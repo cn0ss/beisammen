@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
 import {
-  buildReleaseCommands,
   buildReleaseSteps,
   createReleaseSummary,
   parseReleaseArgs,
@@ -28,11 +27,11 @@ describe('beta release verification', () => {
 
   test('builds typecheck, test, and deployment smoke commands', () => {
     expect(
-      buildReleaseCommands({
+      buildReleaseSteps({
         cloudUrl: 'https://cloud.example.com',
         selfHostedUrl: 'https://home.example.com',
         appVersion: '0.1.0',
-      }),
+      }).map((step) => [step.command, step.args]),
     ).toEqual([
       ['pnpm', ['typecheck']],
       ['pnpm', ['test']],

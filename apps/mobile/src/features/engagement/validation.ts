@@ -1,10 +1,5 @@
 import { msg } from 'gt-react-native';
 
-import {
-  normalizeCommentBody,
-  normalizeReactionEmoji as normalizeSharedReactionEmoji,
-} from '@beisammen/contracts';
-
 export type CommentTarget =
   | {
       shareBatchId: string;
@@ -18,14 +13,6 @@ export type CommentTarget =
       assetId: string;
       label: string;
     };
-
-export function normalizeReactionEmoji(value: string): string {
-  return normalizeSharedReactionEmoji(value);
-}
-
-export function normalizeCommentDraft(value: string): string {
-  return normalizeCommentBody(value);
-}
 
 export function buildCommentTarget(input: {
   shareBatchId: string;

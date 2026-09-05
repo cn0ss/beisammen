@@ -276,8 +276,6 @@ importers:
         specifier: ^4.123.0
         version: 4.123.0(@cloudflare/workers-types@5.20260817.1)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
-  packages/config: {}
-
   packages/contracts: {}
 
   packages/crypto:
@@ -288,21 +286,6 @@ importers:
       libsodium-wrappers:
         specifier: ^0.7.15
         version: 0.7.16
-
-  packages/domain:
-    dependencies:
-      '@beisammen/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-
-  packages/ui-mobile:
-    dependencies:
-      react:
-        specifier: '*'
-        version: 19.2.8
-      react-native:
-        specifier: '*'
-        version: 0.87.0(@babel/core@7.29.7)(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(utf-8-validate@6.0.6)
 
   packages/upload-client:
     dependencies:

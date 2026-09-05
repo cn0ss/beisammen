@@ -4,7 +4,8 @@
 
 - `apps/mobile`: Expo Router + React Native
 - `convex/`: Convex schema and backend surface
-- `packages/*`: shared contracts, domain rules, UI primitives, config helpers
+- `apps/website`: React marketing and policy website
+- `packages/*`: shared contracts, encryption primitives, and upload queue helpers
 
 ## System boundaries
 

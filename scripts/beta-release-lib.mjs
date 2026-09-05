@@ -35,10 +35,6 @@ export function parseReleaseArgs(argv) {
   return args;
 }
 
-export function buildReleaseCommands(args) {
-  return buildReleaseSteps(args).map((step) => [step.command, step.args]);
-}
-
 export function buildReleaseSteps(args) {
   const steps = [
     {

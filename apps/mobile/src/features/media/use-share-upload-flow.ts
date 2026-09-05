@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAction, useMutation } from 'convex/react';
 
 import {
+  assertPreparedUploadAssetMimeTypeSupported,
   enqueue,
   initialUploadQueueState,
   markUploadStatus,
@@ -36,7 +37,6 @@ import {
   uploadPreparedFile,
   type PreparedUploadAsset,
 } from './client';
-import { assertPreparedAssetAllowed } from './upload-policy';
 import {
   encryptedCompletionFields,
   genericUploadFileName,
@@ -233,7 +233,7 @@ export function useShareUploadFlow({
       encryptedPairedVideoCacheUri?: string;
       encryption?: UploadEncryptionEnvelope;
     }) => {
-      assertPreparedAssetAllowed(input.preparedAsset);
+      assertPreparedUploadAssetMimeTypeSupported(input.preparedAsset);
 
       // The exact byte sizes are declared to the server and signed into the
       // presigned PUTs, so both must be known before requesting the target.
@@ -610,7 +610,7 @@ export function useShareUploadFlow({
         try {
           const preparedAsset = await optimizePickerAsset(uploadAsset, resolvedLocation, capturedAt);
 
-          assertPreparedAssetAllowed(preparedAsset);
+          assertPreparedUploadAssetMimeTypeSupported(preparedAsset);
 
           setUploadQueue((state) =>
             patchUploadQueueItem(state, queueId, {
@@ -724,7 +724,7 @@ export function useShareUploadFlow({
             queueItem.location,
             queueItem.capturedAt,
           );
-          assertPreparedAssetAllowed(preparedAsset);
+          assertPreparedUploadAssetMimeTypeSupported(preparedAsset);
 
           setUploadQueue((state) =>
             patchUploadQueueItem(state, itemId, {

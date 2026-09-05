@@ -9,12 +9,6 @@ import {
 } from './lib/engagement';
 import { requireViewer } from './lib/viewer';
 
-export const reactionFunctionSurface = [
-  'reactions.listForShare',
-  'reactions.set',
-  'reactions.remove',
-] as const;
-
 export const listForShare = query({
   args: {
     shareBatchId: v.id('shareBatches'),

@@ -14,12 +14,6 @@ import {
 import { imageCacheKey } from './lib/storage/shared';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const commentFunctionSurface = [
-  'comments.listForShare',
-  'comments.create',
-  'comments.delete',
-] as const;
-
 function canDeleteComment(input: {
   viewerId: Id<'users'>;
   membership: Doc<'circleMembers'>;

@@ -20,16 +20,6 @@ import {
 import { assertValidDeclaredImageSize } from './lib/uploadLimits';
 import { requireViewer } from './lib/viewer';
 
-export const userFunctionSurface = [
-  'users.viewer',
-  'users.viewerState',
-  'users.upsertFromIdentity',
-  'users.createProfileImageTarget',
-  'users.completeProfileImageUpload',
-  'users.removeProfileImage',
-  'users.getProfileImageReadUrl',
-] as const;
-
 function serializeViewer(viewer: Doc<'users'>) {
   return {
     _id: viewer._id,

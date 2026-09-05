@@ -31,13 +31,6 @@ import {
 } from './lib/uploadLimits';
 import { requireCircleMembership, requireViewer } from './lib/viewer';
 
-export const uploadFunctionSurface = [
-  'uploads.createTarget',
-  'uploads.complete',
-  'uploads.retry',
-  'uploads.discard',
-] as const;
-
 interface S3PendingStorage {
   provider: 's3';
   objectKey: string;

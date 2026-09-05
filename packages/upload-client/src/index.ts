@@ -242,14 +242,6 @@ export function uploadQueueItemToPreparedAsset(
   };
 }
 
-export function clearCompleted<SourceAsset>(
-  state: UploadQueueState<SourceAsset>,
-): UploadQueueState<SourceAsset> {
-  return {
-    items: state.items.filter((item) => item.status !== 'uploaded'),
-  };
-}
-
 export function removeUploadQueueItems<SourceAsset>(
   state: UploadQueueState<SourceAsset>,
   predicate: (item: UploadQueueItem<SourceAsset>) => boolean,
